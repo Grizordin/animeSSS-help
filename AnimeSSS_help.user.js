@@ -1398,6 +1398,7 @@
     // ── Порция 3 ─────────────────────────────────────────
     {s:'Сначала победи сундук-мимик',                             icon:'warn',   title:'Внимание',    theme:'neon-amber'},
     {s:'Вы отклонили заявку',                                     icon:'user',   title:'Заявка',      theme:'rose'      },
+    {s:'Заявка на замену арта не найдена',                        icon:'warn',   title:'Заявка',      theme:'neon-amber'},
     // ── Порция 4 ─────────────────────────────────────────
     {s:'Сундук-мимик побеждён',                                   icon:'star',   title:'Победа',      theme:'neon-green'},
     {s:'Сложный босс побеждён',                                   icon:'star',   title:'Победа',      theme:'neon-green'},
@@ -3969,26 +3970,32 @@
     // Зависимые: подсветка лучшей карты и защитное окно
     const bestCardRow = makeToggle('modBestCard', '🏆 Подсветка лучшей карты');
     const guardRow    = makeToggle('modGuard',    '🛡️ Защитное окно');
+    const guardGroup  = document.createElement('div');
     const autoOpenRow = makeToggle('modAutoOpen', '🤖 Автооткрытие паков');
 
     // Отступ для визуального "вложения"
-    [bestCardRow, guardRow, autoOpenRow].forEach(r => {
+    [bestCardRow, guardGroup, autoOpenRow].forEach(r => {
       r.style.paddingLeft = '14px';
       r.style.borderLeft  = '2px solid #1e3a5f';
       r.style.marginLeft  = '6px';
     });
 
     const guardSliderRow = makeSliderRow('guardThreshold','Порог защитного окна',5,50,1);
-    guardSliderRow.style.paddingLeft = '14px';
-    guardSliderRow.style.borderLeft  = '2px solid #1e3a5f';
-    guardSliderRow.style.marginLeft  = '6px';
+    guardSliderRow.style.padding = '0 0 8px 0';
+    guardSliderRow.style.borderBottom = '1px solid #0f172a';
+    guardSliderRow.style.display = cfg.modGuard ? 'block' : 'none';
+    guardGroup.append(guardRow, guardSliderRow);
 
     function syncDependents() {
       const on = cfg.modCardValue;
-      [bestCardRow, guardRow, autoOpenRow, guardSliderRow].forEach(r => {
+      const guardOn = on && cfg.modGuard;
+      [bestCardRow, guardGroup, autoOpenRow].forEach(r => {
         r.style.opacity       = on ? '1' : '0.35';
         r.style.pointerEvents = on ? '' : 'none';
       });
+      guardSliderRow.style.display = guardOn ? 'block' : 'none';
+      guardSliderRow.style.opacity = guardOn ? '1' : '0.35';
+      guardSliderRow.style.pointerEvents = guardOn ? '' : 'none';
       if (!on) {
         // Только визуально снимаем галочки — cfg не трогаем, чтобы состояние сохранилось
         [bestCardRow, guardRow, autoOpenRow].forEach(r => { const inp = r.querySelector('input'); if(inp) inp.checked = false; });
@@ -4005,6 +4012,7 @@
       }
     }
     cardValueRow.querySelector('input').addEventListener('change', syncDependents);
+    guardRow.querySelector('input').addEventListener('change', syncDependents);
     autoOpenRow.querySelector('input').addEventListener('change', () => {
       if(cfg.modAutoOpen && !cfg.modBestCard){
         cfg.modBestCard = true;
@@ -4019,9 +4027,8 @@
     syncDependents();
 
     cardValueSection.appendChild(bestCardRow);
-    cardValueSection.appendChild(guardRow);
+    cardValueSection.appendChild(guardGroup);
     cardValueSection.appendChild(autoOpenRow);
-    cardValueSection.appendChild(guardSliderRow);
 
     // ── ПАКИ ──────────────────────────────────────────────────
     const packsSection = makeSection('packs','📦 Паки');
@@ -5666,6 +5673,7 @@
             { s:'Автолут включён, но эта вкладка',     icon:'info',  title:'Автолут',     cls:'cpt-indigo'     },
             { s:'Автолут включён',                     icon:'bolt',  title:'Автолут',     cls:'cpt-neon-green' },
             { s:'Автолут выключен',                    icon:'bolt',  title:'Автолут',     cls:'cpt-rose'       },
+            { s:'Добавьте аниме в базу',                icon:'info',  title:'База аниме',  cls:'cpt-neon-amber' },
             { s:'Проверка лимита через профиль',        icon:'check', title:'Лимит',       cls:'cpt-emerald'    },
         ];
     
@@ -7107,11 +7115,19 @@
                     return;
                 }
     
+                const initialPool = await buildOrderedPool();
+                if (!initialPool.length) {
+                    log('База аниме пуста. Автолут остановлен до добавления аниме.');
+                    safePush('info', `[Auto-Watch] Добавьте аниме в базу, чтобы автолут мог получать карты.`);
+                    stopMainCardCheckLogic();
+                    return;
+                }
+
                 const state = await updateSmartTarget();
                 if (!state || state.index === -1) {
-                    // База пуста или всё выфармлено — ждём до 00:00 МСК
+                    // База есть, но все доступные серии уже выфармлены — ждём до 00:00 МСК
                     const msToMidnight = getMsUntilMskMidnight();
-                    log(`База пуста / всё выфармлено. Жду до 00:00 МСК (${Math.ceil(msToMidnight / 60000)} мин.).`);
+                    log(`Всё выфармлено. Жду до 00:00 МСК (${Math.ceil(msToMidnight / 60000)} мин.).`);
                     safePush('info', `[Auto-Watch] Всё выфармлено. Жду нового дня по МСК.`);
                     scheduleNext(msToMidnight);
                     return;
