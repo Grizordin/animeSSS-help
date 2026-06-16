@@ -1467,9 +1467,18 @@
     {s:'Дань уплачена',                                            icon:'coin',   title:'Оплата',      theme:'emerald'   },
     {s:'Шахта пока ничего не накопила',                            icon:'warn',   title:'Шахта',       theme:'neon-amber'},
     {r:/Ты улучшил персональную шахту до \d+ уровня.*Получено AСС: \+\d+.*Получено карт: \d+/i, icon:'coin', title:'Шахта', theme:'neon-green'},
+    {s:'Ты помог со сбором шахты',                                 icon:'coin',   title:'Шахта',       theme:'neon-green'},
     {s:'Отголосок повторён',                                       icon:'check',  title:'Готово',      theme:'emerald'   },
     {s:'Ты отказался от отголоска',                                icon:'warn',   title:'Отголосок',   theme:'rose'      },
     {s:'Всевидящее око показало соседние комнаты',                 icon:'bolt',   title:'Лабиринт',    theme:'neon-blue' },
+    {s:'Штурм провален',                                           icon:'warn',   title:'Штурм',       theme:'rose'      },
+    {s:'Ты прошёл по уже открытому пути. Лабиринт не засчитал этот шаг в общий прогресс.', icon:'warn', title:'Лабиринт', theme:'neon-amber'},
+    {s:'Вы не выбрали карту',                                      icon:'warn',   title:'Внимание',    theme:'neon-amber'},
+    {s:'Максимум 70 карточек',                                     icon:'warn',   title:'Лимит',       theme:'rose'      },
+    {s:'Награда получена',                                         icon:'coin',   title:'Награда',     theme:'neon-green'},
+    {s:'Сегодня вы уже ставили реакцию на комментарий данного пользователя', icon:'clock', title:'Лимит', theme:'rose'},
+    {s:'Сообщения удалены',                                        icon:'check',  title:'Готово',      theme:'emerald'   },
+    {s:'Вы уже поставили 3 дизлайка на карты, которые сейчас на модерации. Дождитесь следующей партии карт и сможете ставить новые', icon:'clock', title:'Лимит', theme:'rose'},
     {s:'Ошибка сервера',                                          icon:'err',    title:'Ошибка',      theme:'neon-amber'},
   ];
 
