@@ -6,6 +6,8 @@
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
 // @match        https://animesss.com/*
+// @updateURL    https://raw.githubusercontent.com/Grizordin/animeSSS-help/refs/heads/main/AnimeSSS%20%D0%BF%D0%BE%D0%BC%D0%BE%D1%89%D0%BD%D0%B8%D0%BA.txt
+// @downloadURL  https://raw.githubusercontent.com/Grizordin/animeSSS-help/refs/heads/main/AnimeSSS%20%D0%BF%D0%BE%D0%BC%D0%BE%D1%89%D0%BD%D0%B8%D0%BA.txt
 // @grant        GM_setValue
 // @grant        GM_getValue
 // @grant        GM.getValue
