@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      2.18
+// @version      2.19
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -125,6 +125,16 @@
     return match ? match[1] : null;
   }
 
+  function suiteDecodeNickname(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    try {
+      return decodeURIComponent(raw.replace(/\+/g, '%20')).replace(/\s+/g, ' ').trim();
+    } catch(e) {
+      return raw.replace(/\+/g, ' ').replace(/\s+/g, ' ').trim();
+    }
+  }
+
   function suiteGetSafeNickname() {
     try {
       const nick = String(suiteGetMyNickname() || '').trim();
@@ -135,7 +145,7 @@
       const link = document.querySelector('.header__group-menu a[href*="/user/"]');
       if (link) {
         const match = String(link.href || '').match(/\/user\/([^/]+)/);
-        const nick = match ? decodeURIComponent(match[1]).trim() : '';
+        const nick = match ? suiteDecodeNickname(match[1]) : '';
         if (nick) return nick;
       }
     } catch(e) {}
@@ -146,12 +156,12 @@
   function suiteGetCurrentUserName() {
     try {
       const nick = String(suiteGetMyNickname() || '').trim();
-      if (nick) return decodeURIComponent(nick).trim();
+      if (nick) return suiteDecodeNickname(nick);
     } catch(e) {}
 
     try {
       const safeNick = String(suiteGetSafeNickname() || '').trim();
-      if (safeNick && safeNick !== 'Неизвестно') return decodeURIComponent(safeNick).trim();
+      if (safeNick && safeNick !== 'Неизвестно') return suiteDecodeNickname(safeNick);
     } catch(e) {}
 
     return '';
@@ -4994,12 +5004,12 @@
   function initNoNeedCards() {
     if(!cfg.modNoNeedCards) return;
     if(window.__suiteNoNeedCardsInstalled) return;
-    window.__suiteNoNeedCardsInstalled = true;
     const myName = suiteGetCurrentUserName();
     if(!myName) return;
-    const urlName = new URLSearchParams(location.search).get('name') || '';
+    const urlName = suiteDecodeNickname(new URLSearchParams(location.search).get('name') || '');
     if(!urlName || urlName.toLowerCase() !== myName.toLowerCase()) return;
     if(!/\/user\/cards\//.test(location.pathname)) return;
+    window.__suiteNoNeedCardsInstalled = true;
     nnInit(myName);
   }
 
@@ -5795,7 +5805,7 @@
                 const suiteNick = typeof suiteGetMyNickname === 'function'
                     ? String(suiteGetMyNickname() || '').trim()
                     : '';
-                if (suiteNick) return decodeURIComponent(suiteNick).trim();
+                if (suiteNick) return suiteDecodeNickname(suiteNick);
             } catch (e) {}
 
             try {
@@ -5808,18 +5818,22 @@
             const profileLink = document.querySelector('.header__group-menu a[href*="/user/"]');
             if (profileLink) {
                 const href = profileLink.getAttribute('href') || '';
-                const match = href.match(/^\/user\/([^/]+)\/?$/i) || href.match(/https?:\/\/[^/]+\/user\/([^/]+)\/?$/i);
+                const match =
+                    href.match(/^\/user\/([^/]+)\/?$/i)
+                    || href.match(/https?:\/\/[^/]+\/user\/([^/]+)\/?$/i);
                 if (match && match[1]) {
-                    return decodeURIComponent(match[1]).trim();
+                    return suiteDecodeNickname(match[1]);
                 }
             }
 
             const links = [...document.querySelectorAll('a[href*="/user/"]')];
             for (const a of links) {
                 const href = a.getAttribute('href') || '';
-                const match = href.match(/^\/user\/([^/]+)\/?$/i) || href.match(/https?:\/\/[^/]+\/user\/([^/]+)\/?$/i);
+                const match =
+                    href.match(/^\/user\/([^/]+)\/?$/i)
+                    || href.match(/https?:\/\/[^/]+\/user\/([^/]+)\/?$/i);
                 if (match && match[1]) {
-                    return decodeURIComponent(match[1]).trim();
+                    return suiteDecodeNickname(match[1]);
                 }
             }
     
