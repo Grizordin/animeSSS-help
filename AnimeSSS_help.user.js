@@ -280,7 +280,7 @@
       box-shadow:0 0 0 1px rgba(251,146,60,.18),0 0 14px rgba(249,115,22,.34);
     }
     #suite-emission-timer {
-      position:absolute;top:58px;right:12px;z-index:80;
+      position:absolute;top:12px;right:12px;z-index:99;
       min-width:172px;padding:10px 12px;border-radius:12px;
       border:1px solid rgba(56,189,248,.22);
       background:linear-gradient(180deg,rgba(10,15,26,.96),rgba(9,14,24,.92));
