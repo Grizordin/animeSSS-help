@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      2.6
+// @version      2.7
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -9015,27 +9015,37 @@
       return Promise.resolve(clubWarRelations);
     }
 
-    return new Promise(resolve => {
-      GM_xmlhttpRequest({
-        method: 'GET',
-        url: CLUB_WAR_RELATIONS_URL + '?t=' + Date.now(),
-        onload: response => {
-          try {
-            const data = JSON.parse(response.responseText || '{}');
-            clubWarRelations = buildClubWarRelations(data);
-            clubWarLoadedAt = Date.now();
-            resolve(clubWarRelations);
-          } catch(e) {
-            console.warn('[Suite club war] Failed to parse club list:', e);
+    const url = CLUB_WAR_RELATIONS_URL + '?t=' + Date.now();
+    const applyData = data => {
+      clubWarRelations = buildClubWarRelations(data);
+      clubWarLoadedAt = Date.now();
+      return clubWarRelations;
+    };
+
+    return fetch(url, { cache:'no-store' })
+      .then(response => {
+        if(!response.ok) throw new Error('HTTP ' + response.status);
+        return response.json();
+      })
+      .then(applyData)
+      .catch(fetchError => new Promise(resolve => {
+        GM_xmlhttpRequest({
+          method: 'GET',
+          url,
+          onload: response => {
+            try {
+              resolve(applyData(JSON.parse(response.responseText || '{}')));
+            } catch(parseError) {
+              console.warn('[Suite club war] Failed to parse club list:', parseError);
+              resolve(null);
+            }
+          },
+          onerror: requestError => {
+            console.warn('[Suite club war] Failed to load club list:', fetchError, requestError);
             resolve(null);
           }
-        },
-        onerror: error => {
-          console.warn('[Suite club war] Failed to load club list:', error);
-          resolve(null);
-        }
-      });
-    });
+        });
+      }));
   }
 
   function getClubWarRelationType(card, relations) {
@@ -9063,8 +9073,7 @@
     badge.className = 'suite-club-war-badge';
     badge.textContent = label;
 
-    const info = card.querySelector('.labyrinth__club-war-club-info') || card;
-    info.appendChild(badge);
+    card.appendChild(badge);
   }
 
   function injectClubWarStyles() {
@@ -9074,31 +9083,44 @@
     style.id = 'suite-club-war-style';
     style.textContent = `
       .labyrinth__club-war-club.suite-club-war-ally {
+        position:relative !important;
+        padding-right:92px !important;
         border-color:#22c55e !important;
         background:linear-gradient(90deg,rgba(20,83,45,.78),rgba(6,78,59,.48)) !important;
         box-shadow:0 0 0 1px rgba(34,197,94,.28),0 0 18px rgba(34,197,94,.28) !important;
       }
       .labyrinth__club-war-club.suite-club-war-neutral {
+        position:relative !important;
+        padding-right:92px !important;
         border-color:#eab308 !important;
         background:linear-gradient(90deg,rgba(113,63,18,.78),rgba(120,53,15,.46)) !important;
         box-shadow:0 0 0 1px rgba(234,179,8,.26),0 0 18px rgba(234,179,8,.22) !important;
       }
       .labyrinth__club-war-club.suite-club-war-enemy {
+        position:relative !important;
+        padding-right:92px !important;
         border-color:#ef4444 !important;
         background:linear-gradient(90deg,rgba(127,29,29,.78),rgba(88,28,28,.48)) !important;
         box-shadow:0 0 0 1px rgba(239,68,68,.28),0 0 18px rgba(239,68,68,.28) !important;
       }
       .suite-club-war-badge {
+        position:absolute;
+        top:50%;
+        right:10px;
+        transform:translateY(-50%);
         display:inline-flex;
         align-items:center;
+        justify-content:center;
         width:max-content;
-        margin-top:5px;
+        max-width:78px;
         padding:2px 7px;
         border-radius:6px;
         font-size:10px;
         font-weight:900;
         line-height:1.3;
         letter-spacing:.2px;
+        white-space:nowrap;
+        pointer-events:none;
         color:#f8fafc;
         background:rgba(15,23,42,.72);
         border:1px solid rgba(255,255,255,.16);
