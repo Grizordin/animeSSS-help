@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      2.7
+// @version      2.8
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -8993,6 +8993,33 @@
   let clubWarLoadedAt = 0;
   let clubWarObserver = null;
   let clubWarTimer = null;
+  const CLUB_WAR_ROUTE_RE = /\/labyrinth(?:\/|$)/;
+  const clubWarDebug = {
+    version: '2.8',
+    enabled: false,
+    installed: false,
+    path: '',
+    rootFound: false,
+    loaded: false,
+    lastError: '',
+    cards: [],
+    appliedAt: 0
+  };
+
+  function publishClubWarDebug(extra = {}) {
+    Object.assign(clubWarDebug, extra, {
+      enabled: !!cfg.modLabyrinthClubWar,
+      installed: !!window.__suiteClubWarRelationsInstalled,
+      path: location.pathname
+    });
+
+    try {
+      const targetWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+      targetWindow.__suiteClubWarDebug = clubWarDebug;
+    } catch(e) {
+      window.__suiteClubWarDebug = clubWarDebug;
+    }
+  }
 
   function readClubWarIds(data, key) {
     return new Set(
@@ -9019,6 +9046,15 @@
     const applyData = data => {
       clubWarRelations = buildClubWarRelations(data);
       clubWarLoadedAt = Date.now();
+      publishClubWarDebug({
+        loaded: true,
+        lastError: '',
+        counts: {
+          ally: clubWarRelations.ally.size,
+          neutral: clubWarRelations.neutral.size,
+          enemy: clubWarRelations.enemy.size
+        }
+      });
       return clubWarRelations;
     };
 
@@ -9037,11 +9073,13 @@
               resolve(applyData(JSON.parse(response.responseText || '{}')));
             } catch(parseError) {
               console.warn('[Suite club war] Failed to parse club list:', parseError);
+              publishClubWarDebug({ loaded: false, lastError: 'parse: ' + parseError.message });
               resolve(null);
             }
           },
           onerror: requestError => {
             console.warn('[Suite club war] Failed to load club list:', fetchError, requestError);
+            publishClubWarDebug({ loaded: false, lastError: 'load: ' + fetchError.message });
             resolve(null);
           }
         });
@@ -9148,6 +9186,7 @@
     });
 
     window.__suiteClubWarRelationsInstalled = false;
+    publishClubWarDebug({ installed: false, rootFound: false, cards: [] });
   }
 
   function scheduleClubWarApply(delay=120){
@@ -9161,18 +9200,23 @@
       return;
     }
 
-    if(!/\/labyrinth\//.test(location.pathname)){
+    if(!CLUB_WAR_ROUTE_RE.test(location.pathname)){
       cleanupClubWarRelations();
       return;
     }
 
-    const root = document.getElementById('labyrinthClubWarClubs');
-    if(!root) return;
+    const root = document.getElementById('labyrinthClubWarClubs')
+      || document.querySelector('.labyrinth__club-war-clubs');
+    if(!root){
+      publishClubWarDebug({ rootFound: false, cards: [] });
+      return;
+    }
 
     injectClubWarStyles();
     const relations = await loadClubWarRelations();
     if(!relations) return;
 
+    const cards = [];
     root.querySelectorAll('.labyrinth__club-war-club').forEach(card=>{
       card.classList.remove(
         'suite-club-war-ally',
@@ -9183,6 +9227,18 @@
       const type = getClubWarRelationType(card, relations);
       if(type) card.classList.add('suite-club-war-' + type);
       renderClubWarBadge(card, type);
+      cards.push({
+        id: String(card?.dataset?.clubId || '').trim(),
+        type: type || '',
+        className: card.className,
+        badge: card.querySelector('.suite-club-war-badge')?.textContent || ''
+      });
+    });
+
+    publishClubWarDebug({
+      rootFound: true,
+      cards,
+      appliedAt: Date.now()
     });
   }
 
@@ -9192,7 +9248,7 @@
       return;
     }
 
-    if(!/\/labyrinth\//.test(location.pathname)){
+    if(!CLUB_WAR_ROUTE_RE.test(location.pathname)){
       cleanupClubWarRelations();
       return;
     }
@@ -9203,6 +9259,7 @@
     }
 
     window.__suiteClubWarRelationsInstalled = true;
+    publishClubWarDebug({ installed: true });
     scheduleClubWarApply(0);
 
     clubWarObserver = new MutationObserver(()=>scheduleClubWarApply());
