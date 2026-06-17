@@ -1137,18 +1137,34 @@
   }
 
   function addNeonToCard(card,type){
-    const ex=card.querySelector('.neon-outline-wrapper'); if(ex)ex.remove();
-    card.classList.remove('cv-neon-outline','cv-neon-green','cv-neon-orange','cv-neon-violet','cv-neon-red','cv-neon-blue');
+    const ex=card.querySelector('.neon-outline-wrapper');
+    if(ex)ex.remove();
+    card.classList.remove(
+      'cv-neon-outline',
+      'cv-neon-green',
+      'cv-neon-orange',
+      'cv-neon-violet',
+      'cv-neon-red',
+      'cv-neon-blue'
+    );
     card.style.position='relative';
     if(card.classList.contains('trade__main-item'))card.style.overflow='visible';
     card.classList.add('cv-neon-outline',`cv-neon-${type}`);
-    // Скрываем иконки trophy/lock — их заменяет анимированная обводка
+    // Скрываем иконки trophy/lock:
+    // их заменяет анимированная обводка
     card.querySelectorAll('.lock-trade-btn').forEach(btn => btn.style.display='none');
   }
 
   function clearNeonFromCard(card){
     card.querySelector('.neon-outline-wrapper')?.remove();
-    card.classList.remove('cv-neon-outline','cv-neon-green','cv-neon-orange','cv-neon-violet','cv-neon-red','cv-neon-blue');
+    card.classList.remove(
+      'cv-neon-outline',
+      'cv-neon-green',
+      'cv-neon-orange',
+      'cv-neon-violet',
+      'cv-neon-red',
+      'cv-neon-blue'
+    );
     if(card.style.position === 'relative') card.style.removeProperty('position');
     if(card.classList.contains('trade__main-item')) card.style.removeProperty('overflow');
     card.querySelectorAll('.lock-trade-btn').forEach(btn => btn.style.removeProperty('display'));
@@ -1168,7 +1184,8 @@
   let neonStateMap=new WeakMap();
 
   function isPackCard(card){
-    return card?.classList?.contains('lootbox__card') || !!card?.closest?.('.lootbox__list,.lootbox__row');
+    return card?.classList?.contains('lootbox__card')
+      || !!card?.closest?.('.lootbox__list,.lootbox__row');
   }
 
   function applyNeonToCard(card){
@@ -1188,13 +1205,29 @@
     if(!cfg.modNeon||!entry.isIntersecting)return;
     applyNeonToCard(entry.target);
   }
+
   function setupNeonObservers(){
     if(!cfg.modNeon)return;
     if(neonObserver)neonObserver.disconnect();
     if(neonMutationObserver)neonMutationObserver.disconnect();
-    neonObserver=new IntersectionObserver(entries=>entries.forEach(handleNeonEntry),{threshold:0.1});
-    const isExcluded=card=>isPackCard(card) || card.closest('#suite-settings-panel,#cv-stats-panel,#cv-guarantee-block,.__pe-panel,.__ps-panel,.__pc-panel,#__cpt-root,#__aw-cpt-root,#__sb-root');
-    const scan=()=>{ document.querySelectorAll('.anime-cards__item,.trade__main-item').forEach(card=>{ if(!neonObservedSet.has(card)&&!isExcluded(card)){ neonObserver.observe(card); neonObservedSet.add(card); } }); };
+    neonObserver=new IntersectionObserver(
+      entries=>entries.forEach(handleNeonEntry),
+      {threshold:0.1}
+    );
+
+    const isExcluded=card=>isPackCard(card) || card.closest(
+      '#suite-settings-panel,#cv-stats-panel,#cv-guarantee-block,'
+      + '.__pe-panel,.__ps-panel,.__pc-panel,#__cpt-root,#__aw-cpt-root,#__sb-root'
+    );
+
+    const scan=()=>{
+      document.querySelectorAll('.anime-cards__item,.trade__main-item').forEach(card=>{
+        if(neonObservedSet.has(card)||isExcluded(card)) return;
+        neonObserver.observe(card);
+        neonObservedSet.add(card);
+      });
+    };
+
     neonMutationObserver=new MutationObserver(mutations=>{
       scan();
       mutations.forEach(mutation=>{
@@ -1203,7 +1236,12 @@
         if(card && !isExcluded(card)) applyNeonToCard(card);
       });
     });
-    neonMutationObserver.observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['class']});
+    neonMutationObserver.observe(document.body,{
+      childList:true,
+      subtree:true,
+      attributes:true,
+      attributeFilter:['class']
+    });
     scan();
   }
 
@@ -1215,8 +1253,18 @@
     neonObservedSet = new WeakSet();
     neonStateMap = new WeakMap();
     document.querySelectorAll('.neon-outline-wrapper').forEach(el=>el.remove());
-    document.querySelectorAll('.cv-neon-outline,.cv-neon-green,.cv-neon-orange,.cv-neon-violet,.cv-neon-red,.cv-neon-blue').forEach(card=>{
-      card.classList.remove('cv-neon-outline','cv-neon-green','cv-neon-orange','cv-neon-violet','cv-neon-red','cv-neon-blue');
+    document.querySelectorAll(
+      '.cv-neon-outline,.cv-neon-green,.cv-neon-orange,'
+      + '.cv-neon-violet,.cv-neon-red,.cv-neon-blue'
+    ).forEach(card=>{
+      card.classList.remove(
+        'cv-neon-outline',
+        'cv-neon-green',
+        'cv-neon-orange',
+        'cv-neon-violet',
+        'cv-neon-red',
+        'cv-neon-blue'
+      );
       if(card.style.position === 'relative') card.style.removeProperty('position');
       if(card.classList.contains('trade__main-item')) card.style.removeProperty('overflow');
       card.querySelectorAll('.lock-trade-btn').forEach(btn => btn.style.removeProperty('display'));
