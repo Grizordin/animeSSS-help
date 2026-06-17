@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      2.5
+// @version      2.7
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -69,6 +69,7 @@
     modGuarantee:     true,   // расчёт гаранта
     modLabyrinthQuiz: true,   // викторина лабиринта
     modLabyrinthEmission:true,// таймер выброса в лабиринте
+    modLabyrinthClubWar:true,// подсветка клубов в битве клубов
 
     // Хоткеи
     buyKey:        'Space',
@@ -3910,6 +3911,11 @@
       else cleanupLabyrinthQuiz();
       return;
     }
+    if(key==='modLabyrinthClubWar'){
+      if(cfg.modLabyrinthClubWar) initClubWarRelations();
+      else cleanupClubWarRelations();
+      return;
+    }
     if(key==='modNoNeedCards'){
       if(cfg.modNoNeedCards) initNoNeedCards();
       else if(typeof window.__suiteNoNeedCardsCleanup==='function') window.__suiteNoNeedCardsCleanup();
@@ -4123,6 +4129,12 @@
       else cleanupLabyrinthEmission();
     });
     labyrinthSection.appendChild(emissionRow);
+    const clubWarRow = makeToggle('modLabyrinthClubWar', '⚔️ Битва клубов');
+    clubWarRow.querySelector('input').addEventListener('change', () => {
+      if(cfg.modLabyrinthClubWar) initClubWarRelations();
+      else cleanupClubWarRelations();
+    });
+    labyrinthSection.appendChild(clubWarRow);
 
     panel.append(hdr,body); document.body.appendChild(panel);
     // Восстанавливаем сохранённую позицию панели настроек
@@ -4413,11 +4425,13 @@
     labyrinthRouteWatcherInstalled=true;
     let lastHref=location.href;
     const check=()=>{
-      if(location.href===lastHref && window.__suiteLabyrinthQuizInstalled && window.__suiteLabyrinthEmissionInstalled) return;
+      if(location.href===lastHref && window.__suiteLabyrinthQuizInstalled && window.__suiteLabyrinthEmissionInstalled && window.__suiteClubWarRelationsInstalled) return;
       lastHref=location.href;
       if(cfg.modLabyrinthQuiz) initLabyrinthQuiz();
       if(cfg.modLabyrinthEmission) initLabyrinthEmission();
       else cleanupLabyrinthEmission();
+      if(cfg.modLabyrinthClubWar) initClubWarRelations();
+      else cleanupClubWarRelations();
     };
     ['pushState','replaceState'].forEach(name=>{
       const original=history[name];
@@ -4457,6 +4471,7 @@
     if(cfg.modAutoLootCards) initAutoLootCards();
     if(cfg.modLabyrinthQuiz) initLabyrinthQuiz();
     if(cfg.modLabyrinthEmission) initLabyrinthEmission();
+    if(cfg.modLabyrinthClubWar) initClubWarRelations();
     setupLabyrinthQuizRouteWatcher();
     watchLootboxMiddle();
     setupBuyButtonGuard();
@@ -8964,6 +8979,240 @@
       });
     
     })();
+  }
+
+  // ============================================================
+  //  LABYRINTH CLUB WAR
+  // ============================================================
+
+  const CLUB_WAR_RELATIONS_URL =
+    'https://raw.githubusercontent.com/Grizordin/animeSSS-help/main/club-war-relations.json';
+  const CLUB_WAR_CACHE_MS = 3 * 60 * 1000;
+
+  let clubWarRelations = null;
+  let clubWarLoadedAt = 0;
+  let clubWarObserver = null;
+  let clubWarTimer = null;
+
+  function readClubWarIds(data, key) {
+    return new Set(
+      (Array.isArray(data?.[key]) ? data[key] : [])
+        .map(id => String(id || '').trim())
+        .filter(Boolean)
+    );
+  }
+
+  function buildClubWarRelations(data) {
+    return {
+      ally: readClubWarIds(data, 'allies'),
+      neutral: readClubWarIds(data, 'neutral'),
+      enemy: readClubWarIds(data, 'enemies')
+    };
+  }
+
+  function loadClubWarRelations() {
+    if (clubWarRelations && Date.now() - clubWarLoadedAt < CLUB_WAR_CACHE_MS) {
+      return Promise.resolve(clubWarRelations);
+    }
+
+    const url = CLUB_WAR_RELATIONS_URL + '?t=' + Date.now();
+    const applyData = data => {
+      clubWarRelations = buildClubWarRelations(data);
+      clubWarLoadedAt = Date.now();
+      return clubWarRelations;
+    };
+
+    return fetch(url, { cache:'no-store' })
+      .then(response => {
+        if(!response.ok) throw new Error('HTTP ' + response.status);
+        return response.json();
+      })
+      .then(applyData)
+      .catch(fetchError => new Promise(resolve => {
+        GM_xmlhttpRequest({
+          method: 'GET',
+          url,
+          onload: response => {
+            try {
+              resolve(applyData(JSON.parse(response.responseText || '{}')));
+            } catch(parseError) {
+              console.warn('[Suite club war] Failed to parse club list:', parseError);
+              resolve(null);
+            }
+          },
+          onerror: requestError => {
+            console.warn('[Suite club war] Failed to load club list:', fetchError, requestError);
+            resolve(null);
+          }
+        });
+      }));
+  }
+
+  function getClubWarRelationType(card, relations) {
+    const clubId = String(card?.dataset?.clubId || '').trim();
+    if (!clubId) return '';
+
+    for (const type of ['ally', 'neutral', 'enemy']) {
+      if (relations?.[type]?.has(clubId)) return type;
+    }
+
+    return '';
+  }
+
+  function renderClubWarBadge(card, type) {
+    card.querySelector('.suite-club-war-badge')?.remove();
+    if (!type) return;
+
+    const label = type === 'ally'
+      ? 'Союзник'
+      : type === 'neutral'
+        ? 'Нейтралитет'
+        : 'Враг';
+
+    const badge = document.createElement('span');
+    badge.className = 'suite-club-war-badge';
+    badge.textContent = label;
+
+    card.appendChild(badge);
+  }
+
+  function injectClubWarStyles() {
+    if (document.getElementById('suite-club-war-style')) return;
+
+    const style = document.createElement('style');
+    style.id = 'suite-club-war-style';
+    style.textContent = `
+      .labyrinth__club-war-club.suite-club-war-ally {
+        position:relative !important;
+        padding-right:92px !important;
+        border-color:#22c55e !important;
+        background:linear-gradient(90deg,rgba(20,83,45,.78),rgba(6,78,59,.48)) !important;
+        box-shadow:0 0 0 1px rgba(34,197,94,.28),0 0 18px rgba(34,197,94,.28) !important;
+      }
+      .labyrinth__club-war-club.suite-club-war-neutral {
+        position:relative !important;
+        padding-right:92px !important;
+        border-color:#eab308 !important;
+        background:linear-gradient(90deg,rgba(113,63,18,.78),rgba(120,53,15,.46)) !important;
+        box-shadow:0 0 0 1px rgba(234,179,8,.26),0 0 18px rgba(234,179,8,.22) !important;
+      }
+      .labyrinth__club-war-club.suite-club-war-enemy {
+        position:relative !important;
+        padding-right:92px !important;
+        border-color:#ef4444 !important;
+        background:linear-gradient(90deg,rgba(127,29,29,.78),rgba(88,28,28,.48)) !important;
+        box-shadow:0 0 0 1px rgba(239,68,68,.28),0 0 18px rgba(239,68,68,.28) !important;
+      }
+      .suite-club-war-badge {
+        position:absolute;
+        top:50%;
+        right:10px;
+        transform:translateY(-50%);
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        width:max-content;
+        max-width:78px;
+        padding:2px 7px;
+        border-radius:6px;
+        font-size:10px;
+        font-weight:900;
+        line-height:1.3;
+        letter-spacing:.2px;
+        white-space:nowrap;
+        pointer-events:none;
+        color:#f8fafc;
+        background:rgba(15,23,42,.72);
+        border:1px solid rgba(255,255,255,.16);
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function cleanupClubWarRelations(){
+    clearTimeout(clubWarTimer);
+    clubWarTimer = null;
+
+    if(clubWarObserver){
+      clubWarObserver.disconnect();
+      clubWarObserver = null;
+    }
+
+    document.querySelectorAll('.labyrinth__club-war-club').forEach(card=>{
+      card.classList.remove(
+        'suite-club-war-ally',
+        'suite-club-war-neutral',
+        'suite-club-war-enemy'
+      );
+      card.querySelector('.suite-club-war-badge')?.remove();
+    });
+
+    window.__suiteClubWarRelationsInstalled = false;
+  }
+
+  function scheduleClubWarApply(delay=120){
+    clearTimeout(clubWarTimer);
+    clubWarTimer = setTimeout(applyClubWarRelations, delay);
+  }
+
+  async function applyClubWarRelations(){
+    if(!cfg.modLabyrinthClubWar){
+      cleanupClubWarRelations();
+      return;
+    }
+
+    if(!/\/labyrinth\//.test(location.pathname)){
+      cleanupClubWarRelations();
+      return;
+    }
+
+    const root = document.getElementById('labyrinthClubWarClubs');
+    if(!root) return;
+
+    injectClubWarStyles();
+    const relations = await loadClubWarRelations();
+    if(!relations) return;
+
+    root.querySelectorAll('.labyrinth__club-war-club').forEach(card=>{
+      card.classList.remove(
+        'suite-club-war-ally',
+        'suite-club-war-neutral',
+        'suite-club-war-enemy'
+      );
+
+      const type = getClubWarRelationType(card, relations);
+      if(type) card.classList.add('suite-club-war-' + type);
+      renderClubWarBadge(card, type);
+    });
+  }
+
+  function initClubWarRelations(){
+    if(!cfg.modLabyrinthClubWar){
+      cleanupClubWarRelations();
+      return;
+    }
+
+    if(!/\/labyrinth\//.test(location.pathname)){
+      cleanupClubWarRelations();
+      return;
+    }
+
+    if(window.__suiteClubWarRelationsInstalled){
+      scheduleClubWarApply();
+      return;
+    }
+
+    window.__suiteClubWarRelationsInstalled = true;
+    scheduleClubWarApply(0);
+
+    clubWarObserver = new MutationObserver(()=>scheduleClubWarApply());
+    clubWarObserver.observe(document.body,{
+      childList:true,
+      subtree:true,
+      characterData:true,
+      attributes:true,
+      attributeFilter:['class','style','data-club-id']
+    });
   }
 
   function cleanupLabyrinthQuiz(){
