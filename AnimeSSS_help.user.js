@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      2.10
+// @version      2.11
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -280,7 +280,7 @@
       box-shadow:0 0 0 1px rgba(251,146,60,.18),0 0 14px rgba(249,115,22,.34);
     }
     #suite-emission-timer {
-      position:absolute;top:12px;right:12px;z-index:999;
+      position:absolute;top:58px;right:12px;z-index:80;
       min-width:172px;padding:10px 12px;border-radius:12px;
       border:1px solid rgba(56,189,248,.22);
       background:linear-gradient(180deg,rgba(10,15,26,.96),rgba(9,14,24,.92));
@@ -1488,6 +1488,18 @@
     {s:'Сообщения удалены',                                        icon:'check',  title:'Готово',      theme:'emerald'   },
     {s:'Вы уже поставили 3 дизлайка на карты, которые сейчас на модерации. Дождитесь следующей партии карт и сможете ставить новые', icon:'clock', title:'Лимит', theme:'rose'},
     {s:'Ошибка сервера',                                          icon:'err',    title:'Ошибка',      theme:'neon-amber'},
+    {s:'Недостаточно камней духа', icon:'coin', title:'Ошибка', theme:'rose'},
+    {s:'Автофарм остановлен.', icon:'clock', title:'Автофарм', theme:'rose'},
+    {s:'Карта куплена', icon:'bag', title:'Покупка', theme:'neon-green'},
+    {s:'У вас нет свободных карт ранга A с улучшением +5', icon:'warn', title:'Внимание', theme:'neon-amber'},
+    {s:'Статистика доступна только обладателям возвышения', icon:'lock', title:'Статистика', theme:'neon-amber'},
+    {s:'Ты уже захватывал комнату для клуба', icon:'shield', title:'Клуб', theme:'neon-amber'},
+    {s:'Данный обмен не действительный', icon:'warn', title:'Обмен', theme:'rose'},
+    {s:'Вы уже получали карту с этого пака', icon:'warn', title:'Пак', theme:'neon-amber'},
+    {s:'Награда получена', icon:'coin', title:'Награда', theme:'neon-green'},
+    {s:'Заявка на замену арта не найдена', icon:'warn', title:'Заявка', theme:'neon-amber'},
+    {s:'Вы уже поставили 3 дизлайка на карты, которые сейчас на модерации. Дождитесь следующей партии карт и сможете ставить новые', icon:'clock', title:'Лимит', theme:'rose'},
+    {r:/с момента Вашего отсутствия на сайте Вам было прислано .* сообщения/i, icon:'bell', title:'Сообщения', theme:'neon-blue'},
   ];
 
   const CPT_WEBHOOK = 'https://discord.com/api/webhooks/1512168420727197767/55gHtwhHNj4k3wSCpgWquWR9p2nSe3wzeslheb6xN74J3edWX_6QL1DjemkpDncPveHz';
@@ -1615,6 +1627,45 @@
     cptMap.set(key,{el,titleEl,subEl,bar,timer:setTimeout(()=>cptRemove(key),CPT_LIFE)});
   }
 
+  function cptHandleDlePushNode(node){
+    if(!(node instanceof HTMLElement)) return;
+    const items = node.matches?.('.DLEPush-notification')
+      ? [node]
+      : [...node.querySelectorAll?.('.DLEPush-notification') || []];
+
+    items.forEach(item=>{
+      if(item.dataset.cptHandled === '1') return;
+      const messageEl = item.querySelector('.DLEPush-message') || item;
+      const text = (messageEl.textContent || '').replace(/\s+/g, ' ').trim();
+      if(!text) return;
+
+      const match = cptResolve(text);
+      if(!match) return;
+
+      item.dataset.cptHandled = '1';
+      cptShow(text, match.icon, match.title, text, CPT_CLS[match.theme]);
+      item.remove();
+    });
+  }
+
+  function cptInstallDomObserver(){
+    if(window.__cptDomObserverInstalled) return;
+    if(!document.body) return;
+    window.__cptDomObserverInstalled = true;
+
+    const scanExisting = () => {
+      document.querySelectorAll('.DLEPush-notification').forEach(cptHandleDlePushNode);
+    };
+
+    scanExisting();
+    const observer = new MutationObserver(mutations=>{
+      mutations.forEach(mutation=>{
+        mutation.addedNodes.forEach(cptHandleDlePushNode);
+      });
+    });
+    observer.observe(document.body, { childList:true, subtree:true });
+  }
+
   // Страницы где приоритет уведомлений отдаётся кликеру
   function isClickerPage(){
     const p=location.pathname+location.search;
@@ -1630,14 +1681,17 @@
     if(window.__cptHookInstalled) {
       const dlePushEl=document.getElementById('DLEPush');
       if(dlePushEl) dlePushEl.style.display='';
+      cptInstallDomObserver();
       return;
     }
     if(isClickerPage()) return;
+    cptInstallDomObserver();
     const dp = window.DLEPush || (typeof DLEPush!=='undefined' ? DLEPush : null);
     if(!dp) return;
     window.__cptHookInstalled=true;
     const dlePushEl=document.getElementById('DLEPush');
     if(dlePushEl) dlePushEl.style.display='';
+    cptInstallDomObserver();
     ['info','warning','error','success'].forEach(method=>{
       if(typeof dp[method]!=='function') return;
       const orig=dp[method].bind(dp);
@@ -8995,7 +9049,7 @@
   let clubWarTimer = null;
   const CLUB_WAR_ROUTE_RE = /\/labyrinth(?:\/|$)/;
   const clubWarDebug = {
-    version: '2.10',
+    version: '2.11',
     enabled: false,
     installed: false,
     path: '',
@@ -9142,6 +9196,25 @@
         border-color:#ef4444 !important;
         background:linear-gradient(90deg,rgba(127,29,29,.78),rgba(88,28,28,.48)) !important;
         box-shadow:0 0 0 1px rgba(239,68,68,.28),0 0 18px rgba(239,68,68,.28) !important;
+      }
+      .labyrinth__club-war-club.suite-club-war-ally.is-active,
+      .labyrinth__club-war-club.suite-club-war-neutral.is-active,
+      .labyrinth__club-war-club.suite-club-war-enemy.is-active,
+      .labyrinth__club-war-club.suite-club-war-ally.active,
+      .labyrinth__club-war-club.suite-club-war-neutral.active,
+      .labyrinth__club-war-club.suite-club-war-enemy.active,
+      .labyrinth__club-war-club.suite-club-war-ally.labyrinth__club-war-club--active,
+      .labyrinth__club-war-club.suite-club-war-neutral.labyrinth__club-war-club--active,
+      .labyrinth__club-war-club.suite-club-war-enemy.labyrinth__club-war-club--active,
+      .labyrinth__club-war-club.suite-club-war-ally[aria-selected="true"],
+      .labyrinth__club-war-club.suite-club-war-neutral[aria-selected="true"],
+      .labyrinth__club-war-club.suite-club-war-enemy[aria-selected="true"] {
+        outline:2px solid #f8fafc !important;
+        outline-offset:2px !important;
+        box-shadow:
+          inset 0 0 0 2px rgba(15,23,42,.78),
+          0 0 0 2px rgba(248,250,252,.5),
+          0 0 18px rgba(248,250,252,.36) !important;
       }
     `;
     document.head.appendChild(style);
