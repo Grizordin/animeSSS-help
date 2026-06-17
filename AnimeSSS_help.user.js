@@ -16,6 +16,7 @@
 // @grant        GM_addStyle
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
+// @grant        GM_info
 // @connect      raw.githubusercontent.com
 // @connect      api.telegram.org
 // @connect      kodikplayer.com
@@ -101,7 +102,10 @@
   // ============================================================
 
   const SUITE_ALLOWED_CLUB_ID = '2';
-  const SUITE_ACCESS_VERSION = '1.1';
+  const SUITE_ACCESS_VERSION =
+  typeof GM_info !== 'undefined' && GM_info?.script?.version
+    ? GM_info.script.version
+    : 'unknown';
 
   function suiteGetMyClubId() {
     const links = [...document.querySelectorAll('a[href*="/clubs/"]')];
