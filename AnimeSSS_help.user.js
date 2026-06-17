@@ -279,15 +279,11 @@
       color:#fff7ed;font-size:10px;font-weight:900;letter-spacing:.55px;line-height:1;
       box-shadow:0 0 0 1px rgba(251,146,60,.18),0 0 14px rgba(249,115,22,.34);
     }
-    .header.hbg {
-      position:relative;
-      z-index:120 !important;
-    }
     #suite-emission-timer {
       position:absolute;
       top:12px;
       right:12px;
-      z-index:99;
+      z-index:20;
       min-width:172px;padding:10px 12px;border-radius:12px;
       border:1px solid rgba(56,189,248,.22);
       background:linear-gradient(180deg,rgba(10,15,26,.96),rgba(9,14,24,.92));
