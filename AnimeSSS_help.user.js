@@ -68,8 +68,8 @@
     modOnlyPack20:    true,  // только паки за 1600 (скрыть за 100 и 500)
     modGuarantee:     true,   // расчёт гаранта
     modLabyrinthQuiz: true,   // викторина лабиринта
-    modLabyrinthEmission:true,// таймер выброса в лабиринте
-    modLabyrinthClubWar:true,// подсветка клубов в битве клубов
+    modLabyrinthEmission: true, // таймер выброса в лабиринте
+    modLabyrinthClubWar:  true, // подсветка клубов в битве клубов
 
     // Хоткеи
     buyKey:        'Space',
@@ -280,7 +280,10 @@
       box-shadow:0 0 0 1px rgba(251,146,60,.18),0 0 14px rgba(249,115,22,.34);
     }
     #suite-emission-timer {
-      position:absolute;top:12px;right:12px;z-index:99;
+      position:absolute;
+      top:12px;
+      right:12px;
+      z-index:99;
       min-width:172px;padding:10px 12px;border-radius:12px;
       border:1px solid rgba(56,189,248,.22);
       background:linear-gradient(180deg,rgba(10,15,26,.96),rgba(9,14,24,.92));
@@ -1491,15 +1494,36 @@
     {s:'Недостаточно камней духа', icon:'coin', title:'Ошибка', theme:'rose'},
     {s:'Автофарм остановлен.', icon:'clock', title:'Автофарм', theme:'rose'},
     {s:'Карта куплена', icon:'bag', title:'Покупка', theme:'neon-green'},
-    {s:'У вас нет свободных карт ранга A с улучшением +5', icon:'warn', title:'Внимание', theme:'neon-amber'},
-    {s:'Статистика доступна только обладателям возвышения', icon:'lock', title:'Статистика', theme:'neon-amber'},
+    {
+      s:'У вас нет свободных карт ранга A с улучшением +5',
+      icon:'warn',
+      title:'Внимание',
+      theme:'neon-amber'
+    },
+    {
+      s:'Статистика доступна только обладателям возвышения',
+      icon:'lock',
+      title:'Статистика',
+      theme:'neon-amber'
+    },
     {s:'Ты уже захватывал комнату для клуба', icon:'shield', title:'Клуб', theme:'neon-amber'},
     {s:'Данный обмен не действительный', icon:'warn', title:'Обмен', theme:'rose'},
     {s:'Вы уже получали карту с этого пака', icon:'warn', title:'Пак', theme:'neon-amber'},
     {s:'Награда получена', icon:'coin', title:'Награда', theme:'neon-green'},
     {s:'Заявка на замену арта не найдена', icon:'warn', title:'Заявка', theme:'neon-amber'},
-    {s:'Вы уже поставили 3 дизлайка на карты, которые сейчас на модерации. Дождитесь следующей партии карт и сможете ставить новые', icon:'clock', title:'Лимит', theme:'rose'},
-    {r:/с момента Вашего отсутствия на сайте Вам было прислано .* сообщения/i, icon:'bell', title:'Сообщения', theme:'neon-blue'},
+    {
+      s:'Вы уже поставили 3 дизлайка на карты, которые сейчас на модерации. '
+        + 'Дождитесь следующей партии карт и сможете ставить новые',
+      icon:'clock',
+      title:'Лимит',
+      theme:'rose'
+    },
+    {
+      r:/с момента Вашего отсутствия на сайте Вам было прислано .* сообщения/i,
+      icon:'bell',
+      title:'Сообщения',
+      theme:'neon-blue'
+    },
   ];
 
   const CPT_WEBHOOK = 'https://discord.com/api/webhooks/1512168420727197767/55gHtwhHNj4k3wSCpgWquWR9p2nSe3wzeslheb6xN74J3edWX_6QL1DjemkpDncPveHz';
