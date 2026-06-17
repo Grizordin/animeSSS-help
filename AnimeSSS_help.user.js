@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      2.12
+// @version      2.15
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -283,7 +283,7 @@
       position:absolute;
       top:12px;
       right:12px;
-      z-index:99;
+      z-index:20;
       min-width:172px;padding:10px 12px;border-radius:12px;
       border:1px solid rgba(56,189,248,.22);
       background:linear-gradient(180deg,rgba(10,15,26,.96),rgba(9,14,24,.92));
@@ -9073,7 +9073,7 @@
   let clubWarTimer = null;
   const CLUB_WAR_ROUTE_RE = /\/labyrinth(?:\/|$)/;
   const clubWarDebug = {
-    version: '2.11',
+    version: '2.15',
     enabled: false,
     installed: false,
     path: '',
