@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      2.23
+// @version      2.24
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -97,6 +97,57 @@
 
   let cfg = { ...DEFAULT_SETTINGS, ...gmGet(SETTINGS_KEY, {}) };
   function saveCfg() { gmSet(SETTINGS_KEY, cfg); }
+
+  const PREMIUM_REQUIRED_SETTINGS = [
+    'modCardValue',
+    'modBestCard',
+    'modGuard',
+    'modAutoOpen',
+    'modBrickFill',
+    'modRemelt'
+  ];
+
+  function getPageWindow() {
+    try {
+      if(typeof unsafeWindow !== 'undefined') return unsafeWindow;
+    } catch(e) {}
+    return window;
+  }
+
+  function hasActivePremium() {
+    const pageWindow = getPageWindow();
+    return Number(pageWindow?.member_active_premium) === 1;
+  }
+
+  function isPremiumRequiredSetting(key) {
+    return PREMIUM_REQUIRED_SETTINGS.includes(key);
+  }
+
+  function isPremiumLockedSetting(key) {
+    return isPremiumRequiredSetting(key) && !hasActivePremium();
+  }
+
+  function enforcePremiumSettings() {
+    if(hasActivePremium()) return false;
+
+    let changed = false;
+    PREMIUM_REQUIRED_SETTINGS.forEach(key=>{
+      if(cfg[key]) {
+        cfg[key] = false;
+        changed = true;
+      }
+    });
+
+    if(cfg.autoOpenEnabled) {
+      cfg.autoOpenEnabled = false;
+      changed = true;
+    }
+
+    if(changed) saveCfg();
+    return changed;
+  }
+
+  enforcePremiumSettings();
 
   // ============================================================
   //  ДОСТУП И СЛУЖЕБНАЯ ОТПРАВКА
@@ -1767,6 +1818,17 @@
     return true;
   }
 
+  function warnPremiumRequired() {
+    cptShow(
+      'premium-required',
+      'lock',
+      'Возвышение',
+      'Эта функция доступна только с возвышением',
+      CPT_CLS['neon-amber']
+    );
+    return true;
+  }
+
   function cptHandleDlePushNode(node){
     if(!(node instanceof HTMLElement)) return;
     const items = node.matches?.('.DLEPush-notification')
@@ -2615,6 +2677,10 @@
 
   function initBrickFill(){
     if(!cfg.modBrickFill) return;
+    if(isPremiumLockedSetting('modBrickFill')){
+      enforcePremiumSettings();
+      return;
+    }
     if(!/\/celestial_stone\/?$/.test(location.pathname)) return;
     if(window.__suiteBrickFillInstalled) return;
     window.__suiteBrickFillInstalled=true;
@@ -3080,6 +3146,10 @@
 
   function initRemelt(){
     if(!cfg.modRemelt) return;
+    if(isPremiumLockedSetting('modRemelt')){
+      enforcePremiumSettings();
+      return;
+    }
     if(!/\/cards_remelt\/?$/.test(location.pathname)) return;
     if(window.__suiteRemeltInstalled) return;
     window.__suiteRemeltInstalled=true;
@@ -3829,6 +3899,15 @@
     return parseInt(el.textContent.replace(/\D/g,''),10)||0;
   }
   function startAutoOpen() {
+    if(isPremiumLockedSetting('modAutoOpen')){
+      cfg.modAutoOpen=false;
+      cfg.autoOpenEnabled=false;
+      saveCfg();
+      if(autoRunInput) autoRunInput.checked=false;
+      setAutoStatus('Нужно возвышение');
+      warnPremiumRequired();
+      return;
+    }
     if(warnCardStatsDemandRequired('packs_demand')) {
       cfg.autoOpenEnabled=false;
       saveCfg();
@@ -3890,6 +3969,11 @@
   }
   function autoOpenStep() {
     if(autoBusy || !cfg.autoOpenEnabled) return;
+    if(isPremiumLockedSetting('modAutoOpen')) {
+      stopAutoOpen('Нужно возвышение');
+      warnPremiumRequired();
+      return;
+    }
     if(warnCardStatsDemandRequired('packs_demand')) {
       stopAutoOpen('Нужна статистика карт');
       return;
@@ -4017,7 +4101,13 @@
 
   function makeToggle(key, label){
     const row=document.createElement('div');
-    row.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #0f172a';
+    row.style.cssText=[
+      'display:flex',
+      'align-items:center',
+      'justify-content:space-between',
+      'padding:8px 0',
+      'border-bottom:1px solid #0f172a'
+    ].join(';');
 
     const lbl=document.createElement('span');
     lbl.style.cssText='font-size:13px;color:#cbd5e1;min-width:0;flex:1 1 auto;padding-right:10px;';
@@ -4030,6 +4120,13 @@
     input.type='checkbox';
     input.checked=!!cfg[key];
     input.addEventListener('change',()=>{
+      if(input.checked && isPremiumLockedSetting(key)){
+        input.checked = false;
+        cfg[key] = false;
+        enforcePremiumSettings();
+        warnPremiumRequired();
+        return;
+      }
       cfg[key]=input.checked;
       saveCfg();
       document.dispatchEvent(new CustomEvent('suite-setting-change',{
@@ -4041,7 +4138,38 @@
     slider.className='suite-slider';
     toggle.append(input,slider);
     row.append(lbl,toggle);
+    applyPremiumLockToToggle(row,key);
     return row;
+  }
+
+  function applyPremiumLockToToggle(row,key){
+    if(!isPremiumRequiredSetting(key)) return;
+    if(row.dataset.premiumLockBound !== '1'){
+      row.dataset.premiumLockBound = '1';
+      row.addEventListener('click',e=>{
+        if(!isPremiumLockedSetting(key)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        warnPremiumRequired();
+      },true);
+    }
+
+    const input=row.querySelector('input[type="checkbox"]');
+    if(!input) return;
+
+    const locked=isPremiumLockedSetting(key);
+    if(locked){
+      input.checked = false;
+      input.disabled = true;
+      row.style.opacity = '0.45';
+      row.style.cursor = 'not-allowed';
+      row.title = 'Нужно возвышение';
+    } else {
+      input.disabled = false;
+      row.style.opacity = '';
+      row.style.cursor = '';
+      row.title = '';
+    }
   }
 
   function makeSliderRow(key, label, min, max, step){
@@ -4088,6 +4216,12 @@
   document.addEventListener('suite-setting-change',e=>{
     const key = e.detail?.key;
     if(!key) return;
+    if(isPremiumLockedSetting(key)){
+      cfg[key] = false;
+      enforcePremiumSettings();
+      warnPremiumRequired();
+      return;
+    }
     if(key==='modCardValue'){
       if(!cfg.modCardValue && (cfg.modAutoOpen || cfg.autoOpenEnabled)){
         stopAutoOpen('Модуль выключен');
@@ -4141,6 +4275,7 @@
   });
 
   function createSettingsPanel(){
+    enforcePremiumSettings();
     const panel=document.createElement('div'); panel.id='suite-settings-panel';
     panel.style.cssText='display:none;position:fixed;top:50%;right:20px;transform:translateY(-50%);width:320px;max-height:90vh;overflow-y:auto;background:#0a0f1a;border:1px solid #1e293b;border-radius:16px;box-shadow:none;z-index:999;font-family:\'Segoe UI\',sans-serif;color:#e2e8f0;';
 
