@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      2.8
+// @version      2.9
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -8995,7 +8995,7 @@
   let clubWarTimer = null;
   const CLUB_WAR_ROUTE_RE = /\/labyrinth(?:\/|$)/;
   const clubWarDebug = {
-    version: '2.8',
+    version: '2.9',
     enabled: false,
     installed: false,
     path: '',
@@ -9087,7 +9087,7 @@
   }
 
   function getClubWarRelationType(card, relations) {
-    const clubId = String(card?.dataset?.clubId || '').trim();
+    const clubId = getClubWarCardId(card);
     if (!clubId) return '';
 
     for (const type of ['ally', 'neutral', 'enemy']) {
@@ -9095,6 +9095,28 @@
     }
 
     return '';
+  }
+
+  function getClubWarCardId(card) {
+    const datasetId = String(card?.dataset?.clubId || '').trim();
+    if (datasetId) return datasetId;
+
+    const textId = String(card?.textContent || '').match(/\bID\s*(\d+)\b/i);
+    return textId ? textId[1] : '';
+  }
+
+  function getClubWarCards() {
+    const roots = [
+      ...document.querySelectorAll('#labyrinthClubWarClubs'),
+      ...document.querySelectorAll('.labyrinth__club-war-clubs')
+    ];
+
+    const cards = roots.flatMap(root => [
+      ...root.querySelectorAll('.labyrinth__club-war-club')
+    ]);
+
+    if (cards.length) return [...new Set(cards)];
+    return [...document.querySelectorAll('.labyrinth__club-war-club')];
   }
 
   function renderClubWarBadge(card, type) {
@@ -9205,9 +9227,8 @@
       return;
     }
 
-    const root = document.getElementById('labyrinthClubWarClubs')
-      || document.querySelector('.labyrinth__club-war-clubs');
-    if(!root){
+    const clubCards = getClubWarCards();
+    if(!clubCards.length){
       publishClubWarDebug({ rootFound: false, cards: [] });
       return;
     }
@@ -9217,7 +9238,7 @@
     if(!relations) return;
 
     const cards = [];
-    root.querySelectorAll('.labyrinth__club-war-club').forEach(card=>{
+    clubCards.forEach(card=>{
       card.classList.remove(
         'suite-club-war-ally',
         'suite-club-war-neutral',
@@ -9228,7 +9249,7 @@
       if(type) card.classList.add('suite-club-war-' + type);
       renderClubWarBadge(card, type);
       cards.push({
-        id: String(card?.dataset?.clubId || '').trim(),
+        id: getClubWarCardId(card),
         type: type || '',
         className: card.className,
         badge: card.querySelector('.suite-club-war-badge')?.textContent || ''
