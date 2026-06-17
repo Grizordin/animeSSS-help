@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      2.17
+// @version      2.18
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -1261,9 +1261,10 @@
     if(header.querySelector('.open-s-button')||header.querySelector('.wish-button')||header.querySelector('.created-button'))return;
     const link=header.querySelector('a.usn-sect__title[href*="/user/cards/?name="]'); if(!link)return;
     const url=new URL(link.href,location.origin); const username=url.searchParams.get('name'); if(!username)return;
-    const sBtn=document.createElement('a'); sBtn.href=`/user/cards/?name=${username}&rank=s&locked=0`; sBtn.className='usn-sect__title open-s-button'; sBtn.style.marginLeft='40px';
+    const encodedUsername=encodeURIComponent(username);
+    const sBtn=document.createElement('a'); sBtn.href=`/user/cards/?name=${encodedUsername}&rank=s&locked=0`; sBtn.className='usn-sect__title open-s-button'; sBtn.style.marginLeft='40px';
     const sIcon=document.createElement('span'); sIcon.className='fal fa-yin-yang'; sBtn.appendChild(sIcon); sBtn.append(' Открытые S');
-    const wBtn=document.createElement('a'); wBtn.href=`/user/cards/?name=${username}&locked=0&in_list=1`; wBtn.className='usn-sect__title wish-button'; wBtn.style.marginLeft='55px';
+    const wBtn=document.createElement('a'); wBtn.href=`/user/cards/?name=${encodedUsername}&locked=0&in_list=1`; wBtn.className='usn-sect__title wish-button'; wBtn.style.marginLeft='55px';
     const wIcon=document.createElement('span'); wIcon.className='fal fa-yin-yang'; wBtn.appendChild(wIcon); wBtn.append(' Желаемое');
     const cBtn=document.createElement('a'); cBtn.href=`https://${location.hostname}/user/${encodeURIComponent(username)}/cards_created/?moderation=1`; cBtn.className='usn-sect__title created-button'; cBtn.style.marginLeft='55px';
     const cIcon=document.createElement('span'); cIcon.className='fal fa-yin-yang'; cBtn.appendChild(cIcon); cBtn.append(' На модерации');
@@ -4957,8 +4958,8 @@
     window.__suiteNoNeedCardsInstalled = true;
     const myName = suiteGetCurrentUserName();
     if(!myName) return;
-    const urlName = (location.search.match(/name=([^&]+)/) || [])[1];
-    if(!urlName || decodeURIComponent(urlName).toLowerCase() !== myName.toLowerCase()) return;
+    const urlName = new URLSearchParams(location.search).get('name') || '';
+    if(!urlName || urlName.toLowerCase() !== myName.toLowerCase()) return;
     if(!/\/user\/cards\//.test(location.pathname)) return;
     nnInit(myName);
   }
@@ -5329,7 +5330,7 @@
           } else if(task.type==='card') {
             markBtns('card',task.value,b=>{b.disabled=true;b.textContent='⏳';b.style.opacity='.7';b.title='Выполняется';});
             showQueueInd(`🗑 ID ${task.value}: поиск owner-id...`);
-            const html=await fetchHtml(`https://${currentDomain}/user/cards/?name=${userName}&card_id=${encodeURIComponent(task.value)}`);
+            const html=await fetchHtml(`https://${currentDomain}/user/cards/?name=${encodedUserName}&card_id=${encodeURIComponent(task.value)}`);
             const ids=extractOwnerIds(html);
             if(!ids.length) throw new Error(`Для card_id=${task.value} не найден data-owner-id`);
             showQueueInd(`🗑 ID ${task.value}: отправка ${ids.length} карт...`);
@@ -5475,7 +5476,7 @@
           link.onclick=()=>{ window.location.href=`${scanBaseURL}${pg}&locked=0`; };
         } else {
           link.textContent=entry;
-          link.onclick=()=>{ window.location.href=`https://${currentDomain}/user/cards/?name=${userName}&card_id=${encodeURIComponent(entry)}`; };
+          link.onclick=()=>{ window.location.href=`https://${currentDomain}/user/cards/?name=${encodedUserName}&card_id=${encodeURIComponent(entry)}`; };
         }
         del.onclick=()=>{ missingIds.delete(entry); saveMissing(); row.remove(); title.textContent=`Список ID (${missingIds.size})`; if(!missingIds.size) panel.style.display='none'; };
         row.append(link,del); body.appendChild(row);
