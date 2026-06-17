@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      2.22
+// @version      2.23
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -1749,7 +1749,31 @@
     const bar=document.createElement('div'); bar.className='cpt-bar';
     el.appendChild(head); el.appendChild(subEl); el.appendChild(bar);
     cptRoot.appendChild(el); cptAnimBar(bar);
-    cptMap.set(key,{el,titleEl,subEl,bar,timer:setTimeout(()=>cptRemove(key),CPT_LIFE)});
+    cptMap.set(key,{
+      el,
+      titleEl,
+      subEl,
+      bar,
+      timer:setTimeout(()=>cptRemove(key),CPT_LIFE)
+    });
+  }
+
+  function isCardStatsDemandEnabled(inputId) {
+    return !!document.getElementById(inputId)?.checked;
+  }
+
+  function warnCardStatsDemandRequired(inputId) {
+    if (isCardStatsDemandEnabled(inputId)) return false;
+    const message = 'Для работы нужно включить статистику карт '
+      + 'и перезагрузить страницу';
+    cptShow(
+      'card-stats-demand-required:' + inputId,
+      'warn',
+      'Статистика карт',
+      message,
+      CPT_CLS['neon-amber']
+    );
+    return true;
   }
 
   function cptHandleDlePushNode(node){
@@ -2882,6 +2906,7 @@
     }
     async function clickMatchingBrickCards(forceRefresh=false){
       if(brickBusy)return;
+      if(warnCardStatsDemandRequired('stone_demand')) return;
       brickBusy=true;updateBrickButton(true);
       try{
         const settings=loadBrickSettings();
@@ -2994,9 +3019,19 @@
       body.appendChild(makeBrickTargetRow(settings));
       body.appendChild(sep());
       const btnRow=el('div',{style:'display:flex;gap:6px;'});
-      const btnMain=makeBrickBtn('🧱 В кирпич','#6b46c1','#553c9a');btnMain.id='stone-brick-main-btn';btnMain.style.flex='1';
-      btnMain.addEventListener('click',()=>{if(btnMain.dataset.mode==='trade')clickBrickTrade();else clickMatchingBrickCards(false);});
-      const btnRefresh=makeBrickBtn('🔄','#2d3748','#1a202c');btnRefresh.title='Обновить кэш вишлиста';btnRefresh.style.width='34px';btnRefresh.style.flex='none';btnRefresh.addEventListener('click',()=>clickMatchingBrickCards(true));
+      const btnMain=makeBrickBtn('🧱 В кирпич','#6b46c1','#553c9a');
+      btnMain.id='stone-brick-main-btn';
+      btnMain.style.flex='1';
+      btnMain.addEventListener('click',()=>{
+        if(warnCardStatsDemandRequired('stone_demand')) return;
+        if(btnMain.dataset.mode==='trade')clickBrickTrade();
+        else clickMatchingBrickCards(false);
+      });
+      const btnRefresh=makeBrickBtn('🔄','#2d3748','#1a202c');
+      btnRefresh.title='Обновить кэш вишлиста';
+      btnRefresh.style.width='34px';
+      btnRefresh.style.flex='none';
+      btnRefresh.addEventListener('click',()=>clickMatchingBrickCards(true));
       btnRow.append(btnMain,btnRefresh);body.appendChild(btnRow);
       const cache=loadBrickCache();
       const wishlistUser=suiteGetCurrentUserName();
@@ -3307,6 +3342,7 @@
     }
     async function runRemelt(){
       if(remeltBusy)return;
+      if(warnCardStatsDemandRequired('trade_demand')) return;
       const settings=loadRemeltSettings();
       const target=Math.max(0,parseInt(settings.targetCount,10)||0);
       if(target<=0){remeltNotify('⛔ Укажи количество переплавок больше 0');return;}
@@ -3802,6 +3838,13 @@
     return parseInt(el.textContent.replace(/\D/g,''),10)||0;
   }
   function startAutoOpen() {
+    if(warnCardStatsDemandRequired('packs_demand')) {
+      cfg.autoOpenEnabled=false;
+      saveCfg();
+      if(autoRunInput) autoRunInput.checked=false;
+      setAutoStatus('Нужна статистика карт');
+      return;
+    }
     if(!isAutoOpenAvailable()) {
       cfg.autoOpenEnabled=false; saveCfg();
       if(autoRunInput) autoRunInput.checked=false;
@@ -3856,6 +3899,10 @@
   }
   function autoOpenStep() {
     if(autoBusy || !cfg.autoOpenEnabled) return;
+    if(warnCardStatsDemandRequired('packs_demand')) {
+      stopAutoOpen('Нужна статистика карт');
+      return;
+    }
     if(!isAutoOpenAvailable()) { stopAutoOpen('Модуль выключен'); return; }
 
     const limit=Number(cfg.autoOpenTarget)||0;
@@ -4203,6 +4250,18 @@
     cardValueRow.querySelector('input').addEventListener('change', syncDependents);
     guardRow.querySelector('input').addEventListener('change', syncDependents);
     autoOpenRow.querySelector('input').addEventListener('change', () => {
+      if(
+        cfg.modAutoOpen
+        && location.pathname.includes('/cards/pack')
+        && warnCardStatsDemandRequired('packs_demand')
+      ){
+        cfg.modAutoOpen=false;
+        cfg.autoOpenEnabled=false;
+        saveCfg();
+        autoOpenRow.querySelector('input').checked=false;
+        updateAutoOpenPanel();
+        return;
+      }
       if(cfg.modAutoOpen && !cfg.modBestCard){
         cfg.modBestCard = true;
         saveCfg();
