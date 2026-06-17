@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      2.9
+// @version      2.10
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -8995,7 +8995,7 @@
   let clubWarTimer = null;
   const CLUB_WAR_ROUTE_RE = /\/labyrinth(?:\/|$)/;
   const clubWarDebug = {
-    version: '2.9',
+    version: '2.10',
     enabled: false,
     installed: false,
     path: '',
@@ -9119,23 +9119,6 @@
     return [...document.querySelectorAll('.labyrinth__club-war-club')];
   }
 
-  function renderClubWarBadge(card, type) {
-    card.querySelector('.suite-club-war-badge')?.remove();
-    if (!type) return;
-
-    const label = type === 'ally'
-      ? 'Союзник'
-      : type === 'neutral'
-        ? 'Нейтралитет'
-        : 'Враг';
-
-    const badge = document.createElement('span');
-    badge.className = 'suite-club-war-badge';
-    badge.textContent = label;
-
-    card.appendChild(badge);
-  }
-
   function injectClubWarStyles() {
     if (document.getElementById('suite-club-war-style')) return;
 
@@ -9144,46 +9127,21 @@
     style.textContent = `
       .labyrinth__club-war-club.suite-club-war-ally {
         position:relative !important;
-        padding-right:92px !important;
         border-color:#22c55e !important;
         background:linear-gradient(90deg,rgba(20,83,45,.78),rgba(6,78,59,.48)) !important;
         box-shadow:0 0 0 1px rgba(34,197,94,.28),0 0 18px rgba(34,197,94,.28) !important;
       }
       .labyrinth__club-war-club.suite-club-war-neutral {
         position:relative !important;
-        padding-right:92px !important;
         border-color:#eab308 !important;
         background:linear-gradient(90deg,rgba(113,63,18,.78),rgba(120,53,15,.46)) !important;
         box-shadow:0 0 0 1px rgba(234,179,8,.26),0 0 18px rgba(234,179,8,.22) !important;
       }
       .labyrinth__club-war-club.suite-club-war-enemy {
         position:relative !important;
-        padding-right:92px !important;
         border-color:#ef4444 !important;
         background:linear-gradient(90deg,rgba(127,29,29,.78),rgba(88,28,28,.48)) !important;
         box-shadow:0 0 0 1px rgba(239,68,68,.28),0 0 18px rgba(239,68,68,.28) !important;
-      }
-      .suite-club-war-badge {
-        position:absolute;
-        top:50%;
-        right:10px;
-        transform:translateY(-50%);
-        display:inline-flex;
-        align-items:center;
-        justify-content:center;
-        width:max-content;
-        max-width:78px;
-        padding:2px 7px;
-        border-radius:6px;
-        font-size:10px;
-        font-weight:900;
-        line-height:1.3;
-        letter-spacing:.2px;
-        white-space:nowrap;
-        pointer-events:none;
-        color:#f8fafc;
-        background:rgba(15,23,42,.72);
-        border:1px solid rgba(255,255,255,.16);
       }
     `;
     document.head.appendChild(style);
@@ -9247,12 +9205,12 @@
 
       const type = getClubWarRelationType(card, relations);
       if(type) card.classList.add('suite-club-war-' + type);
-      renderClubWarBadge(card, type);
+      card.querySelector('.suite-club-war-badge')?.remove();
       cards.push({
         id: getClubWarCardId(card),
         type: type || '',
         className: card.className,
-        badge: card.querySelector('.suite-club-war-badge')?.textContent || ''
+        badge: ''
       });
     });
 
