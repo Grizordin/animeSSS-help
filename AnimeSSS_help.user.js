@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      2.15
+// @version      2.17
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -785,6 +785,10 @@
   function addCardValue() {
     document.querySelectorAll('.lootbox__card, .trade__main-item').forEach(card=>{
       if(!card.isConnected)return;
+      if(card.classList.contains('lootbox__card')){
+        if(cfg.modNeon) applyNeonToCard(card);
+        else clearNeonFromCard(card);
+      }
       const res=computeCardValue(card); if(!res)return;
       const {value,total,want,trade,dup,rank,isTradeCard,isHighRank}=res;
       if(cfg.modCardValue){
@@ -1142,27 +1146,64 @@
     card.querySelectorAll('.lock-trade-btn').forEach(btn => btn.style.display='none');
   }
 
-  function handleNeonEntry(entry){
-    if(!cfg.modNeon||!entry.isIntersecting)return;
-    const card=entry.target;
-    if(card.querySelector('i.fal.fa-trophy-alt'))return addNeonToCard(card,'violet');
-    if(card.querySelector('i.fal.fa-lock'))return addNeonToCard(card,'red');
-    if(card.querySelector('i.fal.fa-exchange, i.fal.fa-arrow-right-arrow-left'))return addNeonToCard(card,'blue');
-    if(card.classList.contains('anime-cards__owned-by-user-want'))return addNeonToCard(card,'green');
-    if(card.classList.contains('anime-cards__owned-by-user'))return addNeonToCard(card,'orange');
+  function clearNeonFromCard(card){
+    card.querySelector('.neon-outline-wrapper')?.remove();
+    card.classList.remove('cv-neon-outline','cv-neon-green','cv-neon-orange','cv-neon-violet','cv-neon-red','cv-neon-blue');
+    if(card.style.position === 'relative') card.style.removeProperty('position');
+    if(card.classList.contains('trade__main-item')) card.style.removeProperty('overflow');
+    card.querySelectorAll('.lock-trade-btn').forEach(btn => btn.style.removeProperty('display'));
+  }
+
+  function getNeonCardType(card){
+    if(card.querySelector('i.fal.fa-trophy-alt'))return 'violet';
+    if(card.querySelector('i.fal.fa-lock'))return 'red';
+    if(card.querySelector('i.fal.fa-exchange, i.fal.fa-arrow-right-arrow-left'))return 'blue';
+    if(card.classList.contains('anime-cards__owned-by-user-want'))return 'green';
+    if(card.classList.contains('anime-cards__owned-by-user'))return 'orange';
+    return '';
   }
 
   let neonObserver, neonMutationObserver;
   let neonObservedSet=new WeakSet();
+  let neonStateMap=new WeakMap();
 
+  function isPackCard(card){
+    return card?.classList?.contains('lootbox__card') || !!card?.closest?.('.lootbox__list,.lootbox__row');
+  }
+
+  function applyNeonToCard(card){
+    const type = getNeonCardType(card);
+    const hasExpectedClass = type
+      ? card.classList.contains('cv-neon-' + type)
+      : !card.classList.contains('cv-neon-outline');
+
+    if(neonStateMap.get(card) === type && hasExpectedClass) return;
+
+    clearNeonFromCard(card);
+    neonStateMap.set(card, type);
+    if(type) addNeonToCard(card,type);
+  }
+
+  function handleNeonEntry(entry){
+    if(!cfg.modNeon||!entry.isIntersecting)return;
+    applyNeonToCard(entry.target);
+  }
   function setupNeonObservers(){
     if(!cfg.modNeon)return;
     if(neonObserver)neonObserver.disconnect();
     if(neonMutationObserver)neonMutationObserver.disconnect();
     neonObserver=new IntersectionObserver(entries=>entries.forEach(handleNeonEntry),{threshold:0.1});
-    const scan=()=>{ document.querySelectorAll('.anime-cards__item,.trade__main-item').forEach(card=>{ if(!neonObservedSet.has(card)&&!card.closest('#suite-settings-panel,#cv-stats-panel,#cv-guarantee-block,.__pe-panel,.__ps-panel,.__pc-panel,#__cpt-root,#__aw-cpt-root,#__sb-root')){ neonObserver.observe(card); neonObservedSet.add(card); } }); };
-    neonMutationObserver=new MutationObserver(scan);
-    neonMutationObserver.observe(document.body,{childList:true,subtree:true});
+    const isExcluded=card=>isPackCard(card) || card.closest('#suite-settings-panel,#cv-stats-panel,#cv-guarantee-block,.__pe-panel,.__ps-panel,.__pc-panel,#__cpt-root,#__aw-cpt-root,#__sb-root');
+    const scan=()=>{ document.querySelectorAll('.anime-cards__item,.trade__main-item').forEach(card=>{ if(!neonObservedSet.has(card)&&!isExcluded(card)){ neonObserver.observe(card); neonObservedSet.add(card); } }); };
+    neonMutationObserver=new MutationObserver(mutations=>{
+      scan();
+      mutations.forEach(mutation=>{
+        if(mutation.type !== 'attributes' || mutation.attributeName !== 'class') return;
+        const card = mutation.target.closest?.('.anime-cards__item,.trade__main-item');
+        if(card && !isExcluded(card)) applyNeonToCard(card);
+      });
+    });
+    neonMutationObserver.observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['class']});
     scan();
   }
 
@@ -1172,6 +1213,7 @@
     neonObserver = null;
     neonMutationObserver = null;
     neonObservedSet = new WeakSet();
+    neonStateMap = new WeakMap();
     document.querySelectorAll('.neon-outline-wrapper').forEach(el=>el.remove());
     document.querySelectorAll('.cv-neon-outline,.cv-neon-green,.cv-neon-orange,.cv-neon-violet,.cv-neon-red,.cv-neon-blue').forEach(card=>{
       card.classList.remove('cv-neon-outline','cv-neon-green','cv-neon-orange','cv-neon-violet','cv-neon-red','cv-neon-blue');
