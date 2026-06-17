@@ -1777,20 +1777,31 @@
     cptEnsureRoot();
     const ex=cptMap.get(key);
     if(ex){
-      ex.titleEl.textContent=title; ex.subEl.textContent=sub;
-      clearTimeout(ex.timer); cptAnimBar(ex.bar);
-      ex.timer=setTimeout(()=>cptRemove(key),CPT_LIFE); return;
+      ex.titleEl.textContent=title;
+      ex.subEl.textContent=sub;
+      clearTimeout(ex.timer);
+      cptAnimBar(ex.bar);
+      ex.timer=setTimeout(()=>cptRemove(key),CPT_LIFE);
+      return;
     }
     const el=document.createElement('div');
     el.className=`cpt-toast ${themeCls}`;
-    const head=document.createElement('div'); head.className='cpt-head';
+    const head=document.createElement('div');
+    head.className='cpt-head';
     head.innerHTML=(CPT_ICO[icon]||CPT_ICO.warn);
-    const titleEl=document.createElement('span'); titleEl.textContent=title;
+    const titleEl=document.createElement('span');
+    titleEl.textContent=title;
     head.appendChild(titleEl);
-    const subEl=document.createElement('div'); subEl.className='cpt-sub'; subEl.textContent=sub;
-    const bar=document.createElement('div'); bar.className='cpt-bar';
-    el.appendChild(head); el.appendChild(subEl); el.appendChild(bar);
-    cptRoot.appendChild(el); cptAnimBar(bar);
+    const subEl=document.createElement('div');
+    subEl.className='cpt-sub';
+    subEl.textContent=sub;
+    const bar=document.createElement('div');
+    bar.className='cpt-bar';
+    el.appendChild(head);
+    el.appendChild(subEl);
+    el.appendChild(bar);
+    cptRoot.appendChild(el);
+    cptAnimBar(bar);
     cptMap.set(key,{
       el,
       titleEl,
@@ -3876,7 +3887,11 @@
   function getAutoCardIdentity(card) {
     const img=card.querySelector('img');
     const src=(img?.getAttribute('data-src')||img?.getAttribute('src')||'').replace(/\?.*$/,'');
-    const name=(card.querySelector('.anime-cards__name,.card__name,.lootbox__card-name')?.textContent||img?.alt||'').replace(/\s+/g,' ').trim();
+    const name=(
+      card.querySelector('.anime-cards__name,.card__name,.lootbox__card-name')?.textContent
+      || img?.alt
+      || ''
+    ).replace(/\s+/g,' ').trim();
     return `${src}|${name}`;
   }
   function areSameAutoCards(cards) {
@@ -4006,39 +4021,127 @@
     if(autoPanel || !location.pathname.includes('/cards/pack')) return;
     autoPanel=document.createElement('div');
     autoPanel.id='cv-auto-open-panel';
-    autoPanel.style.cssText='position:fixed;left:14px;top:50%;transform:translateY(-50%);z-index:999;width:230px;background:rgba(12,12,22,.98);color:#e2e8f0;border:1px solid rgba(255,255,255,.09);border-radius:12px;box-shadow:0 8px 40px rgba(0,0,0,.7);font-family:\'Segoe UI\',sans-serif;overflow:hidden;display:none;user-select:none';
+    autoPanel.style.cssText=[
+      'position:fixed',
+      'left:14px',
+      'top:50%',
+      'transform:translateY(-50%)',
+      'z-index:999',
+      'width:230px',
+      'background:rgba(12,12,22,.98)',
+      'color:#e2e8f0',
+      'border:1px solid rgba(255,255,255,.09)',
+      'border-radius:12px',
+      'box-shadow:0 8px 40px rgba(0,0,0,.7)',
+      'font-family:\'Segoe UI\',sans-serif',
+      'overflow:hidden',
+      'display:none',
+      'user-select:none'
+    ].join(';');
 
     const hdr=document.createElement('div');
-    hdr.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:9px 14px;background:linear-gradient(90deg,#164e63,#0891b2);cursor:move';
-    const title=document.createElement('div'); title.textContent='🤖 Автопаки'; title.style.cssText='font-size:13px;font-weight:700';
-    const close=document.createElement('button'); close.type='button'; close.textContent='×'; close.style.cssText='background:none;border:none;color:#64748b;cursor:pointer;font-size:20px;line-height:1;padding:0';
-    close.addEventListener('click',()=>{ stopAutoOpen('Остановлено'); cfg.modAutoOpen=false; saveCfg(); autoPanel.style.display='none'; });
+    hdr.style.cssText=[
+      'display:flex',
+      'align-items:center',
+      'justify-content:space-between',
+      'padding:9px 14px',
+      'background:linear-gradient(90deg,#164e63,#0891b2)',
+      'cursor:move'
+    ].join(';');
+    const title=document.createElement('div');
+    title.textContent='🤖 Автопаки';
+    title.style.cssText='font-size:13px;font-weight:700';
+    const close=document.createElement('button');
+    close.type='button';
+    close.textContent='×';
+    close.style.cssText=[
+      'background:none',
+      'border:none',
+      'color:#64748b',
+      'cursor:pointer',
+      'font-size:20px',
+      'line-height:1',
+      'padding:0'
+    ].join(';');
+    close.addEventListener('click',()=>{
+      stopAutoOpen('Остановлено');
+      cfg.modAutoOpen=false;
+      saveCfg();
+      autoPanel.style.display='none';
+    });
     hdr.append(title,close);
 
-    const body=document.createElement('div'); body.style.cssText='padding:12px 14px;display:flex;flex-direction:column;gap:10px';
-    const runRow=document.createElement('div'); runRow.style.cssText='display:flex;align-items:center;justify-content:space-between';
-    const runLabel=document.createElement('span'); runLabel.textContent='Работа'; runLabel.style.cssText='font-size:12px;color:#cbd5e1';
+    const body=document.createElement('div');
+    body.style.cssText=[
+      'padding:12px 14px',
+      'display:flex',
+      'flex-direction:column',
+      'gap:10px'
+    ].join(';');
+    const runRow=document.createElement('div');
+    runRow.style.cssText=[
+      'display:flex',
+      'align-items:center',
+      'justify-content:space-between'
+    ].join(';');
+    const runLabel=document.createElement('span');
+    runLabel.textContent='Работа';
+    runLabel.style.cssText='font-size:12px;color:#cbd5e1';
     const runToggle=document.createElement('label'); runToggle.className='suite-toggle';
-    autoRunInput=document.createElement('input'); autoRunInput.type='checkbox'; autoRunInput.checked=!!cfg.autoOpenEnabled;
+    autoRunInput=document.createElement('input');
+    autoRunInput.type='checkbox';
+    autoRunInput.checked=!!cfg.autoOpenEnabled;
     const runSlider=document.createElement('span'); runSlider.className='suite-slider';
     runToggle.append(autoRunInput,runSlider); runRow.append(runLabel,runToggle);
 
-    const countWrap=document.createElement('label'); countWrap.style.cssText='display:flex;flex-direction:column;gap:5px;font-size:11px;color:#64748b';
+    const countWrap=document.createElement('label');
+    countWrap.style.cssText=[
+      'display:flex',
+      'flex-direction:column',
+      'gap:5px',
+      'font-size:11px',
+      'color:#64748b'
+    ].join(';');
     countWrap.textContent='Количество паков (0 = без лимита)';
     autoTargetInput=document.createElement('input');
-    autoTargetInput.type='number'; autoTargetInput.min='0'; autoTargetInput.step='1'; autoTargetInput.value=Number(cfg.autoOpenTarget)||0;
-    autoTargetInput.style.cssText='width:100%;box-sizing:border-box;border:1px solid #164e63;border-radius:8px;background:#0f172a;color:#e2e8f0;padding:7px 9px;font-size:13px;outline:none';
+    autoTargetInput.type='number';
+    autoTargetInput.min='0';
+    autoTargetInput.step='1';
+    autoTargetInput.value=Number(cfg.autoOpenTarget)||0;
+    autoTargetInput.style.cssText=[
+      'width:100%',
+      'box-sizing:border-box',
+      'border:1px solid #164e63',
+      'border-radius:8px',
+      'background:#0f172a',
+      'color:#e2e8f0',
+      'padding:7px 9px',
+      'font-size:13px',
+      'outline:none'
+    ].join(';');
     countWrap.appendChild(autoTargetInput);
 
     autoStatusEl=document.createElement('div');
-    autoStatusEl.style.cssText='min-height:18px;padding:7px 8px;border-radius:8px;background:#0f172a;color:#94a3b8;font-size:11px;line-height:1.35;border:1px solid rgba(255,255,255,.06)';
+    autoStatusEl.style.cssText=[
+      'min-height:18px',
+      'padding:7px 8px',
+      'border-radius:8px',
+      'background:#0f172a',
+      'color:#94a3b8',
+      'font-size:11px',
+      'line-height:1.35',
+      'border:1px solid rgba(255,255,255,.06)'
+    ].join(';');
     autoCountEl=document.createElement('div');
     autoCountEl.style.cssText='font-size:11px;color:#67e8f9;text-align:right;font-weight:700';
     body.append(runRow,countWrap,autoStatusEl,autoCountEl);
     autoPanel.append(hdr,body);
     document.body.appendChild(autoPanel);
 
-    autoRunInput.addEventListener('change',()=>{ autoRunInput.checked?startAutoOpen():stopAutoOpen('Остановлено'); });
+    autoRunInput.addEventListener('change',()=>{
+      if(autoRunInput.checked) startAutoOpen();
+      else stopAutoOpen('Остановлено');
+    });
     autoTargetInput.addEventListener('change',()=>{
       cfg.autoOpenTarget=Math.max(0,parseInt(autoTargetInput.value,10)||0);
       autoTargetInput.value=cfg.autoOpenTarget;
@@ -4277,17 +4380,66 @@
   function createSettingsPanel(){
     enforcePremiumSettings();
     const panel=document.createElement('div'); panel.id='suite-settings-panel';
-    panel.style.cssText='display:none;position:fixed;top:50%;right:20px;transform:translateY(-50%);width:320px;max-height:90vh;overflow-y:auto;background:#0a0f1a;border:1px solid #1e293b;border-radius:16px;box-shadow:none;z-index:999;font-family:\'Segoe UI\',sans-serif;color:#e2e8f0;';
+    panel.style.cssText=[
+      'display:none',
+      'position:fixed',
+      'top:50%',
+      'right:20px',
+      'transform:translateY(-50%)',
+      'width:320px',
+      'max-height:90vh',
+      'overflow-y:auto',
+      'background:#0a0f1a',
+      'border:1px solid #1e293b',
+      'border-radius:16px',
+      'box-shadow:none',
+      'z-index:999',
+      "font-family:'Segoe UI',sans-serif",
+      'color:#e2e8f0'
+    ].join(';');
 
-    const hdr=document.createElement('div'); hdr.style.cssText='background:#0f172a;padding:14px 18px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #1e293b;position:sticky;top:0;z-index:1';
+    const hdr=document.createElement('div');
+    hdr.style.cssText=[
+      'background:#0f172a',
+      'padding:14px 18px',
+      'display:flex',
+      'align-items:center',
+      'justify-content:space-between',
+      'border-bottom:1px solid #1e293b',
+      'position:sticky',
+      'top:0',
+      'z-index:1'
+    ].join(';');
     const htitle=document.createElement('div'); htitle.innerHTML='⚙️ <b>Меню настроек</b>'; htitle.style.cssText='font-size:15px;';
-    const closeBtn=document.createElement('button'); closeBtn.textContent='×'; closeBtn.style.cssText='background:none;border:none;color:#475569;cursor:pointer;font-size:24px;line-height:1;padding:0';
+    const closeBtn=document.createElement('button');
+    closeBtn.textContent='×';
+    closeBtn.style.cssText=[
+      'background:none',
+      'border:none',
+      'color:#475569',
+      'cursor:pointer',
+      'font-size:24px',
+      'line-height:1',
+      'padding:0'
+    ].join(';');
     closeBtn.addEventListener('click',()=>panel.style.display='none');
     hdr.append(htitle,closeBtn);
 
     const body=document.createElement('div'); body.style.cssText='padding:14px 18px';
     const crownLegend=document.createElement('div');
-    crownLegend.style.cssText='display:flex;align-items:center;gap:7px;margin-bottom:10px;padding:7px 9px;border:1px solid #1e293b;border-radius:9px;background:#0f172a;color:#cbd5e1;font-size:12px;font-weight:700;';
+    crownLegend.style.cssText=[
+      'display:flex',
+      'align-items:center',
+      'gap:7px',
+      'margin-bottom:10px',
+      'padding:7px 9px',
+      'border:1px solid #1e293b',
+      'border-radius:9px',
+      'background:#0f172a',
+      'color:#cbd5e1',
+      'font-size:12px',
+      'font-weight:700'
+    ].join(';');
     crownLegend.append(makeCrownIcon(18),document.createTextNode('— Возвышение'));
     body.appendChild(crownLegend);
 
@@ -4297,15 +4449,53 @@
       wrap.style.cssText='margin-top:10px';
       const head=document.createElement('button');
       head.type='button';
-      head.style.cssText='width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;background:#0f172a;border:1px solid #1e293b;border-radius:9px;color:#cbd5e1;cursor:pointer;padding:8px 9px;font-family:inherit;text-align:left;transition:background .15s,border-color .15s';
+      head.style.cssText=[
+        'width:100%',
+        'display:flex',
+        'align-items:center',
+        'justify-content:space-between',
+        'gap:10px',
+        'background:#0f172a',
+        'border:1px solid #1e293b',
+        'border-radius:9px',
+        'color:#cbd5e1',
+        'cursor:pointer',
+        'padding:8px 9px',
+        'font-family:inherit',
+        'text-align:left',
+        'transition:background .15s,border-color .15s'
+      ].join(';');
       head.onmouseenter=()=>{ head.style.background='#111c2f'; head.style.borderColor='#334155'; };
       head.onmouseleave=()=>{ head.style.background='#0f172a'; head.style.borderColor='#1e293b'; };
       const label=document.createElement('span');
       label.textContent=title;
-      label.style.cssText='font-size:12px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+      label.style.cssText=[
+        'font-size:12px',
+        'font-weight:800',
+        'letter-spacing:.5px',
+        'text-transform:uppercase',
+        'min-width:0',
+        'overflow:hidden',
+        'text-overflow:ellipsis',
+        'white-space:nowrap'
+      ].join(';');
       if(key==='cardValue')appendCrown(label,14);
       const state=document.createElement('span');
-      state.style.cssText='display:inline-flex;align-items:center;justify-content:center;gap:5px;min-width:86px;border-radius:7px;background:#1e293b;color:#93c5fd;padding:4px 7px;font-size:11px;font-weight:700;line-height:1;flex-shrink:0';
+      state.style.cssText=[
+        'display:inline-flex',
+        'align-items:center',
+        'justify-content:center',
+        'gap:5px',
+        'min-width:86px',
+        'border-radius:7px',
+        'background:#1e293b',
+        'color:#93c5fd',
+        'padding:4px 7px',
+        'font-size:11px',
+        'font-weight:700',
+        'line-height:1',
+        'flex-shrink:0'
+      ].join(';');
       const content=document.createElement('div');
       content.style.cssText='padding-top:4px';
       const setOpen=(open)=>{
