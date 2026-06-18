@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      2.24
+// @version      2.26
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -600,6 +600,7 @@
     }
     body.suite-neon-animation-off .cv-neon-outline::before {
       animation:none !important;
+      background:var(--cv-neon-main) !important;
     }
     .trade__main-item.cv-neon-outline {
       overflow:visible !important;
@@ -658,6 +659,7 @@
       --suite-menu-text-clarity: .75;
       --suite-menu-text-weight: 650;
       --suite-menu-text-shadow-alpha: .65;
+      --suite-menu-text-bg-alpha: .06;
     }
     .lgn__inner.tm-fullbg-ready > video.tm-menu-profilebg {
       position: absolute !important;
@@ -717,7 +719,13 @@
       font-weight: var(--suite-menu-text-weight) !important;
       text-shadow:
         0 1px 2px rgba(0,0,0,var(--suite-menu-text-shadow-alpha)),
-        0 0 calc(3px + 10px * var(--suite-menu-text-clarity)) rgba(0,0,0,calc(var(--suite-menu-text-shadow-alpha) * .75)) !important;
+        0 0 calc(5px + 18px * var(--suite-menu-text-clarity)) rgba(0,0,0,var(--suite-menu-text-shadow-alpha)),
+        0 0 calc(2px + 8px * var(--suite-menu-text-clarity)) rgba(255,255,255,calc(var(--suite-menu-text-clarity) * .18)) !important;
+    }
+    .lgn__inner.tm-fullbg-ready .lgn__menus a,
+    .lgn__inner.tm-fullbg-ready .lgn__menus .lgn__menu-item {
+      background: rgba(0,0,0,var(--suite-menu-text-bg-alpha)) !important;
+      border-radius: 8px !important;
     }
     .lgn__inner.tm-fullbg-ready .lgn__caption::after {
       opacity: calc(.35 + var(--suite-menu-text-clarity) * .55) !important;
@@ -1552,12 +1560,13 @@
 
   function applyMenuBgTuning(wrapper) {
     if(!wrapper) return;
-    const dim = Math.min(0.8, Math.max(0, Number(cfg.menuBgDim ?? DEFAULT_SETTINGS.menuBgDim)));
+    const dim = Math.min(0.6, Math.max(0, Number(cfg.menuBgDim ?? DEFAULT_SETTINGS.menuBgDim)));
     const clarity = Math.min(1, Math.max(0, Number(cfg.menuTextClarity ?? DEFAULT_SETTINGS.menuTextClarity)));
     wrapper.style.setProperty('--suite-menu-bg-dim', dim.toFixed(2));
     wrapper.style.setProperty('--suite-menu-text-clarity', clarity.toFixed(2));
-    wrapper.style.setProperty('--suite-menu-text-weight', String(Math.round(500 + clarity * 300)));
-    wrapper.style.setProperty('--suite-menu-text-shadow-alpha', (0.35 + clarity * 0.45).toFixed(2));
+    wrapper.style.setProperty('--suite-menu-text-weight', String(Math.round(520 + clarity * 380)));
+    wrapper.style.setProperty('--suite-menu-text-shadow-alpha', (0.2 + clarity * 0.75).toFixed(2));
+    wrapper.style.setProperty('--suite-menu-text-bg-alpha', (clarity * 0.18).toFixed(2));
   }
 
   function applyMenuBackground(){
@@ -4569,7 +4578,7 @@
     slider.min=String(min);
     slider.max=String(max);
     slider.step=String(step);
-    slider.value=Number(cfg[key] ?? DEFAULT_SETTINGS[key]);
+    slider.value=Math.min(max, Math.max(min, Number(cfg[key] ?? DEFAULT_SETTINGS[key])));
     const render=()=>{
       const value=Number(slider.value);
       cfg[key]=Number(value.toFixed(2));
@@ -4988,7 +4997,7 @@
         applyMenuBackground();
       }
     };
-    const menuDimRow = makePercentSliderRow('menuBgDim', 'Затемнение фона', 0, 0.8, 0.02, refreshMenuBgTuning);
+    const menuDimRow = makePercentSliderRow('menuBgDim', 'Затемнение фона', 0, 0.6, 0.02, refreshMenuBgTuning);
     const menuTextRow = makePercentSliderRow('menuTextClarity', 'Четкость текста', 0, 1, 0.02, refreshMenuBgTuning);
     const syncMenuBgRows = () => {
       [menuDimRow, menuTextRow].forEach(row=>{
