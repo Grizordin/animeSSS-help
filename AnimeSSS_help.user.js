@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      2.26
+// @version      2.27
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -659,7 +659,7 @@
       --suite-menu-text-clarity: .75;
       --suite-menu-text-weight: 650;
       --suite-menu-text-shadow-alpha: .65;
-      --suite-menu-text-bg-alpha: .06;
+      --suite-menu-text-alpha: .95;
     }
     .lgn__inner.tm-fullbg-ready > video.tm-menu-profilebg {
       position: absolute !important;
@@ -714,18 +714,15 @@
     .lgn__inner.tm-fullbg-ready .lgn__menus .lgn__menu-item,
     .lgn__inner.tm-fullbg-ready .lgn__user-name,
     .lgn__inner.tm-fullbg-ready .lgn__name span,
-    .lgn__inner.tm-fullbg-ready .lgn__caption {
-      color: #fff !important;
+    .lgn__inner.tm-fullbg-ready .lgn__caption,
+    .lgn__inner.tm-fullbg-ready .lgn__ava-holder a,
+    .lgn__inner.tm-fullbg-ready .lgn__ava-holder button,
+    .lgn__inner.tm-fullbg-ready .lgn__ava-holder .btn {
+      color: rgba(255,255,255,var(--suite-menu-text-alpha)) !important;
       font-weight: var(--suite-menu-text-weight) !important;
       text-shadow:
-        0 1px 2px rgba(0,0,0,var(--suite-menu-text-shadow-alpha)),
-        0 0 calc(5px + 18px * var(--suite-menu-text-clarity)) rgba(0,0,0,var(--suite-menu-text-shadow-alpha)),
-        0 0 calc(2px + 8px * var(--suite-menu-text-clarity)) rgba(255,255,255,calc(var(--suite-menu-text-clarity) * .18)) !important;
-    }
-    .lgn__inner.tm-fullbg-ready .lgn__menus a,
-    .lgn__inner.tm-fullbg-ready .lgn__menus .lgn__menu-item {
-      background: rgba(0,0,0,var(--suite-menu-text-bg-alpha)) !important;
-      border-radius: 8px !important;
+        0 1px calc(1px + 2px * var(--suite-menu-text-clarity)) rgba(0,0,0,var(--suite-menu-text-shadow-alpha)),
+        0 0 calc(2px + 10px * var(--suite-menu-text-clarity)) rgba(0,0,0,var(--suite-menu-text-shadow-alpha)) !important;
     }
     .lgn__inner.tm-fullbg-ready .lgn__caption::after {
       opacity: calc(.35 + var(--suite-menu-text-clarity) * .55) !important;
@@ -733,7 +730,7 @@
     .lgn__inner.tm-fullbg-ready .lgn__menus a:hover,
     .lgn__inner.tm-fullbg-ready .lgn__menu-list li:hover,
     .lgn__inner.tm-fullbg-ready .lgn__menu li a:hover {
-      background: rgba(255,255,255,calc(.06 + var(--suite-menu-text-clarity) * .08)) !important;
+      background: rgba(255,255,255,.08) !important;
     }
     .lgn.tm-fullbg-host,
     .lgn.tm-fullbg-host .lgn__inner {
@@ -1564,9 +1561,9 @@
     const clarity = Math.min(1, Math.max(0, Number(cfg.menuTextClarity ?? DEFAULT_SETTINGS.menuTextClarity)));
     wrapper.style.setProperty('--suite-menu-bg-dim', dim.toFixed(2));
     wrapper.style.setProperty('--suite-menu-text-clarity', clarity.toFixed(2));
-    wrapper.style.setProperty('--suite-menu-text-weight', String(Math.round(520 + clarity * 380)));
-    wrapper.style.setProperty('--suite-menu-text-shadow-alpha', (0.2 + clarity * 0.75).toFixed(2));
-    wrapper.style.setProperty('--suite-menu-text-bg-alpha', (clarity * 0.18).toFixed(2));
+    wrapper.style.setProperty('--suite-menu-text-weight', String(Math.round(420 + clarity * 480)));
+    wrapper.style.setProperty('--suite-menu-text-shadow-alpha', (0.08 + clarity * 0.9).toFixed(2));
+    wrapper.style.setProperty('--suite-menu-text-alpha', (0.58 + clarity * 0.42).toFixed(2));
   }
 
   function applyMenuBackground(){
