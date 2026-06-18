@@ -210,6 +210,16 @@
     : 'unknown';
   const SUITE_REMOTE_VERSION_URL = 'https://raw.githubusercontent.com/Grizordin/animeSSS-help/main/version.json';
   const SUITE_SCRIPT_DOWNLOAD_URL = 'https://raw.githubusercontent.com/Grizordin/animeSSS-help/main/AnimeSSS_help.user.js';
+  const SUITE_VERSION_CHECK_INTERVAL_MS = 60 * 60 * 1000;
+  const suiteUpdateState = {
+    remoteVersion: '',
+    hasUpdate: false,
+    checked: false,
+    checking: false,
+    error: false,
+    timerId: null,
+    listeners: new Set()
+  };
 
   function parseSuiteVersionText(text) {
     const raw = String(text || '').trim();
@@ -238,6 +248,59 @@
     const res = await fetch(`${SUITE_REMOTE_VERSION_URL}?t=${Date.now()}`, { cache:'no-store' });
     if(!res.ok) throw new Error(`HTTP ${res.status}`);
     return parseSuiteVersionText(await res.text());
+  }
+
+  function getSuiteUpdateStateSnapshot() {
+    return {
+      remoteVersion: suiteUpdateState.remoteVersion,
+      hasUpdate: suiteUpdateState.hasUpdate,
+      checked: suiteUpdateState.checked,
+      checking: suiteUpdateState.checking,
+      error: suiteUpdateState.error
+    };
+  }
+
+  function notifySuiteUpdateState() {
+    const state = getSuiteUpdateStateSnapshot();
+    suiteUpdateState.listeners.forEach(listener=>{
+      try { listener(state); } catch(e) {}
+    });
+  }
+
+  function subscribeSuiteUpdateState(listener) {
+    if(typeof listener !== 'function') return ()=>{};
+    suiteUpdateState.listeners.add(listener);
+    listener(getSuiteUpdateStateSnapshot());
+    return ()=>suiteUpdateState.listeners.delete(listener);
+  }
+
+  async function checkSuiteRemoteVersion() {
+    if(suiteUpdateState.checking) return;
+    suiteUpdateState.checking = true;
+    notifySuiteUpdateState();
+
+    try {
+      const remoteVersion = await fetchSuiteRemoteVersion();
+      suiteUpdateState.remoteVersion = remoteVersion;
+      suiteUpdateState.hasUpdate = !!remoteVersion &&
+        compareSuiteVersions(remoteVersion, SUITE_ACCESS_VERSION) > 0;
+      suiteUpdateState.checked = true;
+      suiteUpdateState.error = false;
+    } catch(e) {
+      suiteUpdateState.checked = true;
+      suiteUpdateState.error = true;
+    } finally {
+      suiteUpdateState.checking = false;
+      notifySuiteUpdateState();
+    }
+  }
+
+  function startSuiteVersionChecker() {
+    if(suiteUpdateState.timerId) return;
+    suiteUpdateState.timerId = setInterval(
+      checkSuiteRemoteVersion,
+      SUITE_VERSION_CHECK_INTERVAL_MS
+    );
   }
 
   function suiteGetMyClubId() {
@@ -381,6 +444,26 @@
 
   const globalStyle = document.createElement('style');
   globalStyle.textContent = `
+    #suite-settings-btn.suite-update-available {
+      border-color:#38bdf8 !important;
+      background:#082f49 !important;
+      color:#e0f2fe !important;
+      box-shadow:
+        0 0 0 1px rgba(56,189,248,.46),
+        0 0 18px rgba(56,189,248,.5),
+        0 0 34px rgba(14,165,233,.28) !important;
+      animation:suite-update-pulse 1.4s ease-in-out infinite;
+    }
+    @keyframes suite-update-pulse {
+      0%,100% {
+        transform:scale(1);
+        filter:brightness(1);
+      }
+      50% {
+        transform:scale(1.08);
+        filter:brightness(1.18);
+      }
+    }
     /* Бейдж лучшей карты — внизу карты */
     .cv-best-badge {
       position:absolute;bottom:42px;left:50%;transform:translateX(-50%);z-index:999;
@@ -4594,6 +4677,14 @@
     }
   });
 
+  function applySuiteSettingsButtonUpdateState(btn, state) {
+    if(!btn) return;
+    btn.classList.toggle('suite-update-available', !!state.hasUpdate);
+    btn.title = state.hasUpdate && state.remoteVersion
+      ? `Доступна версия ${state.remoteVersion}`
+      : 'Настройки ANIMESSS SUITE';
+  }
+
   function createSettingsPanel(){
     enforcePremiumSettings();
     const panel=document.createElement('div'); panel.id='suite-settings-panel';
@@ -4682,16 +4773,16 @@
     ].join(';');
     closeBtn.addEventListener('click',()=>panel.style.display='none');
     hdr.append(titleWrap,closeBtn);
-    fetchSuiteRemoteVersion()
-      .then(remoteVersion=>{
-        if(!remoteVersion) return;
-        versionBadge.title=`Текущая версия: ${SUITE_ACCESS_VERSION}. Версия в репозитории: ${remoteVersion}`;
-        if(compareSuiteVersions(remoteVersion, SUITE_ACCESS_VERSION) > 0) {
-          updateBtn.style.display='inline-flex';
-          updateBtn.title=`Доступна версия ${remoteVersion}`;
-        }
-      })
-      .catch(()=>{ versionBadge.title=`Текущая версия: ${SUITE_ACCESS_VERSION}`; });
+    subscribeSuiteUpdateState(state=>{
+      updateBtn.style.display=state.hasUpdate ? 'inline-flex' : 'none';
+      versionBadge.title=`Текущая версия: ${SUITE_ACCESS_VERSION}`;
+      if(state.remoteVersion) {
+        versionBadge.title += `. Версия в репозитории: ${state.remoteVersion}`;
+      }
+      if(state.hasUpdate) {
+        updateBtn.title=`Доступна версия ${state.remoteVersion}`;
+      }
+    });
 
     const body=document.createElement('div'); body.style.cssText='padding:14px 18px';
     const crownLegend=document.createElement('div');
@@ -5009,9 +5100,15 @@
     btn.style.cssText='position:fixed;bottom:20px;left:20px;z-index:999;width:44px;height:44px;border-radius:12px;border:1px solid #1e293b;background:#0a0f1a;color:#e2e8f0;font-size:20px;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.5);transition:background .15s;display:flex;align-items:center;justify-content:center;';
     btn.onmouseover=()=>btn.style.background='#1e293b'; btn.onmouseout=()=>btn.style.background='#0a0f1a';
     // Восстанавливаем сохранённую позицию кнопки
-    if(cfg.settingsBtnLeft!==null)  { btn.style.left=cfg.settingsBtnLeft+'px'; btn.style.bottom=(cfg.settingsBtnBottom||20)+'px'; btn.style.right='auto'; }
+    if(cfg.settingsBtnLeft!==null)  {
+      btn.style.left=cfg.settingsBtnLeft+'px';
+      btn.style.bottom=(cfg.settingsBtnBottom||20)+'px';
+      btn.style.right='auto';
+    }
     document.body.appendChild(btn);
     const panel=createSettingsPanel();
+    subscribeSuiteUpdateState(state=>applySuiteSettingsButtonUpdateState(btn, state));
+    startSuiteVersionChecker();
 
     // Перетаскивание кнопки настроек
     let btnDragging=false, btnMoved=false, bx, by, bLeft, bBottom;
