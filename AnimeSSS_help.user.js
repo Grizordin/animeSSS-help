@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      2.28
+// @version      2.29
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -1723,8 +1723,11 @@
     {s:'Вы удалены из списка',                                    icon:'user',   title:'Список',      theme:'neon-pink' },
     {s:'Вы добавлены в список',                                   icon:'user',   title:'Список',      theme:'neon-green'},
     {s:'Пользователь удалён из игнора',                           icon:'user',   title:'Игнор',       theme:'emerald'   },
+    {s:'Вы не можете добавить в игнор команду сайта',              icon:'shield', title:'Игнор',       theme:'neon-amber'},
     {r:/Пользователь .+ успешно добавлен в друзья/i,              icon:'user',   title:'Друзья',      theme:'neon-green'},
     {s:'Комментарий удалён',                                      icon:'check',  title:'Готово',      theme:'emerald'   },
+    {s:'Выберите сообщения для удаления',                         icon:'warn',   title:'Сообщения',   theme:'neon-amber'},
+    {s:'История очищена',                                         icon:'check',  title:'Сообщения',   theme:'emerald'   },
     {s:'Сообщение не найдено',                                    icon:'warn',   title:'Внимание',    theme:'neon-amber'},
     {s:'Ваш голос учтён',                                         icon:'check',  title:'Голос',       theme:'emerald'   },
     {s:'Вы не можете голосовать за карту, которую сами добавили на сайт', icon:'warn', title:'Голос', theme:'neon-amber'},
