@@ -42,13 +42,17 @@
   // ============================================================
 
   const SETTINGS_KEY = 'suite_settings_v1';
+  const PREMIUM_DESIRED_SETTINGS_KEY = 'suite_premium_desired_settings_v1';
   const DEFAULT_SETTINGS = {
     // Модули вкл/выкл
     modCardValue:     true,   // ценность карт
     modHotkeys:       true,   // горячие клавиши
     modStats:         true,   // статистика паков
     modNeon:          true,   // неоновые обводки
+    modNeonAnimation: true,   // анимация неоновых обводок
     modMenuBg:        true,   // фон меню
+    menuBgDim:        0.42,   // затемнение фона меню
+    menuTextClarity:  0.75,   // четкость текста меню
     modProfileBtns:   true,   // кнопки "Открытые S" и "Желаемые"
     modEnlightenment: true,   // просветление
     modVoteCardsToggle:true,  // скрытие голосования
@@ -127,22 +131,68 @@
     return isPremiumRequiredSetting(key) && !hasActivePremium();
   }
 
-  function enforcePremiumSettings() {
-    if(hasActivePremium()) return false;
+  function getPremiumDesiredSettings() {
+    return gmGet(PREMIUM_DESIRED_SETTINGS_KEY, null);
+  }
+
+  function savePremiumDesiredSettings(source = cfg) {
+    const desired = {};
+    PREMIUM_REQUIRED_SETTINGS.forEach(key=>{
+      desired[key] = !!source[key];
+    });
+    desired.autoOpenEnabled = !!source.autoOpenEnabled;
+    gmSet(PREMIUM_DESIRED_SETTINGS_KEY, desired);
+  }
+
+  function restorePremiumDesiredSettings() {
+    if(!hasActivePremium()) return false;
+
+    const desired = getPremiumDesiredSettings();
+    if(!desired || typeof desired !== 'object') return false;
 
     let changed = false;
     PREMIUM_REQUIRED_SETTINGS.forEach(key=>{
+      if(Object.prototype.hasOwnProperty.call(desired, key) && cfg[key] !== !!desired[key]) {
+        cfg[key] = !!desired[key];
+        changed = true;
+      }
+    });
+
+    if(Object.prototype.hasOwnProperty.call(desired, 'autoOpenEnabled') && cfg.autoOpenEnabled !== !!desired.autoOpenEnabled) {
+      cfg.autoOpenEnabled = !!desired.autoOpenEnabled;
+      changed = true;
+    }
+
+    if(changed) saveCfg();
+    return changed;
+  }
+
+  function enforcePremiumSettings() {
+    if(hasActivePremium()) return restorePremiumDesiredSettings();
+
+    let changed = false;
+    let shouldSaveDesired = false;
+    const desiredBeforeLock = {};
+    PREMIUM_REQUIRED_SETTINGS.forEach(key=>{
+      desiredBeforeLock[key] = !!cfg[key];
+    });
+    desiredBeforeLock.autoOpenEnabled = !!cfg.autoOpenEnabled;
+
+    PREMIUM_REQUIRED_SETTINGS.forEach(key=>{
       if(cfg[key]) {
+        shouldSaveDesired = true;
         cfg[key] = false;
         changed = true;
       }
     });
 
     if(cfg.autoOpenEnabled) {
+      shouldSaveDesired = true;
       cfg.autoOpenEnabled = false;
       changed = true;
     }
 
+    if(shouldSaveDesired && !getPremiumDesiredSettings()) savePremiumDesiredSettings(desiredBeforeLock);
     if(changed) saveCfg();
     return changed;
   }
@@ -158,6 +208,37 @@
   typeof GM_info !== 'undefined' && GM_info?.script?.version
     ? GM_info.script.version
     : 'unknown';
+  const SUITE_REMOTE_VERSION_URL = 'https://raw.githubusercontent.com/Grizordin/animeSSS-help/main/version.json';
+  const SUITE_SCRIPT_DOWNLOAD_URL = 'https://raw.githubusercontent.com/Grizordin/animeSSS-help/main/AnimeSSS_help.user.js';
+
+  function parseSuiteVersionText(text) {
+    const raw = String(text || '').trim();
+    if(!raw) return '';
+
+    try {
+      const data = JSON.parse(raw);
+      return String(data.version || '').trim();
+    } catch(e) {
+      return raw.replace(/^v/i, '').trim();
+    }
+  }
+
+  function compareSuiteVersions(a, b) {
+    const left = String(a || '').replace(/^v/i, '').split('.').map(n=>parseInt(n,10)||0);
+    const right = String(b || '').replace(/^v/i, '').split('.').map(n=>parseInt(n,10)||0);
+    const len = Math.max(left.length, right.length);
+    for(let i=0;i<len;i++){
+      const diff = (left[i] || 0) - (right[i] || 0);
+      if(diff !== 0) return diff > 0 ? 1 : -1;
+    }
+    return 0;
+  }
+
+  async function fetchSuiteRemoteVersion() {
+    const res = await fetch(`${SUITE_REMOTE_VERSION_URL}?t=${Date.now()}`, { cache:'no-store' });
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    return parseSuiteVersionText(await res.text());
+  }
 
   function suiteGetMyClubId() {
     const links = [...document.querySelectorAll('a[href*="/clubs/"]')];
@@ -434,6 +515,9 @@
       -webkit-mask-composite:xor;
       mask-composite:exclude;
     }
+    body.suite-neon-animation-off .cv-neon-outline::before {
+      animation:none !important;
+    }
     .trade__main-item.cv-neon-outline {
       overflow:visible !important;
       border-width:1px !important;
@@ -487,6 +571,10 @@
     .lgn__inner.tm-fullbg-ready {
       position: relative !important;
       overflow: hidden !important;
+      --suite-menu-bg-dim: .42;
+      --suite-menu-text-clarity: .75;
+      --suite-menu-text-weight: 650;
+      --suite-menu-text-shadow-alpha: .65;
     }
     .lgn__inner.tm-fullbg-ready > video.tm-menu-profilebg {
       position: absolute !important;
@@ -504,7 +592,22 @@
     }
     .lgn__inner.tm-fullbg-ready > *:not(video.tm-menu-profilebg) {
       position: relative !important;
+      z-index: 3 !important;
+    }
+    .lgn__inner.tm-fullbg-ready::before,
+    .lgn__inner.tm-fullbg-ready::after {
+      content: '' !important;
+      position: absolute !important;
+      inset: 0 !important;
+      pointer-events: none !important;
+    }
+    .lgn__inner.tm-fullbg-ready::before {
       z-index: 1 !important;
+      background: rgba(0,0,0,var(--suite-menu-bg-dim)) !important;
+    }
+    .lgn__inner.tm-fullbg-ready::after {
+      z-index: 2 !important;
+      background: linear-gradient(90deg, rgba(0,0,0,calc(var(--suite-menu-bg-dim) * .25)) 0%, rgba(0,0,0,calc(var(--suite-menu-bg-dim) * .85)) 100%) !important;
     }
     .lgn__inner.tm-fullbg-ready .lgn__ava-holder,
     .lgn__inner.tm-fullbg-ready .lgn__menus {
@@ -516,6 +619,25 @@
     .lgn__inner.tm-fullbg-ready .lgn__menus::after {
       display: none !important;
       content: none !important;
+    }
+    .lgn__inner.tm-fullbg-ready .lgn__menus a,
+    .lgn__inner.tm-fullbg-ready .lgn__menus .lgn__menu-item,
+    .lgn__inner.tm-fullbg-ready .lgn__user-name,
+    .lgn__inner.tm-fullbg-ready .lgn__name span,
+    .lgn__inner.tm-fullbg-ready .lgn__caption {
+      color: #fff !important;
+      font-weight: var(--suite-menu-text-weight) !important;
+      text-shadow:
+        0 1px 2px rgba(0,0,0,var(--suite-menu-text-shadow-alpha)),
+        0 0 calc(3px + 10px * var(--suite-menu-text-clarity)) rgba(0,0,0,calc(var(--suite-menu-text-shadow-alpha) * .75)) !important;
+    }
+    .lgn__inner.tm-fullbg-ready .lgn__caption::after {
+      opacity: calc(.35 + var(--suite-menu-text-clarity) * .55) !important;
+    }
+    .lgn__inner.tm-fullbg-ready .lgn__menus a:hover,
+    .lgn__inner.tm-fullbg-ready .lgn__menu-list li:hover,
+    .lgn__inner.tm-fullbg-ready .lgn__menu li a:hover {
+      background: rgba(255,255,255,calc(.06 + var(--suite-menu-text-clarity) * .08)) !important;
     }
     .lgn.tm-fullbg-host,
     .lgn.tm-fullbg-host .lgn__inner {
@@ -1216,6 +1338,10 @@
     card.querySelectorAll('.lock-trade-btn').forEach(btn => btn.style.display='none');
   }
 
+  function applyNeonAnimationSetting() {
+    document.body?.classList.toggle('suite-neon-animation-off', !cfg.modNeonAnimation);
+  }
+
   function clearNeonFromCard(card){
     card.querySelector('.neon-outline-wrapper')?.remove();
     card.classList.remove(
@@ -1336,11 +1462,22 @@
   //  ФОН МЕНЮ
   // ============================================================
 
+  function applyMenuBgTuning(wrapper) {
+    if(!wrapper) return;
+    const dim = Math.min(0.8, Math.max(0, Number(cfg.menuBgDim ?? DEFAULT_SETTINGS.menuBgDim)));
+    const clarity = Math.min(1, Math.max(0, Number(cfg.menuTextClarity ?? DEFAULT_SETTINGS.menuTextClarity)));
+    wrapper.style.setProperty('--suite-menu-bg-dim', dim.toFixed(2));
+    wrapper.style.setProperty('--suite-menu-text-clarity', clarity.toFixed(2));
+    wrapper.style.setProperty('--suite-menu-text-weight', String(Math.round(500 + clarity * 300)));
+    wrapper.style.setProperty('--suite-menu-text-shadow-alpha', (0.35 + clarity * 0.45).toFixed(2));
+  }
+
   function applyMenuBackground(){
     if(!cfg.modMenuBg)return;
     const modal=document.querySelector('.lgn.is-active, .lgn.done, .lgn'); if(!modal)return;
     const wrapper=modal.querySelector('.lgn__inner'); if(!wrapper)return;
     const menuVideo=modal.querySelector('.lgn__ava-holder > video#profilebg'); if(!menuVideo)return;
+    applyMenuBgTuning(wrapper);
     if(menuVideo.classList.contains('tm-menu-profilebg')&&wrapper.classList.contains('tm-fullbg-ready'))return;
     if(menuVideo.parentElement!==wrapper)wrapper.prepend(menuVideo);
     menuVideo.classList.add('tm-menu-profilebg'); modal.classList.add('tm-fullbg-host'); wrapper.classList.add('tm-fullbg-ready');
@@ -4141,6 +4278,7 @@
     autoRunInput.addEventListener('change',()=>{
       if(autoRunInput.checked) startAutoOpen();
       else stopAutoOpen('Остановлено');
+      if(hasActivePremium()) savePremiumDesiredSettings();
     });
     autoTargetInput.addEventListener('change',()=>{
       cfg.autoOpenTarget=Math.max(0,parseInt(autoTargetInput.value,10)||0);
@@ -4232,6 +4370,7 @@
       }
       cfg[key]=input.checked;
       saveCfg();
+      if(hasActivePremium() && isPremiumRequiredSetting(key)) savePremiumDesiredSettings();
       document.dispatchEvent(new CustomEvent('suite-setting-change',{
         detail:{ key, value:input.checked }
       }));
@@ -4283,6 +4422,36 @@
     const slider=document.createElement('input'); slider.type='range'; slider.min=min; slider.max=max; slider.step=step; slider.value=cfg[key];
     slider.addEventListener('input',()=>{ cfg[key]=Number(slider.value); val.textContent=cfg[key]; saveCfg(); });
     top.append(lbl,val); row.append(top,slider); return row;
+  }
+
+  function makePercentSliderRow(key, label, min, max, step, onChange){
+    const row=document.createElement('div');
+    row.style.cssText='padding:8px 0 8px 14px;border-bottom:1px solid #0f172a;border-left:2px solid #1e3a5f;margin-left:6px';
+    const top=document.createElement('div');
+    top.style.cssText='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;gap:10px';
+    const lbl=document.createElement('span');
+    lbl.textContent=label;
+    lbl.style.cssText='font-size:13px;color:#cbd5e1;min-width:0;';
+    const val=document.createElement('span');
+    val.style.cssText='font-size:13px;color:#0ea5e9;font-weight:800;white-space:nowrap';
+    const slider=document.createElement('input');
+    slider.type='range';
+    slider.min=String(min);
+    slider.max=String(max);
+    slider.step=String(step);
+    slider.value=Number(cfg[key] ?? DEFAULT_SETTINGS[key]);
+    const render=()=>{
+      const value=Number(slider.value);
+      cfg[key]=Number(value.toFixed(2));
+      val.textContent=Math.round(cfg[key]*100)+'%';
+      saveCfg();
+      if(typeof onChange==='function') onChange();
+    };
+    slider.addEventListener('input',render);
+    val.textContent=Math.round(Number(slider.value)*100)+'%';
+    top.append(lbl,val);
+    row.append(top,slider);
+    return row;
   }
 
   function makeCustomPushScaleRow(){
@@ -4350,6 +4519,7 @@
     if(key==='modGuarantee'){ insertGuaranteeInfo(); return; }
     if(key==='modOnlyPack20'){ applyOnlyPack20(); return; }
     if(key==='modNeon'){ if(cfg.modNeon) setupNeonObservers(); else cleanupNeonUi(); return; }
+    if(key==='modNeonAnimation'){ applyNeonAnimationSetting(); return; }
     if(key==='modMenuBg'){ if(cfg.modMenuBg) applyMenuBackground(); else cleanupMenuBackground(); return; }
     if(key==='modProfileBtns'){ if(cfg.modProfileBtns) addProfileButtons(); else cleanupProfileButtons(); return; }
     if(key==='modEnlightenment'){ if(cfg.modEnlightenment) applyEnlightenment(); else cleanupEnlightenment(); return; }
@@ -4410,7 +4580,48 @@
       'top:0',
       'z-index:1'
     ].join(';');
-    const htitle=document.createElement('div'); htitle.innerHTML='⚙️ <b>Меню настроек</b>'; htitle.style.cssText='font-size:15px;';
+    const titleWrap=document.createElement('div');
+    titleWrap.style.cssText='display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap;';
+    const htitle=document.createElement('div');
+    htitle.innerHTML='⚙️ <b>Меню настроек</b>';
+    htitle.style.cssText='font-size:15px;';
+    const versionBadge=document.createElement('span');
+    versionBadge.textContent=`v${SUITE_ACCESS_VERSION}`;
+    versionBadge.style.cssText=[
+      'display:inline-flex',
+      'align-items:center',
+      'height:20px',
+      'padding:0 7px',
+      'border-radius:999px',
+      'background:#111c2f',
+      'border:1px solid #1e293b',
+      'color:#93c5fd',
+      'font-size:11px',
+      'font-weight:800',
+      'line-height:1'
+    ].join(';');
+    const updateBtn=document.createElement('button');
+    updateBtn.type='button';
+    updateBtn.textContent='Обновить';
+    updateBtn.style.cssText=[
+      'display:none',
+      'height:22px',
+      'padding:0 8px',
+      'border-radius:7px',
+      'border:1px solid #0ea5e9',
+      'background:#082f49',
+      'color:#e0f2fe',
+      'font-size:11px',
+      'font-weight:800',
+      'cursor:pointer',
+      'font-family:inherit'
+    ].join(';');
+    updateBtn.addEventListener('click',e=>{
+      e.preventDefault();
+      e.stopPropagation();
+      window.open(SUITE_SCRIPT_DOWNLOAD_URL, '_blank', 'noopener,noreferrer');
+    });
+    titleWrap.append(htitle,versionBadge,updateBtn);
     const closeBtn=document.createElement('button');
     closeBtn.textContent='×';
     closeBtn.style.cssText=[
@@ -4423,7 +4634,17 @@
       'padding:0'
     ].join(';');
     closeBtn.addEventListener('click',()=>panel.style.display='none');
-    hdr.append(htitle,closeBtn);
+    hdr.append(titleWrap,closeBtn);
+    fetchSuiteRemoteVersion()
+      .then(remoteVersion=>{
+        if(!remoteVersion) return;
+        versionBadge.title=`Текущая версия: ${SUITE_ACCESS_VERSION}. Версия в репозитории: ${remoteVersion}`;
+        if(compareSuiteVersions(remoteVersion, SUITE_ACCESS_VERSION) > 0) {
+          updateBtn.style.display='inline-flex';
+          updateBtn.title=`Доступна версия ${remoteVersion}`;
+        }
+      })
+      .catch(()=>{ versionBadge.title=`Текущая версия: ${SUITE_ACCESS_VERSION}`; });
 
     const body=document.createElement('div'); body.style.cssText='padding:14px 18px';
     const crownLegend=document.createElement('div');
@@ -4608,8 +4829,38 @@
 
     // ── UI И ВИЗУАЛ ───────────────────────────────────────────
     const uiSection = makeSection('ui','🎨 UI и визуал');
-    uiSection.appendChild(makeToggle('modNeon',          '✨ Неоновые обводки'));
-    uiSection.appendChild(makeToggle('modMenuBg',        '🎬 Фон меню'));
+    const neonRow = makeToggle('modNeon', '✨ Неоновые обводки');
+    const neonAnimationRow = makeToggle('modNeonAnimation', '↻ Анимация неоновой обводки');
+    neonAnimationRow.style.paddingLeft = '14px';
+    neonAnimationRow.style.borderLeft = '2px solid #1e3a5f';
+    neonAnimationRow.style.marginLeft = '6px';
+    const syncNeonAnimationRow = () => {
+      neonAnimationRow.style.opacity = cfg.modNeon ? '1' : '0.35';
+      neonAnimationRow.style.pointerEvents = cfg.modNeon ? '' : 'none';
+      neonAnimationRow.querySelector('input').checked = !!cfg.modNeonAnimation;
+    };
+    neonRow.querySelector('input').addEventListener('change', syncNeonAnimationRow);
+    syncNeonAnimationRow();
+    uiSection.append(neonRow, neonAnimationRow);
+    const menuBgRow = makeToggle('modMenuBg', '🎬 Фон меню');
+    const refreshMenuBgTuning = () => {
+      const wrapper = document.querySelector('.lgn.is-active .lgn__inner, .lgn.done .lgn__inner, .lgn .lgn__inner');
+      if(cfg.modMenuBg) {
+        applyMenuBgTuning(wrapper);
+        applyMenuBackground();
+      }
+    };
+    const menuDimRow = makePercentSliderRow('menuBgDim', 'Затемнение фона', 0, 0.8, 0.02, refreshMenuBgTuning);
+    const menuTextRow = makePercentSliderRow('menuTextClarity', 'Четкость текста', 0, 1, 0.02, refreshMenuBgTuning);
+    const syncMenuBgRows = () => {
+      [menuDimRow, menuTextRow].forEach(row=>{
+        row.style.opacity = cfg.modMenuBg ? '1' : '0.35';
+        row.style.pointerEvents = cfg.modMenuBg ? '' : 'none';
+      });
+    };
+    menuBgRow.querySelector('input').addEventListener('change', syncMenuBgRows);
+    syncMenuBgRows();
+    uiSection.append(menuBgRow, menuDimRow, menuTextRow);
     uiSection.appendChild(makeToggle('modProfileBtns',   '🔍 Кнопки профиля'));
     uiSection.appendChild(makeToggle('modEnlightenment', '🧘 Клубное просветление'));
     const voteCardsRow = makeToggle('modVoteCardsToggle', '🗳️ Скрытие голосования');
@@ -5002,6 +5253,7 @@
   async function init(){
     await suiteAccessGate();
     insertNeonGradients();
+    applyNeonAnimationSetting();
     setupNeonObservers();
     initObservers();
     observeContainer(document.querySelector('.lootbox__list'));
