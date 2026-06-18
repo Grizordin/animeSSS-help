@@ -42,13 +42,17 @@
   // ============================================================
 
   const SETTINGS_KEY = 'suite_settings_v1';
+  const PREMIUM_DESIRED_SETTINGS_KEY = 'suite_premium_desired_settings_v1';
   const DEFAULT_SETTINGS = {
     // Модули вкл/выкл
     modCardValue:     true,   // ценность карт
     modHotkeys:       true,   // горячие клавиши
     modStats:         true,   // статистика паков
     modNeon:          true,   // неоновые обводки
+    modNeonAnimation: true,   // анимация неоновых обводок
     modMenuBg:        true,   // фон меню
+    menuBgDim:        0.42,   // затемнение фона меню
+    menuTextClarity:  0.75,   // четкость текста меню
     modProfileBtns:   true,   // кнопки "Открытые S" и "Желаемые"
     modEnlightenment: true,   // просветление
     modVoteCardsToggle:true,  // скрытие голосования
@@ -127,22 +131,68 @@
     return isPremiumRequiredSetting(key) && !hasActivePremium();
   }
 
-  function enforcePremiumSettings() {
-    if(hasActivePremium()) return false;
+  function getPremiumDesiredSettings() {
+    return gmGet(PREMIUM_DESIRED_SETTINGS_KEY, null);
+  }
+
+  function savePremiumDesiredSettings(source = cfg) {
+    const desired = {};
+    PREMIUM_REQUIRED_SETTINGS.forEach(key=>{
+      desired[key] = !!source[key];
+    });
+    desired.autoOpenEnabled = !!source.autoOpenEnabled;
+    gmSet(PREMIUM_DESIRED_SETTINGS_KEY, desired);
+  }
+
+  function restorePremiumDesiredSettings() {
+    if(!hasActivePremium()) return false;
+
+    const desired = getPremiumDesiredSettings();
+    if(!desired || typeof desired !== 'object') return false;
 
     let changed = false;
     PREMIUM_REQUIRED_SETTINGS.forEach(key=>{
+      if(Object.prototype.hasOwnProperty.call(desired, key) && cfg[key] !== !!desired[key]) {
+        cfg[key] = !!desired[key];
+        changed = true;
+      }
+    });
+
+    if(Object.prototype.hasOwnProperty.call(desired, 'autoOpenEnabled') && cfg.autoOpenEnabled !== !!desired.autoOpenEnabled) {
+      cfg.autoOpenEnabled = !!desired.autoOpenEnabled;
+      changed = true;
+    }
+
+    if(changed) saveCfg();
+    return changed;
+  }
+
+  function enforcePremiumSettings() {
+    if(hasActivePremium()) return restorePremiumDesiredSettings();
+
+    let changed = false;
+    let shouldSaveDesired = false;
+    const desiredBeforeLock = {};
+    PREMIUM_REQUIRED_SETTINGS.forEach(key=>{
+      desiredBeforeLock[key] = !!cfg[key];
+    });
+    desiredBeforeLock.autoOpenEnabled = !!cfg.autoOpenEnabled;
+
+    PREMIUM_REQUIRED_SETTINGS.forEach(key=>{
       if(cfg[key]) {
+        shouldSaveDesired = true;
         cfg[key] = false;
         changed = true;
       }
     });
 
     if(cfg.autoOpenEnabled) {
+      shouldSaveDesired = true;
       cfg.autoOpenEnabled = false;
       changed = true;
     }
 
+    if(shouldSaveDesired && !getPremiumDesiredSettings()) savePremiumDesiredSettings(desiredBeforeLock);
     if(changed) saveCfg();
     return changed;
   }
@@ -158,6 +208,100 @@
   typeof GM_info !== 'undefined' && GM_info?.script?.version
     ? GM_info.script.version
     : 'unknown';
+  const SUITE_REMOTE_VERSION_URL = 'https://raw.githubusercontent.com/Grizordin/animeSSS-help/main/version.json';
+  const SUITE_SCRIPT_DOWNLOAD_URL = 'https://raw.githubusercontent.com/Grizordin/animeSSS-help/main/AnimeSSS_help.user.js';
+  const SUITE_VERSION_CHECK_INTERVAL_MS = 60 * 60 * 1000;
+  const suiteUpdateState = {
+    remoteVersion: '',
+    hasUpdate: false,
+    checked: false,
+    checking: false,
+    error: false,
+    timerId: null,
+    listeners: new Set()
+  };
+
+  function parseSuiteVersionText(text) {
+    const raw = String(text || '').trim();
+    if(!raw) return '';
+
+    try {
+      const data = JSON.parse(raw);
+      return String(data.version || '').trim();
+    } catch(e) {
+      return raw.replace(/^v/i, '').trim();
+    }
+  }
+
+  function compareSuiteVersions(a, b) {
+    const left = String(a || '').replace(/^v/i, '').split('.').map(n=>parseInt(n,10)||0);
+    const right = String(b || '').replace(/^v/i, '').split('.').map(n=>parseInt(n,10)||0);
+    const len = Math.max(left.length, right.length);
+    for(let i=0;i<len;i++){
+      const diff = (left[i] || 0) - (right[i] || 0);
+      if(diff !== 0) return diff > 0 ? 1 : -1;
+    }
+    return 0;
+  }
+
+  async function fetchSuiteRemoteVersion() {
+    const res = await fetch(`${SUITE_REMOTE_VERSION_URL}?t=${Date.now()}`, { cache:'no-store' });
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    return parseSuiteVersionText(await res.text());
+  }
+
+  function getSuiteUpdateStateSnapshot() {
+    return {
+      remoteVersion: suiteUpdateState.remoteVersion,
+      hasUpdate: suiteUpdateState.hasUpdate,
+      checked: suiteUpdateState.checked,
+      checking: suiteUpdateState.checking,
+      error: suiteUpdateState.error
+    };
+  }
+
+  function notifySuiteUpdateState() {
+    const state = getSuiteUpdateStateSnapshot();
+    suiteUpdateState.listeners.forEach(listener=>{
+      try { listener(state); } catch(e) {}
+    });
+  }
+
+  function subscribeSuiteUpdateState(listener) {
+    if(typeof listener !== 'function') return ()=>{};
+    suiteUpdateState.listeners.add(listener);
+    listener(getSuiteUpdateStateSnapshot());
+    return ()=>suiteUpdateState.listeners.delete(listener);
+  }
+
+  async function checkSuiteRemoteVersion() {
+    if(suiteUpdateState.checking) return;
+    suiteUpdateState.checking = true;
+    notifySuiteUpdateState();
+
+    try {
+      const remoteVersion = await fetchSuiteRemoteVersion();
+      suiteUpdateState.remoteVersion = remoteVersion;
+      suiteUpdateState.hasUpdate = !!remoteVersion &&
+        compareSuiteVersions(remoteVersion, SUITE_ACCESS_VERSION) > 0;
+      suiteUpdateState.checked = true;
+      suiteUpdateState.error = false;
+    } catch(e) {
+      suiteUpdateState.checked = true;
+      suiteUpdateState.error = true;
+    } finally {
+      suiteUpdateState.checking = false;
+      notifySuiteUpdateState();
+    }
+  }
+
+  function startSuiteVersionChecker() {
+    if(suiteUpdateState.timerId) return;
+    suiteUpdateState.timerId = setInterval(
+      checkSuiteRemoteVersion,
+      SUITE_VERSION_CHECK_INTERVAL_MS
+    );
+  }
 
   function suiteGetMyClubId() {
     const links = [...document.querySelectorAll('a[href*="/clubs/"]')];
@@ -300,6 +444,26 @@
 
   const globalStyle = document.createElement('style');
   globalStyle.textContent = `
+    #suite-settings-btn.suite-update-available {
+      border-color:#38bdf8 !important;
+      background:#082f49 !important;
+      color:#e0f2fe !important;
+      box-shadow:
+        0 0 0 1px rgba(56,189,248,.46),
+        0 0 18px rgba(56,189,248,.5),
+        0 0 34px rgba(14,165,233,.28) !important;
+      animation:suite-update-pulse 1.4s ease-in-out infinite;
+    }
+    @keyframes suite-update-pulse {
+      0%,100% {
+        transform:scale(1);
+        filter:brightness(1);
+      }
+      50% {
+        transform:scale(1.08);
+        filter:brightness(1.18);
+      }
+    }
     /* Бейдж лучшей карты — внизу карты */
     .cv-best-badge {
       position:absolute;bottom:42px;left:50%;transform:translateX(-50%);z-index:999;
@@ -434,6 +598,9 @@
       -webkit-mask-composite:xor;
       mask-composite:exclude;
     }
+    body.suite-neon-animation-off .cv-neon-outline::before {
+      animation:none !important;
+    }
     .trade__main-item.cv-neon-outline {
       overflow:visible !important;
       border-width:1px !important;
@@ -487,6 +654,10 @@
     .lgn__inner.tm-fullbg-ready {
       position: relative !important;
       overflow: hidden !important;
+      --suite-menu-bg-dim: .42;
+      --suite-menu-text-clarity: .75;
+      --suite-menu-text-weight: 650;
+      --suite-menu-text-shadow-alpha: .65;
     }
     .lgn__inner.tm-fullbg-ready > video.tm-menu-profilebg {
       position: absolute !important;
@@ -504,7 +675,27 @@
     }
     .lgn__inner.tm-fullbg-ready > *:not(video.tm-menu-profilebg) {
       position: relative !important;
+      z-index: 3 !important;
+    }
+    .lgn__inner.tm-fullbg-ready::before,
+    .lgn__inner.tm-fullbg-ready::after {
+      content: '' !important;
+      position: absolute !important;
+      inset: 0 !important;
+      pointer-events: none !important;
+    }
+    .lgn__inner.tm-fullbg-ready::before {
       z-index: 1 !important;
+      background: rgba(0,0,0,var(--suite-menu-bg-dim)) !important;
+    }
+    .lgn__inner.tm-fullbg-ready::after {
+      z-index: 2 !important;
+      background:
+        linear-gradient(
+          90deg,
+          rgba(0,0,0,calc(var(--suite-menu-bg-dim) * .25)) 0%,
+          rgba(0,0,0,calc(var(--suite-menu-bg-dim) * .85)) 100%
+        ) !important;
     }
     .lgn__inner.tm-fullbg-ready .lgn__ava-holder,
     .lgn__inner.tm-fullbg-ready .lgn__menus {
@@ -516,6 +707,25 @@
     .lgn__inner.tm-fullbg-ready .lgn__menus::after {
       display: none !important;
       content: none !important;
+    }
+    .lgn__inner.tm-fullbg-ready .lgn__menus a,
+    .lgn__inner.tm-fullbg-ready .lgn__menus .lgn__menu-item,
+    .lgn__inner.tm-fullbg-ready .lgn__user-name,
+    .lgn__inner.tm-fullbg-ready .lgn__name span,
+    .lgn__inner.tm-fullbg-ready .lgn__caption {
+      color: #fff !important;
+      font-weight: var(--suite-menu-text-weight) !important;
+      text-shadow:
+        0 1px 2px rgba(0,0,0,var(--suite-menu-text-shadow-alpha)),
+        0 0 calc(3px + 10px * var(--suite-menu-text-clarity)) rgba(0,0,0,calc(var(--suite-menu-text-shadow-alpha) * .75)) !important;
+    }
+    .lgn__inner.tm-fullbg-ready .lgn__caption::after {
+      opacity: calc(.35 + var(--suite-menu-text-clarity) * .55) !important;
+    }
+    .lgn__inner.tm-fullbg-ready .lgn__menus a:hover,
+    .lgn__inner.tm-fullbg-ready .lgn__menu-list li:hover,
+    .lgn__inner.tm-fullbg-ready .lgn__menu li a:hover {
+      background: rgba(255,255,255,calc(.06 + var(--suite-menu-text-clarity) * .08)) !important;
     }
     .lgn.tm-fullbg-host,
     .lgn.tm-fullbg-host .lgn__inner {
@@ -1216,6 +1426,10 @@
     card.querySelectorAll('.lock-trade-btn').forEach(btn => btn.style.display='none');
   }
 
+  function applyNeonAnimationSetting() {
+    document.body?.classList.toggle('suite-neon-animation-off', !cfg.modNeonAnimation);
+  }
+
   function clearNeonFromCard(card){
     card.querySelector('.neon-outline-wrapper')?.remove();
     card.classList.remove(
@@ -1336,11 +1550,22 @@
   //  ФОН МЕНЮ
   // ============================================================
 
+  function applyMenuBgTuning(wrapper) {
+    if(!wrapper) return;
+    const dim = Math.min(0.8, Math.max(0, Number(cfg.menuBgDim ?? DEFAULT_SETTINGS.menuBgDim)));
+    const clarity = Math.min(1, Math.max(0, Number(cfg.menuTextClarity ?? DEFAULT_SETTINGS.menuTextClarity)));
+    wrapper.style.setProperty('--suite-menu-bg-dim', dim.toFixed(2));
+    wrapper.style.setProperty('--suite-menu-text-clarity', clarity.toFixed(2));
+    wrapper.style.setProperty('--suite-menu-text-weight', String(Math.round(500 + clarity * 300)));
+    wrapper.style.setProperty('--suite-menu-text-shadow-alpha', (0.35 + clarity * 0.45).toFixed(2));
+  }
+
   function applyMenuBackground(){
     if(!cfg.modMenuBg)return;
     const modal=document.querySelector('.lgn.is-active, .lgn.done, .lgn'); if(!modal)return;
     const wrapper=modal.querySelector('.lgn__inner'); if(!wrapper)return;
     const menuVideo=modal.querySelector('.lgn__ava-holder > video#profilebg'); if(!menuVideo)return;
+    applyMenuBgTuning(wrapper);
     if(menuVideo.classList.contains('tm-menu-profilebg')&&wrapper.classList.contains('tm-fullbg-ready'))return;
     if(menuVideo.parentElement!==wrapper)wrapper.prepend(menuVideo);
     menuVideo.classList.add('tm-menu-profilebg'); modal.classList.add('tm-fullbg-host'); wrapper.classList.add('tm-fullbg-ready');
@@ -1455,6 +1680,8 @@
     {s:'Успешное применение',                                    icon:'refresh',title:'Готово',      theme:'neon-blue' },
     {s:'Обмен произведён',                                       icon:'trade',  title:'Обмен',       theme:'neon-green'},
     {s:'Обмен отменён',                                          icon:'trade',  title:'Отмена',      theme:'rose'      },
+    {s:'Данный обмен не действительный',                         icon:'warn',   title:'Обмен',       theme:'rose'      },
+    {s:'Вы можете обмениваться с одним и тем же пользователем не более 3 раз в сутки', icon:'clock', title:'Обмен', theme:'rose'},
     {s:'ID карточки скопировано',                                icon:'copy',   title:'Скопировано', theme:'indigo'    },
     {s:'Ссылка на текущую страницу скопирована',                 icon:'link',   title:'Скопировано', theme:'indigo'    },
     {s:'Ссылки на все домены',                                   icon:'link',   title:'Скопировано', theme:'indigo'    },
@@ -1484,9 +1711,16 @@
     {s:'Вы не можете голосовать за карту, которую сами добавили на сайт', icon:'warn', title:'Голос', theme:'neon-amber'},
     {s:'Вы уже голосовали за эту карточку, изменить голос или проголосовать повторно нельзя', icon:'clock', title:'Голос', theme:'rose'},
     {s:'Вы уже ставили дизлайк сегодня, его можно ставить 1 раз в сутки', icon:'clock', title:'Лимит', theme:'rose'},
+    {
+      s:'Вы уже поставили 3 лайка на карты, которые сейчас на модерации. Дождитесь следующей партии карт и сможете ставить новые',
+      icon:'clock',
+      title:'Лимит',
+      theme:'rose'
+    },
     {s:'Вы не можете оставить данную реакцию на комментарий',     icon:'warn',   title:'Реакция',     theme:'neon-amber'},
     {s:'Все карты на странице заблокированы',                     icon:'lock',   title:'Готово',      theme:'emerald'   },
     {s:'Все карты на странице разблокированы',                    icon:'lock',   title:'Готово',      theme:'emerald'   },
+    {s:'Карта разблокирована',                                    icon:'lock',   title:'Готово',      theme:'emerald'   },
     {s:'Все карты на странице добавлены в ненужные',              icon:'check',  title:'Готово',      theme:'emerald'   },
     {s:'На странице нет доступных карт для добавления в ненужные', icon:'warn',   title:'Внимание',    theme:'neon-amber'},
     {s:'На странице нет доступных карт для удаления с ненужных',  icon:'warn',   title:'Внимание',    theme:'neon-amber'},
@@ -1544,6 +1778,13 @@
     // ── Порция 2 ─────────────────────────────────────────
     {s:'Награда в виде',                                          icon:'coin',   title:'Награда',     theme:'neon-green'},
     {s:'Успешное повышение звёздности карты',                     icon:'star',   title:'Улучшение',   theme:'neon-green'},
+    {
+      s:'Данная карта не доступна к повышению уровня звёздности, но модераторы получили вашу заявку ' +
+        'и после рассмотрения вы сможете улучшать данную карту',
+      icon:'star',
+      title:'Улучшение',
+      theme:'neon-amber'
+    },
     {r:/У вас нет \d+ дублей карт необходимых для повышения/i,   icon:'warn',   title:'Внимание',    theme:'neon-amber'},
     {s:'Вы можете улучшать звёзды на картах ранга S не более 3 раз в день', icon:'clock', title:'Лимит', theme:'rose'},
     {s:'Вы не выбрали карты ранга S или +',                       icon:'warn',   title:'Внимание',    theme:'neon-amber'},
@@ -1572,7 +1813,20 @@
     {s:'Нет награды для получения',                                icon:'warn',   title:'Награда',     theme:'neon-amber'},
     {s:'Территория захвачена',                                    icon:'shield', title:'Захват',      theme:'neon-green'},
     {r:/Вы получили .+ за бесконечную гачу/i,                    icon:'coin',   title:'Получено',    theme:'neon-green'},
+    {
+      r:/Получение награды с бесконечной гачи отключено с \d{1,2}:\d{2} до \d{1,2}:\d{2}/i,
+      icon:'clock',
+      title:'Обслуживание',
+      theme:'neon-amber'
+    },
     {s:'Духовная энергия получена',                               icon:'bolt',   title:'Энергия',     theme:'neon-blue' },
+    {
+      s:'Духовный телепорт перенёс твоё астральное тело во владения другого игрока. ' +
+        'Сначала заплати дань или захвати комнату более сильным SSS-стражем.',
+      icon:'shield',
+      title:'Телепорт',
+      theme:'neon-amber'
+    },
     {r:/Вы нашли небесный камень духа.*ваша награда \d+ камней/i, icon:'coin',  title:'Находка',     theme:'neon-green'},
     {s:'Тут уже пусто, приятного просмотра',                      icon:'check',  title:'Готово',      theme:'emerald'   },
     {s:'Сундук не открылся',                                      icon:'warn',   title:'Внимание',    theme:'neon-amber'},
@@ -1619,17 +1873,32 @@
     {s:'Режим берсерка активирован',                               icon:'bolt',   title:'Берсерк',     theme:'neon-pink' },
     {r:/Куплено \+\d+ небесного кирпича/i,                        icon:'bolt',   title:'Покупка',     theme:'neon-green'},
     {s:'Карта успешно куплена',                                    icon:'bag',    title:'Покупка',     theme:'neon-green'},
+    {s:'Карта куплена',                                           icon:'bag',    title:'Покупка',     theme:'neon-green'},
     {s:'Недостаточно AСС',                                         icon:'coin',   title:'Ошибка',      theme:'rose'      },
     {s:'Недостаточно ходов для установки ловушки',                  icon:'clock',  title:'Ловушка',     theme:'rose'      },
     {s:'Возможность пробуждения карт приостановлена',               icon:'lock',   title:'Пробуждение', theme:'neon-amber'},
+    {
+      s:'Карта пока не доступна к пробуждению, модераторы уже получили вашу заявку ' +
+        'на разблокировку пробуждения карты, дождитесь уведомления',
+      icon:'lock',
+      title:'Пробуждение',
+      theme:'neon-amber'
+    },
     {s:'Максимальный вес оригинальной картинки',                   icon:'warn',   title:'Внимание',    theme:'neon-amber'},
     {s:'Изображение загружено в предпросмотр',                     icon:'check',  title:'Загружено',   theme:'emerald'   },
     {s:'Успешное пробуждение',                                     icon:'star',   title:'Пробуждение', theme:'neon-green'},
+    {s:'Сперва выберите карту для пробуждения',                    icon:'warn',   title:'Пробуждение', theme:'neon-amber'},
     {s:'Судьба комнаты выбрана',                                   icon:'check',  title:'Готово',      theme:'emerald'   },
     {s:'За выбор судьбы комнаты ты получаешь',                     icon:'coin',   title:'Награда',     theme:'neon-green'},
     {s:'Дань уплачена',                                            icon:'coin',   title:'Оплата',      theme:'emerald'   },
     {s:'Шахта пока ничего не накопила',                            icon:'warn',   title:'Шахта',       theme:'neon-amber'},
-    {r:/Ты улучшил персональную шахту до \d+ уровня.*Получено AСС: \+\d+.*Получено карт: \d+/i, icon:'coin', title:'Шахта', theme:'neon-green'},
+    {r:/Шахта: собрано \d+ AСС(?: \+ \d+ карт)?/i,                 icon:'coin',   title:'Шахта',       theme:'neon-green'},
+    {
+      r:/Ты улучшил персональную шахту до \d+ уровня.*Получено AСС: \+\d+(?:.*Получено карт: \d+)?/i,
+      icon:'coin',
+      title:'Шахта',
+      theme:'neon-green'
+    },
     {s:'Ты помог со сбором шахты',                                 icon:'coin',   title:'Шахта',       theme:'neon-green'},
     {s:'Отголосок повторён',                                       icon:'check',  title:'Готово',      theme:'emerald'   },
     {s:'Ты отказался от отголоска',                                icon:'warn',   title:'Отголосок',   theme:'rose'      },
@@ -1645,7 +1914,6 @@
     {s:'Ошибка сервера',                                          icon:'err',    title:'Ошибка',      theme:'neon-amber'},
     {s:'Недостаточно камней духа', icon:'coin', title:'Ошибка', theme:'rose'},
     {s:'Автофарм остановлен.', icon:'clock', title:'Автофарм', theme:'rose'},
-    {s:'Карта куплена', icon:'bag', title:'Покупка', theme:'neon-green'},
     {
       s:'У вас нет свободных карт ранга A с улучшением +5',
       icon:'warn',
@@ -1659,7 +1927,6 @@
       theme:'neon-amber'
     },
     {s:'Ты уже захватывал комнату для клуба', icon:'shield', title:'Клуб', theme:'neon-amber'},
-    {s:'Данный обмен не действительный', icon:'warn', title:'Обмен', theme:'rose'},
     {s:'Вы уже получали карту с этого пака', icon:'warn', title:'Пак', theme:'neon-amber'},
     {
       r:/с момента Вашего отсутствия на сайте Вам было прислано .* сообщения/i,
@@ -4141,6 +4408,7 @@
     autoRunInput.addEventListener('change',()=>{
       if(autoRunInput.checked) startAutoOpen();
       else stopAutoOpen('Остановлено');
+      if(hasActivePremium()) savePremiumDesiredSettings();
     });
     autoTargetInput.addEventListener('change',()=>{
       cfg.autoOpenTarget=Math.max(0,parseInt(autoTargetInput.value,10)||0);
@@ -4232,6 +4500,7 @@
       }
       cfg[key]=input.checked;
       saveCfg();
+      if(hasActivePremium() && isPremiumRequiredSetting(key)) savePremiumDesiredSettings();
       document.dispatchEvent(new CustomEvent('suite-setting-change',{
         detail:{ key, value:input.checked }
       }));
@@ -4283,6 +4552,36 @@
     const slider=document.createElement('input'); slider.type='range'; slider.min=min; slider.max=max; slider.step=step; slider.value=cfg[key];
     slider.addEventListener('input',()=>{ cfg[key]=Number(slider.value); val.textContent=cfg[key]; saveCfg(); });
     top.append(lbl,val); row.append(top,slider); return row;
+  }
+
+  function makePercentSliderRow(key, label, min, max, step, onChange){
+    const row=document.createElement('div');
+    row.style.cssText='padding:8px 0 8px 14px;border-bottom:1px solid #0f172a;border-left:2px solid #1e3a5f;margin-left:6px';
+    const top=document.createElement('div');
+    top.style.cssText='display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;gap:10px';
+    const lbl=document.createElement('span');
+    lbl.textContent=label;
+    lbl.style.cssText='font-size:13px;color:#cbd5e1;min-width:0;';
+    const val=document.createElement('span');
+    val.style.cssText='font-size:13px;color:#0ea5e9;font-weight:800;white-space:nowrap';
+    const slider=document.createElement('input');
+    slider.type='range';
+    slider.min=String(min);
+    slider.max=String(max);
+    slider.step=String(step);
+    slider.value=Number(cfg[key] ?? DEFAULT_SETTINGS[key]);
+    const render=()=>{
+      const value=Number(slider.value);
+      cfg[key]=Number(value.toFixed(2));
+      val.textContent=Math.round(cfg[key]*100)+'%';
+      saveCfg();
+      if(typeof onChange==='function') onChange();
+    };
+    slider.addEventListener('input',render);
+    val.textContent=Math.round(Number(slider.value)*100)+'%';
+    top.append(lbl,val);
+    row.append(top,slider);
+    return row;
   }
 
   function makeCustomPushScaleRow(){
@@ -4350,6 +4649,7 @@
     if(key==='modGuarantee'){ insertGuaranteeInfo(); return; }
     if(key==='modOnlyPack20'){ applyOnlyPack20(); return; }
     if(key==='modNeon'){ if(cfg.modNeon) setupNeonObservers(); else cleanupNeonUi(); return; }
+    if(key==='modNeonAnimation'){ applyNeonAnimationSetting(); return; }
     if(key==='modMenuBg'){ if(cfg.modMenuBg) applyMenuBackground(); else cleanupMenuBackground(); return; }
     if(key==='modProfileBtns'){ if(cfg.modProfileBtns) addProfileButtons(); else cleanupProfileButtons(); return; }
     if(key==='modEnlightenment'){ if(cfg.modEnlightenment) applyEnlightenment(); else cleanupEnlightenment(); return; }
@@ -4376,6 +4676,14 @@
       return;
     }
   });
+
+  function applySuiteSettingsButtonUpdateState(btn, state) {
+    if(!btn) return;
+    btn.classList.toggle('suite-update-available', !!state.hasUpdate);
+    btn.title = state.hasUpdate && state.remoteVersion
+      ? `Доступна версия ${state.remoteVersion}`
+      : 'Настройки ANIMESSS SUITE';
+  }
 
   function createSettingsPanel(){
     enforcePremiumSettings();
@@ -4410,7 +4718,48 @@
       'top:0',
       'z-index:1'
     ].join(';');
-    const htitle=document.createElement('div'); htitle.innerHTML='⚙️ <b>Меню настроек</b>'; htitle.style.cssText='font-size:15px;';
+    const titleWrap=document.createElement('div');
+    titleWrap.style.cssText='display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap;';
+    const htitle=document.createElement('div');
+    htitle.innerHTML='⚙️ <b>Меню настроек</b>';
+    htitle.style.cssText='font-size:15px;';
+    const versionBadge=document.createElement('span');
+    versionBadge.textContent=`v${SUITE_ACCESS_VERSION}`;
+    versionBadge.style.cssText=[
+      'display:inline-flex',
+      'align-items:center',
+      'height:20px',
+      'padding:0 7px',
+      'border-radius:999px',
+      'background:#111c2f',
+      'border:1px solid #1e293b',
+      'color:#93c5fd',
+      'font-size:11px',
+      'font-weight:800',
+      'line-height:1'
+    ].join(';');
+    const updateBtn=document.createElement('button');
+    updateBtn.type='button';
+    updateBtn.textContent='Обновить';
+    updateBtn.style.cssText=[
+      'display:none',
+      'height:22px',
+      'padding:0 8px',
+      'border-radius:7px',
+      'border:1px solid #0ea5e9',
+      'background:#082f49',
+      'color:#e0f2fe',
+      'font-size:11px',
+      'font-weight:800',
+      'cursor:pointer',
+      'font-family:inherit'
+    ].join(';');
+    updateBtn.addEventListener('click',e=>{
+      e.preventDefault();
+      e.stopPropagation();
+      window.open(SUITE_SCRIPT_DOWNLOAD_URL, '_blank', 'noopener,noreferrer');
+    });
+    titleWrap.append(htitle,versionBadge,updateBtn);
     const closeBtn=document.createElement('button');
     closeBtn.textContent='×';
     closeBtn.style.cssText=[
@@ -4423,7 +4772,17 @@
       'padding:0'
     ].join(';');
     closeBtn.addEventListener('click',()=>panel.style.display='none');
-    hdr.append(htitle,closeBtn);
+    hdr.append(titleWrap,closeBtn);
+    subscribeSuiteUpdateState(state=>{
+      updateBtn.style.display=state.hasUpdate ? 'inline-flex' : 'none';
+      versionBadge.title=`Текущая версия: ${SUITE_ACCESS_VERSION}`;
+      if(state.remoteVersion) {
+        versionBadge.title += `. Версия в репозитории: ${state.remoteVersion}`;
+      }
+      if(state.hasUpdate) {
+        updateBtn.title=`Доступна версия ${state.remoteVersion}`;
+      }
+    });
 
     const body=document.createElement('div'); body.style.cssText='padding:14px 18px';
     const crownLegend=document.createElement('div');
@@ -4608,8 +4967,38 @@
 
     // ── UI И ВИЗУАЛ ───────────────────────────────────────────
     const uiSection = makeSection('ui','🎨 UI и визуал');
-    uiSection.appendChild(makeToggle('modNeon',          '✨ Неоновые обводки'));
-    uiSection.appendChild(makeToggle('modMenuBg',        '🎬 Фон меню'));
+    const neonRow = makeToggle('modNeon', '✨ Неоновые обводки');
+    const neonAnimationRow = makeToggle('modNeonAnimation', '↻ Анимация неоновой обводки');
+    neonAnimationRow.style.paddingLeft = '14px';
+    neonAnimationRow.style.borderLeft = '2px solid #1e3a5f';
+    neonAnimationRow.style.marginLeft = '6px';
+    const syncNeonAnimationRow = () => {
+      neonAnimationRow.style.opacity = cfg.modNeon ? '1' : '0.35';
+      neonAnimationRow.style.pointerEvents = cfg.modNeon ? '' : 'none';
+      neonAnimationRow.querySelector('input').checked = !!cfg.modNeonAnimation;
+    };
+    neonRow.querySelector('input').addEventListener('change', syncNeonAnimationRow);
+    syncNeonAnimationRow();
+    uiSection.append(neonRow, neonAnimationRow);
+    const menuBgRow = makeToggle('modMenuBg', '🎬 Фон меню');
+    const refreshMenuBgTuning = () => {
+      const wrapper = document.querySelector('.lgn.is-active .lgn__inner, .lgn.done .lgn__inner, .lgn .lgn__inner');
+      if(cfg.modMenuBg) {
+        applyMenuBgTuning(wrapper);
+        applyMenuBackground();
+      }
+    };
+    const menuDimRow = makePercentSliderRow('menuBgDim', 'Затемнение фона', 0, 0.8, 0.02, refreshMenuBgTuning);
+    const menuTextRow = makePercentSliderRow('menuTextClarity', 'Четкость текста', 0, 1, 0.02, refreshMenuBgTuning);
+    const syncMenuBgRows = () => {
+      [menuDimRow, menuTextRow].forEach(row=>{
+        row.style.opacity = cfg.modMenuBg ? '1' : '0.35';
+        row.style.pointerEvents = cfg.modMenuBg ? '' : 'none';
+      });
+    };
+    menuBgRow.querySelector('input').addEventListener('change', syncMenuBgRows);
+    syncMenuBgRows();
+    uiSection.append(menuBgRow, menuDimRow, menuTextRow);
     uiSection.appendChild(makeToggle('modProfileBtns',   '🔍 Кнопки профиля'));
     uiSection.appendChild(makeToggle('modEnlightenment', '🧘 Клубное просветление'));
     const voteCardsRow = makeToggle('modVoteCardsToggle', '🗳️ Скрытие голосования');
@@ -4711,9 +5100,15 @@
     btn.style.cssText='position:fixed;bottom:20px;left:20px;z-index:999;width:44px;height:44px;border-radius:12px;border:1px solid #1e293b;background:#0a0f1a;color:#e2e8f0;font-size:20px;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,.5);transition:background .15s;display:flex;align-items:center;justify-content:center;';
     btn.onmouseover=()=>btn.style.background='#1e293b'; btn.onmouseout=()=>btn.style.background='#0a0f1a';
     // Восстанавливаем сохранённую позицию кнопки
-    if(cfg.settingsBtnLeft!==null)  { btn.style.left=cfg.settingsBtnLeft+'px'; btn.style.bottom=(cfg.settingsBtnBottom||20)+'px'; btn.style.right='auto'; }
+    if(cfg.settingsBtnLeft!==null)  {
+      btn.style.left=cfg.settingsBtnLeft+'px';
+      btn.style.bottom=(cfg.settingsBtnBottom||20)+'px';
+      btn.style.right='auto';
+    }
     document.body.appendChild(btn);
     const panel=createSettingsPanel();
+    subscribeSuiteUpdateState(state=>applySuiteSettingsButtonUpdateState(btn, state));
+    startSuiteVersionChecker();
 
     // Перетаскивание кнопки настроек
     let btnDragging=false, btnMoved=false, bx, by, bLeft, bBottom;
@@ -5002,6 +5397,7 @@
   async function init(){
     await suiteAccessGate();
     insertNeonGradients();
+    applyNeonAnimationSetting();
     setupNeonObservers();
     initObservers();
     observeContainer(document.querySelector('.lootbox__list'));
