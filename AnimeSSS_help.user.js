@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      2.27
+// @version      2.28
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -660,6 +660,9 @@
       --suite-menu-text-weight: 650;
       --suite-menu-text-shadow-alpha: .65;
       --suite-menu-text-alpha: .95;
+      --suite-menu-hover-bg-alpha: .05;
+      --suite-menu-hover-border-alpha: .22;
+      --suite-menu-hover-glow-alpha: .22;
     }
     .lgn__inner.tm-fullbg-ready > video.tm-menu-profilebg {
       position: absolute !important;
@@ -730,7 +733,14 @@
     .lgn__inner.tm-fullbg-ready .lgn__menus a:hover,
     .lgn__inner.tm-fullbg-ready .lgn__menu-list li:hover,
     .lgn__inner.tm-fullbg-ready .lgn__menu li a:hover {
-      background: rgba(255,255,255,.08) !important;
+      color: #fff !important;
+      background: rgba(0,0,0,var(--suite-menu-hover-bg-alpha)) !important;
+      box-shadow:
+        inset 0 0 0 1px rgba(255,255,255,var(--suite-menu-hover-border-alpha)),
+        0 0 calc(8px + 12px * var(--suite-menu-text-clarity)) rgba(255,255,255,var(--suite-menu-hover-glow-alpha)) !important;
+      text-shadow:
+        0 1px 2px rgba(0,0,0,.95),
+        0 0 calc(8px + 12px * var(--suite-menu-text-clarity)) rgba(255,255,255,calc(var(--suite-menu-text-clarity) * .28)) !important;
     }
     .lgn.tm-fullbg-host,
     .lgn.tm-fullbg-host .lgn__inner {
@@ -1564,6 +1574,9 @@
     wrapper.style.setProperty('--suite-menu-text-weight', String(Math.round(420 + clarity * 480)));
     wrapper.style.setProperty('--suite-menu-text-shadow-alpha', (0.08 + clarity * 0.9).toFixed(2));
     wrapper.style.setProperty('--suite-menu-text-alpha', (0.58 + clarity * 0.42).toFixed(2));
+    wrapper.style.setProperty('--suite-menu-hover-bg-alpha', (0.02 + clarity * 0.045).toFixed(3));
+    wrapper.style.setProperty('--suite-menu-hover-border-alpha', (0.08 + clarity * 0.28).toFixed(2));
+    wrapper.style.setProperty('--suite-menu-hover-glow-alpha', (0.04 + clarity * 0.22).toFixed(2));
   }
 
   function applyMenuBackground(){
