@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      2.29
+// @version      2.30
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -902,6 +902,10 @@
     if(el) return el.getAttribute('data-rank').toUpperCase();
     return null;
   }
+  function isGoldSCard(card) {
+    const el=card.matches('[data-gold="1"]')?card:card.querySelector('[data-gold="1"]');
+    return !!el && (el.getAttribute('data-rank') || '').toUpperCase() === 'S';
+  }
   function getCardId(card) { return card.getAttribute('data-id')||null; }
 
   function computeCardValue(card) {
@@ -912,9 +916,13 @@
     const isTradeCard=!!card.closest('.trade__main');
     const ru=rank?rank.toUpperCase():null;
     const isHigh=ru==='S'||ru==='S_PLUS'||ru==='ASS';
+    const isGold=isGoldSCard(card);
+    if(isGold) {
+      return { value:666, total, want, trade, dup, rank, rankUpper:ru, isTradeCard, isHighRank:isHigh, isGold };
+    }
     let value=isTradeCard&&isHigh?calcTradeSValue(total,want,trade,dup,wb):calcCardValue(total,want,trade,dup,rank,wb);
     if(value<BAD_BASE_MAX)value=calcBadCardValue(total,want,trade,dup);
-    return { value, total, want, trade, dup, rank, rankUpper:ru, isTradeCard, isHighRank:isHigh };
+    return { value, total, want, trade, dup, rank, rankUpper:ru, isTradeCard, isHighRank:isHigh, isGold };
   }
 
   // ============================================================
