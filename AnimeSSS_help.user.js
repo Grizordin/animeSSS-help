@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      2.29
+// @version      2.31
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -93,6 +93,7 @@
     autoPanelTop:      null,
     autoOpenEnabled:   false,
     autoOpenTarget:    0,
+    autoOpenedCount:   0,
     settingsSections:  { cardValue:true, packs:true, ui:true, cards:true, labyrinth:true },
 
     // Защита
@@ -211,6 +212,8 @@
   const SUITE_REMOTE_VERSION_URL = 'https://raw.githubusercontent.com/Grizordin/animeSSS-help/main/version.json';
   const SUITE_SCRIPT_DOWNLOAD_URL = 'https://raw.githubusercontent.com/Grizordin/animeSSS-help/main/AnimeSSS_help.user.js';
   const SUITE_VERSION_CHECK_INTERVAL_MS = 60 * 60 * 1000;
+  const SUITE_VERSION_CHECK_FORCE_MS = 24 * 60 * 60 * 1000;
+  const SUITE_LAST_VERSION_CHECK_KEY = 'suite_last_version_check_v1';
   const suiteUpdateState = {
     remoteVersion: '',
     hasUpdate: false,
@@ -286,6 +289,7 @@
         compareSuiteVersions(remoteVersion, SUITE_ACCESS_VERSION) > 0;
       suiteUpdateState.checked = true;
       suiteUpdateState.error = false;
+      gmSet(SUITE_LAST_VERSION_CHECK_KEY, Date.now());
     } catch(e) {
       suiteUpdateState.checked = true;
       suiteUpdateState.error = true;
@@ -297,10 +301,27 @@
 
   function startSuiteVersionChecker() {
     if(suiteUpdateState.timerId) return;
-    suiteUpdateState.timerId = setInterval(
-      checkSuiteRemoteVersion,
-      SUITE_VERSION_CHECK_INTERVAL_MS
-    );
+    const now = Date.now();
+    const lastCheck = Number(gmGet(SUITE_LAST_VERSION_CHECK_KEY, 0)) || 0;
+    const sinceLastCheck = lastCheck > 0 ? now - lastCheck : Infinity;
+    const hourOffset = now % SUITE_VERSION_CHECK_INTERVAL_MS;
+    let nextHourDelay = hourOffset < 1000
+      ? 0
+      : SUITE_VERSION_CHECK_INTERVAL_MS - hourOffset;
+    const shouldForceCheck = sinceLastCheck >= SUITE_VERSION_CHECK_FORCE_MS;
+
+    if(shouldForceCheck) {
+      checkSuiteRemoteVersion();
+      if(nextHourDelay === 0) nextHourDelay = SUITE_VERSION_CHECK_INTERVAL_MS;
+    }
+
+    suiteUpdateState.timerId = setTimeout(()=>{
+      checkSuiteRemoteVersion();
+      suiteUpdateState.timerId = setInterval(
+        checkSuiteRemoteVersion,
+        SUITE_VERSION_CHECK_INTERVAL_MS
+      );
+    }, nextHourDelay);
   }
 
   function suiteGetMyClubId() {
@@ -902,6 +923,10 @@
     if(el) return el.getAttribute('data-rank').toUpperCase();
     return null;
   }
+  function isGoldSCard(card) {
+    const el=card.matches('[data-gold="1"]')?card:card.querySelector('[data-gold="1"]');
+    return !!el && (el.getAttribute('data-rank') || '').toUpperCase() === 'S';
+  }
   function getCardId(card) { return card.getAttribute('data-id')||null; }
 
   function computeCardValue(card) {
@@ -912,9 +937,13 @@
     const isTradeCard=!!card.closest('.trade__main');
     const ru=rank?rank.toUpperCase():null;
     const isHigh=ru==='S'||ru==='S_PLUS'||ru==='ASS';
+    const isGold=isGoldSCard(card);
+    if(isGold) {
+      return { value:666, total, want, trade, dup, rank, rankUpper:ru, isTradeCard, isHighRank:isHigh, isGold };
+    }
     let value=isTradeCard&&isHigh?calcTradeSValue(total,want,trade,dup,wb):calcCardValue(total,want,trade,dup,rank,wb);
     if(value<BAD_BASE_MAX)value=calcBadCardValue(total,want,trade,dup);
-    return { value, total, want, trade, dup, rank, rankUpper:ru, isTradeCard, isHighRank:isHigh };
+    return { value, total, want, trade, dup, rank, rankUpper:ru, isTradeCard, isHighRank:isHigh, isGold };
   }
 
   // ============================================================
@@ -1716,6 +1745,7 @@
     {s:'В колоде может быть не больше',                          icon:'warn',   title:'Внимание',    theme:'rose'      },
     {s:'Введите название вашей колоды',                          icon:'save',   title:'Внимание',    theme:'ocean'     },
     {s:'зафиксирована в колоде и не может быть заблокирована',   icon:'lock',   title:'Внимание',    theme:'rose'      },
+    {s:'Данная карта зафиксирована в колоде и не может быть выбрана', icon:'lock', title:'Колода', theme:'rose'},
     {s:'заблокирована вами и не подлежит обмену',                icon:'lock',   title:'Внимание',    theme:'rose'      },
     {s:'заблокирована вами и не может быть переплавлена',        icon:'fire',   title:'Внимание',    theme:'rose'      },
     {s:'в очереди на обмен и не может быть переплавлена',        icon:'fire',   title:'Внимание',    theme:'rose'      },
@@ -1723,14 +1753,17 @@
     {s:'Вы удалены из списка',                                    icon:'user',   title:'Список',      theme:'neon-pink' },
     {s:'Вы добавлены в список',                                   icon:'user',   title:'Список',      theme:'neon-green'},
     {s:'Пользователь удалён из игнора',                           icon:'user',   title:'Игнор',       theme:'emerald'   },
+    {s:'Пользователь добавлен в игнор',                            icon:'user',   title:'Игнор',       theme:'neon-green'},
     {s:'Вы не можете добавить в игнор команду сайта',              icon:'shield', title:'Игнор',       theme:'neon-amber'},
     {r:/Пользователь .+ успешно добавлен в друзья/i,              icon:'user',   title:'Друзья',      theme:'neon-green'},
+    {r:/Вы отменили заявку на дружбу с .+!?/i,                    icon:'user',   title:'Друзья',      theme:'rose'},
     {s:'Комментарий удалён',                                      icon:'check',  title:'Готово',      theme:'emerald'   },
     {s:'Выберите сообщения для удаления',                         icon:'warn',   title:'Сообщения',   theme:'neon-amber'},
     {s:'История очищена',                                         icon:'check',  title:'Сообщения',   theme:'emerald'   },
     {s:'Сообщение не найдено',                                    icon:'warn',   title:'Внимание',    theme:'neon-amber'},
     {s:'Ваш голос учтён',                                         icon:'check',  title:'Голос',       theme:'emerald'   },
     {s:'Вы не можете голосовать за карту, которую сами добавили на сайт', icon:'warn', title:'Голос', theme:'neon-amber'},
+    {s:'Карта уже опубликована, вы не можете голосовать за неё',  icon:'warn',   title:'Голос',       theme:'neon-amber'},
     {s:'Вы уже голосовали за эту карточку, изменить голос или проголосовать повторно нельзя', icon:'clock', title:'Голос', theme:'rose'},
     {s:'Вы уже ставили дизлайк сегодня, его можно ставить 1 раз в сутки', icon:'clock', title:'Лимит', theme:'rose'},
     {
@@ -1743,9 +1776,31 @@
     {s:'Все карты на странице заблокированы',                     icon:'lock',   title:'Готово',      theme:'emerald'   },
     {s:'Все карты на странице разблокированы',                    icon:'lock',   title:'Готово',      theme:'emerald'   },
     {s:'Карта разблокирована',                                    icon:'lock',   title:'Готово',      theme:'emerald'   },
+    {s:'Данную карту нельзя блокировать',                         icon:'lock',   title:'Блокировка',  theme:'rose'},
     {s:'Все карты на странице добавлены в ненужные',              icon:'check',  title:'Готово',      theme:'emerald'   },
     {s:'На странице нет доступных карт для добавления в ненужные', icon:'warn',   title:'Внимание',    theme:'neon-amber'},
     {s:'На странице нет доступных карт для удаления с ненужных',  icon:'warn',   title:'Внимание',    theme:'neon-amber'},
+    {s:'На странице нет доступных карт для блокировки',            icon:'warn',   title:'Внимание',    theme:'neon-amber'},
+    {s:'На странице нет доступных карт для разблокировки',         icon:'warn',   title:'Внимание',    theme:'neon-amber'},
+    {s:'У вас список не нужных карт пустой',                       icon:'warn',   title:'Список',      theme:'neon-amber'},
+    {
+      r:/Управление списками отключено с \d{1,2}:\d{2} до \d{1,2}:\d{2}/i,
+      icon:'clock',
+      title:'Обслуживание',
+      theme:'neon-amber'
+    },
+    {
+      r:/Возможность массового добавления или удаления карт со списка ненужных отключена с \d{1,2}:\d{2} до \d{1,2}:\d{2}/i,
+      icon:'clock',
+      title:'Обслуживание',
+      theme:'neon-amber'
+    },
+    {
+      s:'Ваш лимит добавления карт S в список - 10 шт. Получите больше карточек S для увеличения лимита',
+      icon:'clock',
+      title:'Лимит',
+      theme:'rose'
+    },
     {s:'уже находится в очереди на обмен',                       icon:'trade',  title:'Внимание',    theme:'neon-amber'},
     {s:'уже добавлена в обмен',                                  icon:'trade',  title:'Внимание',    theme:'neon-amber'},
     {s:'больше трёх карт',                                       icon:'shield', title:'Внимание',    theme:'neon-amber'},
@@ -1780,6 +1835,13 @@
     {s:'Ошибка сети',                                            icon:'err',    title:'Ошибка',      theme:'neon-amber'},
     {s:'Неизвестный ответ сервера',                              icon:'err',    title:'Ошибка',      theme:'neon-amber'},
     {s:'Ошибка при копировании',                                  icon:'err',    title:'Ошибка',      theme:'neon-amber'},
+    {s:'Не корректный промо-код',                                 icon:'warn',   title:'Промокод',    theme:'rose'},
+    {
+      s:'Вы уже вводили этот промо-код или он был использован на вашем IP но на другом аккаунте',
+      icon:'clock',
+      title:'Промокод',
+      theme:'rose'
+    },
     // ── Новые из коллектора ───────────────────────────────
     {s:'Все карты на странице убраны с ненужных',                 icon:'check',  title:'Готово',      theme:'emerald'   },
     {s:'Вы подписались, теперь вы будете получать лс',            icon:'bell',   title:'Подписка',    theme:'neon-blue' },
@@ -1792,6 +1854,12 @@
     {r:/Куплено \+\d+ опыта/i,                                    icon:'coin',   title:'Покупка',     theme:'neon-green'},
     {s:'Пропуск оплачен',                                         icon:'check',  title:'Оплата',      theme:'emerald'   },
     {s:'данный камень больше не активный',                        icon:'clock',  title:'Внимание',    theme:'neon-amber'},
+    {
+      r:/Возможность заряжать камень отключена с \d{1,2}:\d{2} до \d{1,2}:\d{2}/i,
+      icon:'clock',
+      title:'Обслуживание',
+      theme:'neon-amber'
+    },
     {s:'Вы приобрели премиум',                                    icon:'star',   title:'Премиум',     theme:'neon-green'},
     {s:'Блок последних вышедших серий скрыт',                     icon:'save',   title:'Настройки',   theme:'indigo'    },
     {s:'Страж уволен',                                            icon:'shield', title:'Комната',     theme:'rose'      },
@@ -1820,12 +1888,17 @@
     {s:'сняли блокировку с пользователя',                         icon:'shield', title:'Разблокировка','theme':'emerald'},
     // ── Порция 3 ─────────────────────────────────────────
     {s:'Сначала победи сундук-мимик',                             icon:'warn',   title:'Внимание',    theme:'neon-amber'},
+    {s:'Активный сундук-мимик не найден',                         icon:'warn',   title:'Сундук',      theme:'neon-amber'},
     {s:'Вы отклонили заявку',                                     icon:'user',   title:'Заявка',      theme:'rose'      },
     {s:'Заявка на замену арта не найдена',                        icon:'warn',   title:'Заявка',      theme:'neon-amber'},
+    {s:'Заявка на замену арта отправлена на модерацию',            icon:'mod',    title:'Заявка',      theme:'neon-pink'},
+    {s:'Опишите причину замены арта (минимум 10 символов)',        icon:'warn',   title:'Заявка',      theme:'neon-amber'},
     // ── Порция 4 ─────────────────────────────────────────
     {s:'Сундук-мимик побеждён',                                   icon:'star',   title:'Победа',      theme:'neon-green'},
     {s:'Сложный босс побеждён',                                   icon:'star',   title:'Победа',      theme:'neon-green'},
+    {s:'Ты сбежал от сложного босса',                              icon:'warn',   title:'Побег',       theme:'rose'},
     {s:'Подарок оставлен',                                        icon:'check',  title:'Готово',      theme:'emerald'   },
+    {s:'В этой комнате нельзя оставить подарок',                   icon:'warn',   title:'Комната',     theme:'neon-amber'},
     {s:'Правильный ответ',                                        icon:'check',  title:'Верно',       theme:'neon-green'},
     {s:'У тебя нет нужной карты для удара',                       icon:'warn',   title:'Внимание',    theme:'neon-amber'},
     {s:'Сначала победи сложного босса',                           icon:'warn',   title:'Внимание',    theme:'neon-amber'},
@@ -1865,6 +1938,7 @@
     {s:'Путь закрыт. Сначала собери нужное количество одинаковых карт.', icon:'lock', title:'Путь закрыт', theme:'neon-amber'},
     {s:'Вы уже выставили свою оценку для данной статьи',           icon:'warn',   title:'Внимание',    theme:'neon-amber'},
     {s:'зафиксирована в колоде и не может быть разблокирована',    icon:'lock',   title:'Внимание',    theme:'rose'      },
+    {s:'Сначала сделай выбор в Комнате отголосков',                icon:'warn',   title:'Отголосок',   theme:'neon-amber'},
     {r:/Лабиринт временно недоступен с \d{1,2}:\d{2} до \d{1,2}:\d{2}/i, icon:'clock', title:'Лабиринт', theme:'neon-amber'},
     {s:'Лабиринт откликнулся на твой путь',                        icon:'bolt',   title:'Лабиринт',    theme:'neon-blue' },
     {s:'Щит активирован',                                          icon:'shield', title:'Щит',         theme:'neon-blue' },
@@ -1887,6 +1961,7 @@
     {s:'Неудача. Ты не пройдешь',                                  icon:'warn',   title:'Неудача',     theme:'rose'      },
     {s:'Открытие паков карточек отключено',                        icon:'clock',  title:'Внимание',    theme:'neon-amber'},
     {s:'Карты не существует',                                      icon:'warn',   title:'Внимание',    theme:'neon-amber'},
+    {s:'Данной карты не сущетсвует',                               icon:'warn',   title:'Внимание',    theme:'neon-amber'},
     // ── Порция 7 ─────────────────────────────────────────
     {s:'Данная карта уже добавлена',                               icon:'warn',   title:'Внимание',    theme:'neon-amber'},
     {r:/Вы должны выбрать от одной до \d+ карт/i,                 icon:'warn',   title:'Внимание',    theme:'neon-amber'},
@@ -1902,6 +1977,13 @@
     {
       s:'Карта пока не доступна к пробуждению, модераторы уже получили вашу заявку ' +
         'на разблокировку пробуждения карты, дождитесь уведомления',
+      icon:'lock',
+      title:'Пробуждение',
+      theme:'neon-amber'
+    },
+    {
+      s:'Данная карта временно не доступна к пробуждению, но модераторы получили вашу заявку ' +
+        'и после рассмотрения вы сможете пробуждать данную карту',
       icon:'lock',
       title:'Пробуждение',
       theme:'neon-amber'
@@ -4106,8 +4188,9 @@
   // ============================================================
 
   let autoPanel=null, autoRunInput=null, autoTargetInput=null, autoStatusEl=null, autoCountEl=null;
-  let autoLoopTimer=null, autoOpenedCount=0, autoWaitingManual=false, autoBusy=false;
+  let autoLoopTimer=null, autoOpenedCount=Number(cfg.autoOpenedCount)||0, autoWaitingManual=false, autoBusy=false;
   let autoLastChosenPackId='', autoManualPackId='';
+  let autoPausedAfterReload=false;
   const AUTO_DELAY_START=250;
   const AUTO_DELAY_BEFORE_PICK=900;
   const AUTO_DELAY_AFTER_PICK=650;
@@ -4127,11 +4210,22 @@
       autoCountEl.textContent=limit>0?`${autoOpenedCount}/${limit}`:`${autoOpenedCount}/∞`;
     }
   }
+  function saveAutoOpenedCount() {
+    cfg.autoOpenedCount=Math.max(0, Number(autoOpenedCount)||0);
+    saveCfg();
+  }
+  function pauseAutoOpenAfterReload() {
+    if(!cfg.autoOpenEnabled || autoPausedAfterReload) return;
+    cfg.autoOpenEnabled=false;
+    autoPausedAfterReload=true;
+    saveCfg();
+  }
   function stopAutoOpen(reason='Остановлено') {
     cfg.autoOpenEnabled=false; saveCfg();
     if(autoRunInput) autoRunInput.checked=false;
     clearTimeout(autoLoopTimer); autoLoopTimer=null;
     autoBusy=false; autoWaitingManual=false;
+    autoPausedAfterReload=false;
     autoLastChosenPackId=''; autoManualPackId='';
     setAutoStatus(reason);
     updateAutoCount();
@@ -4154,6 +4248,7 @@
     autoManualPackId='';
     autoLastChosenPackId=packId;
     autoOpenedCount++;
+    saveAutoOpenedCount();
     updateAutoCount();
     const limit=Number(cfg.autoOpenTarget)||0;
     if(limit>0 && autoOpenedCount>=limit) {
@@ -4226,7 +4321,7 @@
       return;
     }
     cfg.autoOpenEnabled=true; saveCfg();
-    autoOpenedCount=0;
+    autoPausedAfterReload=false;
     autoWaitingManual=false;
     autoBusy=false;
     setAutoStatus('Запуск...');
@@ -4243,6 +4338,7 @@
       autoLastChosenPackId=getActiveRow()?.getAttribute('data-pack-id')||'';
       card.click();
       autoOpenedCount++;
+      saveAutoOpenedCount();
       updateAutoCount();
       const limit=Number(cfg.autoOpenTarget)||0;
       if(limit>0 && autoOpenedCount>=limit) {
@@ -4308,6 +4404,7 @@
   }
   function createAutoOpenPanel() {
     if(autoPanel || !location.pathname.includes('/cards/pack')) return;
+    pauseAutoOpenAfterReload();
     autoPanel=document.createElement('div');
     autoPanel.id='cv-auto-open-panel';
     autoPanel.style.cssText=[
@@ -4452,7 +4549,7 @@
     autoPanel.style.display=(cfg.modAutoOpen && location.pathname.includes('/cards/pack'))?'block':'none';
     if(!cfg.modAutoOpen && cfg.autoOpenEnabled) stopAutoOpen('Модуль выключен');
     if(autoRunInput) autoRunInput.checked=!!cfg.autoOpenEnabled;
-    setAutoStatus(cfg.autoOpenEnabled?'Работает':'Остановлено');
+    setAutoStatus(cfg.autoOpenEnabled?'Работает':(autoPausedAfterReload?'Пауза после перезагрузки':'Остановлено'));
     updateAutoCount();
   }
 
