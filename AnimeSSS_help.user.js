@@ -4219,6 +4219,9 @@
     cfg.autoOpenEnabled=false;
     autoPausedAfterReload=true;
     saveCfg();
+    if(hasActivePremium()) savePremiumDesiredSettings();
+    if(autoRunInput) autoRunInput.checked=false;
+    updateAutoOpenPanel();
   }
   function stopAutoOpen(reason='Остановлено') {
     cfg.autoOpenEnabled=false; saveCfg();
