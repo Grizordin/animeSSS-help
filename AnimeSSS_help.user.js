@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      2.30
+// @version      2.31
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -93,6 +93,7 @@
     autoPanelTop:      null,
     autoOpenEnabled:   false,
     autoOpenTarget:    0,
+    autoOpenedCount:   0,
     settingsSections:  { cardValue:true, packs:true, ui:true, cards:true, labyrinth:true },
 
     // Защита
@@ -4114,8 +4115,9 @@
   // ============================================================
 
   let autoPanel=null, autoRunInput=null, autoTargetInput=null, autoStatusEl=null, autoCountEl=null;
-  let autoLoopTimer=null, autoOpenedCount=0, autoWaitingManual=false, autoBusy=false;
+  let autoLoopTimer=null, autoOpenedCount=Number(cfg.autoOpenedCount)||0, autoWaitingManual=false, autoBusy=false;
   let autoLastChosenPackId='', autoManualPackId='';
+  let autoPausedAfterReload=false;
   const AUTO_DELAY_START=250;
   const AUTO_DELAY_BEFORE_PICK=900;
   const AUTO_DELAY_AFTER_PICK=650;
@@ -4135,11 +4137,22 @@
       autoCountEl.textContent=limit>0?`${autoOpenedCount}/${limit}`:`${autoOpenedCount}/∞`;
     }
   }
+  function saveAutoOpenedCount() {
+    cfg.autoOpenedCount=Math.max(0, Number(autoOpenedCount)||0);
+    saveCfg();
+  }
+  function pauseAutoOpenAfterReload() {
+    if(!cfg.autoOpenEnabled || autoPausedAfterReload) return;
+    cfg.autoOpenEnabled=false;
+    autoPausedAfterReload=true;
+    saveCfg();
+  }
   function stopAutoOpen(reason='Остановлено') {
     cfg.autoOpenEnabled=false; saveCfg();
     if(autoRunInput) autoRunInput.checked=false;
     clearTimeout(autoLoopTimer); autoLoopTimer=null;
     autoBusy=false; autoWaitingManual=false;
+    autoPausedAfterReload=false;
     autoLastChosenPackId=''; autoManualPackId='';
     setAutoStatus(reason);
     updateAutoCount();
@@ -4162,6 +4175,7 @@
     autoManualPackId='';
     autoLastChosenPackId=packId;
     autoOpenedCount++;
+    saveAutoOpenedCount();
     updateAutoCount();
     const limit=Number(cfg.autoOpenTarget)||0;
     if(limit>0 && autoOpenedCount>=limit) {
@@ -4234,7 +4248,7 @@
       return;
     }
     cfg.autoOpenEnabled=true; saveCfg();
-    autoOpenedCount=0;
+    autoPausedAfterReload=false;
     autoWaitingManual=false;
     autoBusy=false;
     setAutoStatus('Запуск...');
@@ -4251,6 +4265,7 @@
       autoLastChosenPackId=getActiveRow()?.getAttribute('data-pack-id')||'';
       card.click();
       autoOpenedCount++;
+      saveAutoOpenedCount();
       updateAutoCount();
       const limit=Number(cfg.autoOpenTarget)||0;
       if(limit>0 && autoOpenedCount>=limit) {
@@ -4316,6 +4331,7 @@
   }
   function createAutoOpenPanel() {
     if(autoPanel || !location.pathname.includes('/cards/pack')) return;
+    pauseAutoOpenAfterReload();
     autoPanel=document.createElement('div');
     autoPanel.id='cv-auto-open-panel';
     autoPanel.style.cssText=[
@@ -4460,7 +4476,7 @@
     autoPanel.style.display=(cfg.modAutoOpen && location.pathname.includes('/cards/pack'))?'block':'none';
     if(!cfg.modAutoOpen && cfg.autoOpenEnabled) stopAutoOpen('Модуль выключен');
     if(autoRunInput) autoRunInput.checked=!!cfg.autoOpenEnabled;
-    setAutoStatus(cfg.autoOpenEnabled?'Работает':'Остановлено');
+    setAutoStatus(cfg.autoOpenEnabled?'Работает':(autoPausedAfterReload?'Пауза после перезагрузки':'Остановлено'));
     updateAutoCount();
   }
 
