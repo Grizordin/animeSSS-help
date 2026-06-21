@@ -212,6 +212,8 @@
   const SUITE_REMOTE_VERSION_URL = 'https://raw.githubusercontent.com/Grizordin/animeSSS-help/main/version.json';
   const SUITE_SCRIPT_DOWNLOAD_URL = 'https://raw.githubusercontent.com/Grizordin/animeSSS-help/main/AnimeSSS_help.user.js';
   const SUITE_VERSION_CHECK_INTERVAL_MS = 60 * 60 * 1000;
+  const SUITE_VERSION_CHECK_FORCE_MS = 24 * 60 * 60 * 1000;
+  const SUITE_LAST_VERSION_CHECK_KEY = 'suite_last_version_check_v1';
   const suiteUpdateState = {
     remoteVersion: '',
     hasUpdate: false,
@@ -287,6 +289,7 @@
         compareSuiteVersions(remoteVersion, SUITE_ACCESS_VERSION) > 0;
       suiteUpdateState.checked = true;
       suiteUpdateState.error = false;
+      gmSet(SUITE_LAST_VERSION_CHECK_KEY, Date.now());
     } catch(e) {
       suiteUpdateState.checked = true;
       suiteUpdateState.error = true;
@@ -298,10 +301,27 @@
 
   function startSuiteVersionChecker() {
     if(suiteUpdateState.timerId) return;
-    suiteUpdateState.timerId = setInterval(
-      checkSuiteRemoteVersion,
-      SUITE_VERSION_CHECK_INTERVAL_MS
-    );
+    const now = Date.now();
+    const lastCheck = Number(gmGet(SUITE_LAST_VERSION_CHECK_KEY, 0)) || 0;
+    const sinceLastCheck = lastCheck > 0 ? now - lastCheck : Infinity;
+    const hourOffset = now % SUITE_VERSION_CHECK_INTERVAL_MS;
+    let nextHourDelay = hourOffset < 1000
+      ? 0
+      : SUITE_VERSION_CHECK_INTERVAL_MS - hourOffset;
+    const shouldForceCheck = sinceLastCheck >= SUITE_VERSION_CHECK_FORCE_MS;
+
+    if(shouldForceCheck) {
+      checkSuiteRemoteVersion();
+      if(nextHourDelay === 0) nextHourDelay = SUITE_VERSION_CHECK_INTERVAL_MS;
+    }
+
+    suiteUpdateState.timerId = setTimeout(()=>{
+      checkSuiteRemoteVersion();
+      suiteUpdateState.timerId = setInterval(
+        checkSuiteRemoteVersion,
+        SUITE_VERSION_CHECK_INTERVAL_MS
+      );
+    }, nextHourDelay);
   }
 
   function suiteGetMyClubId() {
