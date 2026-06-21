@@ -4214,11 +4214,22 @@
     cfg.autoOpenedCount=Math.max(0, Number(autoOpenedCount)||0);
     saveCfg();
   }
+  function resetAutoOpenedCount() {
+    autoOpenedCount=0;
+    cfg.autoOpenedCount=0;
+    saveCfg();
+    updateAutoCount();
+  }
   function pauseAutoOpenAfterReload() {
     if(!cfg.autoOpenEnabled || autoPausedAfterReload) return;
     cfg.autoOpenEnabled=false;
     autoPausedAfterReload=true;
-    saveCfg();
+    const limit=Number(cfg.autoOpenTarget)||0;
+    if(limit>0 && autoOpenedCount>=limit) {
+      resetAutoOpenedCount();
+    } else {
+      saveCfg();
+    }
     if(hasActivePremium()) savePremiumDesiredSettings();
     if(autoRunInput) autoRunInput.checked=false;
     updateAutoOpenPanel();
@@ -4491,7 +4502,7 @@
       'font-size:11px',
       'color:#64748b'
     ].join(';');
-    countWrap.textContent='Количество паков (0 = без лимита)';
+    countWrap.textContent='Количество паков (0 = без лимита и сброс)';
     autoTargetInput=document.createElement('input');
     autoTargetInput.type='number';
     autoTargetInput.min='0';
@@ -4533,9 +4544,13 @@
       if(hasActivePremium()) savePremiumDesiredSettings();
     });
     autoTargetInput.addEventListener('change',()=>{
-      cfg.autoOpenTarget=Math.max(0,parseInt(autoTargetInput.value,10)||0);
+      const nextTarget=Math.max(0,parseInt(autoTargetInput.value,10)||0);
+      const currentTarget=Number(cfg.autoOpenTarget)||0;
+      const shouldReset=nextTarget===0 || nextTarget!==currentTarget;
+      cfg.autoOpenTarget=nextTarget;
       autoTargetInput.value=cfg.autoOpenTarget;
-      saveCfg(); updateAutoCount();
+      if(shouldReset) resetAutoOpenedCount();
+      else { saveCfg(); updateAutoCount(); }
     });
 
     if(cfg.autoPanelLeft!==null && cfg.autoPanelTop!==null){
@@ -10069,6 +10084,7 @@
   let clubWarLoadedAt = 0;
   let clubWarObserver = null;
   let clubWarTimer = null;
+  let clubWarClickBound = false;
   const CLUB_WAR_ROUTE_RE = /\/labyrinth(?:\/|$)/;
   const clubWarDebug = {
     version: '2.15',
@@ -10195,6 +10211,94 @@
     return [...document.querySelectorAll('.labyrinth__club-war-club')];
   }
 
+  function showClubWarClickNotice(key, icon, title, text, theme) {
+    cptShow(
+      'club-war:' + key,
+      icon,
+      title,
+      text,
+      CPT_CLS[theme] || CPT_CLS['neon-blue']
+    );
+  }
+
+  function getClubWarCardRelation(card) {
+    if(card.classList.contains('suite-club-war-ally')) return 'ally';
+    if(card.classList.contains('suite-club-war-neutral')) return 'neutral';
+    if(card.classList.contains('suite-club-war-enemy')) return 'enemy';
+    return card.dataset.suiteClubWarRelation || '';
+  }
+
+  function hasVisibleClubWarEnemy() {
+    return getClubWarCards().some(card => (
+      card.isConnected && getClubWarCardRelation(card) === 'enemy'
+    ));
+  }
+
+  function handleClubWarClubClick(event) {
+    if(!cfg.modLabyrinthClubWar || !CLUB_WAR_ROUTE_RE.test(location.pathname)) return;
+    const card = event.target?.closest?.('.labyrinth__club-war-club');
+    if(!card) return;
+
+    const relation = getClubWarCardRelation(card);
+    if(relation === 'ally') {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      showClubWarClickNotice(
+        'ally',
+        'warn',
+        'Союзный клуб',
+        'Это союзный клуб, его нельзя атаковать.',
+        'neon-green'
+      );
+      return;
+    }
+
+    if(relation === 'neutral') {
+      showClubWarClickNotice(
+        'neutral',
+        'warn',
+        'Нейтралитет',
+        'С этим клубом нейтралитет, атаковать нежелательно.',
+        'neon-amber'
+      );
+      return;
+    }
+
+    if(relation === 'enemy') {
+      showClubWarClickNotice(
+        'enemy',
+        'bolt',
+        'Вражеский клуб',
+        'Это вражеский клуб. БЕЕЕЕЙ!',
+        'rose'
+      );
+      return;
+    }
+
+    if(hasVisibleClubWarEnemy()) {
+      showClubWarClickNotice(
+        'unknown-with-enemy',
+        'warn',
+        'Есть враг',
+        'В списке есть вражеский клуб, бей его.',
+        'neon-amber'
+      );
+    }
+  }
+
+  function bindClubWarClickGuard() {
+    if(clubWarClickBound) return;
+    clubWarClickBound = true;
+    document.addEventListener('click', handleClubWarClubClick, true);
+  }
+
+  function unbindClubWarClickGuard() {
+    if(!clubWarClickBound) return;
+    clubWarClickBound = false;
+    document.removeEventListener('click', handleClubWarClubClick, true);
+  }
+
   function injectClubWarStyles() {
     if (document.getElementById('suite-club-war-style')) return;
 
@@ -10258,8 +10362,10 @@
         'suite-club-war-enemy'
       );
       card.querySelector('.suite-club-war-badge')?.remove();
+      delete card.dataset.suiteClubWarRelation;
     });
 
+    unbindClubWarClickGuard();
     window.__suiteClubWarRelationsInstalled = false;
     publishClubWarDebug({ installed: false, rootFound: false, cards: [] });
   }
@@ -10287,6 +10393,7 @@
     }
 
     injectClubWarStyles();
+    bindClubWarClickGuard();
     const relations = await loadClubWarRelations();
     if(!relations) return;
 
@@ -10300,6 +10407,7 @@
 
       const type = getClubWarRelationType(card, relations);
       if(type) card.classList.add('suite-club-war-' + type);
+      card.dataset.suiteClubWarRelation = type || '';
       card.querySelector('.suite-club-war-badge')?.remove();
       cards.push({
         id: getClubWarCardId(card),
