@@ -6657,6 +6657,8 @@
         const PAUSE_DATE_KEY = 'aw_active_tab_pause_date_v2';
         const PAUSE_ON_LIMIT_ENABLED_KEY = 'aw_active_tab_pause_on_limit_enabled_v2';
         const MAX_FAILED_ATTEMPTS_KEY = 'aw_active_tab_max_failed_attempts_v2';
+        const KODIK_WARMUP_DONE_KEY = 'aw_active_tab_kodik_warmup_done_v1';
+        const KODIK_WARMUP_NOTICE_KEY = 'aw_active_tab_kodik_warmup_notice_v1';
     
         const CARD_COUNT_CACHE_KEY = 'aw_active_tab_card_count_cache_v2';
         const CARD_COUNT_SYNC_KEY = 'aw_active_tab_card_count_sync_v2';
@@ -6691,6 +6693,7 @@
         const START_DELAY_MS = 1200;
         const RESUME_DELAY_MS = 300;
         const RECEIPTS_PER_EP_COMPLETE = 5;
+        const KODIK_WARMUP_MS = 60 * 1000;
     
         // =========================================================
         // STATE
@@ -6705,6 +6708,7 @@
         let storageHandler = null;
         let nextRunAt = 0;
         let profileFetchInProgress = false;
+        let kodikWarmupPromise = null;
     
         const currentUser = getCurrentUser();
         const DB_NAME = `ASCM_AutoWatch_VisibleTab_${currentUser || 'guest'}`;
@@ -7438,6 +7442,7 @@
                 max_ep: Number(entry.max_ep || 1),
                 t_title: String(entry.t_title || ''),
                 t_id: String(entry.t_id || ''),
+                t_link: String(entry.t_link || ''),
                 title: String(entry.title || ''),
                 addedAt: Number(entry.addedAt || 0)
             };
@@ -7799,6 +7804,156 @@
             }
         }
     
+        function buildKodikWarmupUrl(translationLink, season, episode) {
+            const target = normalizeKodikUrl(translationLink);
+            if (!target) return '';
+
+            try {
+                const url = new URL(target, location.href);
+                url.searchParams.set('season', String(season || 1));
+                url.searchParams.set('episode', String(episode || 1));
+                url.searchParams.set('autoplay', '1');
+                url.searchParams.set('auto_play', '1');
+                url.searchParams.set('muted', '1');
+                return url.toString();
+            } catch (e) {
+                const joiner = target.includes('?') ? '&' : '?';
+                return `${target}${joiner}season=${encodeURIComponent(season || 1)}&episode=${encodeURIComponent(episode || 1)}&autoplay=1&auto_play=1&muted=1`;
+            }
+        }
+
+        async function isKodikWarmupDoneToday() {
+            const data = await GM_getValue(KODIK_WARMUP_DONE_KEY, null);
+            return !!(data && data.date === getMskDateKey());
+        }
+
+        async function markKodikWarmupDoneToday(entry, episode) {
+            await GM_setValue(KODIK_WARMUP_DONE_KEY, {
+                date: getMskDateKey(),
+                animeId: entry?.anime_id || '',
+                season: entry?.s || 1,
+                episode: episode || 1,
+                at: Date.now()
+            });
+        }
+
+        async function showKodikMissingLinkNotice(entry) {
+            const noticeKey = `${getMskDateKey()}::${entry?.anime_id || 'unknown'}::${entry?.t_id || ''}`;
+            const lastNotice = await GM_getValue(KODIK_WARMUP_NOTICE_KEY, '');
+            if (lastNotice === noticeKey) return;
+            await GM_setValue(KODIK_WARMUP_NOTICE_KEY, noticeKey);
+            warn('[Auto-Watch] Kodik warmup skipped: this anime entry has no saved player link. Re-add it from the anime page to enable daily playback.');
+            safePush('info', '[Auto-Watch] Kodik playback is not available for this saved anime yet. Re-add it from the anime page.');
+        }
+
+        function removeKodikWarmupPlayer() {
+            document.getElementById('aw-kodik-warmup-player')?.remove();
+        }
+
+        function createKodikWarmupPlayer(url, entry, episode) {
+            removeKodikWarmupPlayer();
+
+            const holder = document.createElement('div');
+            holder.id = 'aw-kodik-warmup-player';
+            holder.style.cssText = [
+                'position:fixed',
+                'right:16px',
+                'bottom:16px',
+                'z-index:2147483647',
+                'width:min(360px,calc(100vw - 32px))',
+                'background:#111827',
+                'border:1px solid rgba(255,255,255,.22)',
+                'box-shadow:0 18px 42px rgba(0,0,0,.45)',
+                'border-radius:8px',
+                'overflow:hidden',
+                'color:#e5e7eb',
+                'font:12px/1.35 Arial,sans-serif'
+            ].join(';');
+
+            const header = document.createElement('div');
+            header.style.cssText = [
+                'display:flex',
+                'align-items:center',
+                'justify-content:space-between',
+                'gap:8px',
+                'padding:8px 10px',
+                'background:#0f172a',
+                'border-bottom:1px solid rgba(255,255,255,.12)'
+            ].join(';');
+
+            const title = document.createElement('div');
+            title.style.cssText = 'min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+            title.textContent = `Kodik warmup: ${entry?.title || entry?.anime_id || 'anime'} / ep ${episode || 1}`;
+
+            const timer = document.createElement('div');
+            timer.className = 'aw-kodik-warmup-timer';
+            timer.style.cssText = 'flex:0 0 auto;color:#93c5fd;font-weight:700';
+            timer.textContent = formatMs(KODIK_WARMUP_MS);
+
+            const frame = document.createElement('iframe');
+            frame.src = url;
+            frame.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture';
+            frame.referrerPolicy = 'no-referrer-when-downgrade';
+            frame.style.cssText = [
+                'display:block',
+                'width:100%',
+                'height:205px',
+                'border:0',
+                'background:#000'
+            ].join(';');
+
+            header.append(title, timer);
+            holder.append(header, frame);
+            document.body.appendChild(holder);
+            return { holder, timer };
+        }
+
+        async function ensureDailyKodikWarmup(entry, episode) {
+            if (await isKodikWarmupDoneToday()) return true;
+            if (kodikWarmupPromise) return kodikWarmupPromise;
+
+            kodikWarmupPromise = (async () => {
+                if (!entry?.t_link) {
+                    await showKodikMissingLinkNotice(entry);
+                    return false;
+                }
+
+                const url = buildKodikWarmupUrl(entry.t_link, entry.s || 1, episode || entry.min_ep || 1);
+                if (!url) {
+                    await showKodikMissingLinkNotice(entry);
+                    return false;
+                }
+
+                const player = createKodikWarmupPlayer(url, entry, episode);
+                const startedAt = Date.now();
+                log(`[Auto-Watch] Kodik daily warmup started for ${Math.ceil(KODIK_WARMUP_MS / 1000)} sec.`);
+                safePush('info', `[Auto-Watch] Kodik playback warmup: ${Math.ceil(KODIK_WARMUP_MS / 1000)} sec.`);
+
+                await new Promise(resolve => {
+                    const tick = setInterval(() => {
+                        const left = Math.max(0, KODIK_WARMUP_MS - (Date.now() - startedAt));
+                        player.timer.textContent = formatMs(left);
+                    }, 1000);
+
+                    setTimeout(() => {
+                        clearInterval(tick);
+                        resolve();
+                    }, KODIK_WARMUP_MS);
+                });
+
+                removeKodikWarmupPlayer();
+                await markKodikWarmupDoneToday(entry, episode);
+                log('[Auto-Watch] Kodik daily warmup finished.');
+                return true;
+            })();
+
+            try {
+                return await kodikWarmupPromise;
+            } finally {
+                kodikWarmupPromise = null;
+            }
+        }
+
         function getCurrentPageAnimeTitle() {
             return clean(document.querySelector('h1')?.textContent || document.title || 'Аниме');
         }
@@ -8261,7 +8416,11 @@
                     `&kodik_data[translation][id]=${cur.t_id}` +
                     `&kodik_data[translation][title]=${encodeURIComponent(cur.t_title)}` +
                     `&user_hash=${userHash}`;
-    
+
+                ensureDailyKodikWarmup(cur, targetEp).catch(e => {
+                    warn('[Auto-Watch] Kodik daily warmup failed:', e);
+                });
+
                 const headers = {
                     'Accept': 'application/json, text/javascript, */*; q=0.01',
                     'X-Requested-With': 'XMLHttpRequest',
@@ -8700,6 +8859,7 @@
                 max_ep,
                 t_title: baseData.t_title,
                 t_id: baseData.t_id,
+                t_link: baseData.t_link,
                 title: baseData.title,
                 addedAt: Date.now()
             });
