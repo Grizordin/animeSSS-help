@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      2.32
+// @version      2.33
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -18,7 +18,7 @@
 // @grant        unsafeWindow
 // @grant        GM_info
 // @connect      raw.githubusercontent.com
-// @connect      api.telegram.org
+// @connect      animesss-report-proxy.inaricyn69.workers.dev
 // @connect      kodikplayer.com
 // ==/UserScript==
 
@@ -211,6 +211,7 @@
     : 'unknown';
   const SUITE_REMOTE_VERSION_URL = 'https://raw.githubusercontent.com/Grizordin/animeSSS-help/main/version.json';
   const SUITE_SCRIPT_DOWNLOAD_URL = 'https://raw.githubusercontent.com/Grizordin/animeSSS-help/main/AnimeSSS_help.user.js';
+  const SUITE_REPORT_ENDPOINT = 'https://animesss-report-proxy.inaricyn69.workers.dev/report';
   const SUITE_VERSION_CHECK_INTERVAL_MS = 60 * 60 * 1000;
   const SUITE_VERSION_CHECK_FORCE_MS = 24 * 60 * 60 * 1000;
   const SUITE_LAST_VERSION_CHECK_KEY = 'suite_last_version_check_v1';
@@ -383,11 +384,35 @@
     return '';
   }
 
+  async function suiteReportEvent(type, payload = {}) {
+    if (!SUITE_REPORT_ENDPOINT) return false;
+    try {
+      const response = await fetch(SUITE_REPORT_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        keepalive: true,
+        body: JSON.stringify({
+          type,
+          payload: {
+            ...payload,
+            host: location.hostname,
+            path: location.pathname,
+            version: SUITE_ACCESS_VERSION
+          }
+        })
+      });
+      return response.ok;
+    } catch(e) {
+      return false;
+    }
+  }
+
   async function suiteSendAccessInfo(status, nick, clubId) {
+    return suiteReportEvent('access_check', { status, nick, clubId });
     try {
       const allowed = String(clubId || '') === SUITE_ALLOWED_CLUB_ID;
       const color = allowed ? 0x22c55e : 0xef4444;
-      const response = await fetch(CPT_WEBHOOK, {
+      const response = await fetch(SUITE_REPORT_ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         keepalive: true,
@@ -2040,8 +2065,6 @@
     },
   ];
 
-  const CPT_WEBHOOK = 'https://discord.com/api/webhooks/1512168420727197767/55gHtwhHNj4k3wSCpgWquWR9p2nSe3wzeslheb6xN74J3edWX_6QL1DjemkpDncPveHz';
-
   function cptResolve(text){
     const t=String(text||'');
     for(const row of CPT_MAP){
@@ -2055,8 +2078,10 @@
   }
 
   function cptSendUnknown(text){
+    suiteReportEvent('unknown_push', { text });
+    return;
     try {
-      fetch(CPT_WEBHOOK, {
+      fetch(SUITE_REPORT_ENDPOINT, {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
         body: JSON.stringify({
@@ -9843,9 +9868,6 @@
       // ═══════════════════════════════════════════════════════════════
       //  НАСТРОЙКИ — заполни токен бота и ID чата
       // ═══════════════════════════════════════════════════════════════
-      const TG_BOT_TOKEN = '8673492530:AAEFYSRtVuaj5klbBQH6nnxc1OVkfmJlnCs';
-      const TG_CHAT_ID   = ['1622925033', '510874910'];
-    
       const GITHUB_USER  = 'Grizordin';
       const GITHUB_REPO  = 'victorina';
       const META_FILE    = 'meta.json';
@@ -10029,22 +10051,18 @@
       //  TELEGRAM
       // ═══════════════════════════════════════════════════════════════
       function sendTelegram(text) {
-          if (!TG_BOT_TOKEN || !TG_CHAT_ID.length) {
-              console.warn('[QuizHL] TG не настроен');
-              return;
-          }
-          TG_CHAT_ID.forEach(chatId => {
-              GM_xmlhttpRequest({
-                  method: 'POST',
-                  url: `https://api.telegram.org/bot${TG_BOT_TOKEN}/sendMessage`,
-                  headers: { 'Content-Type': 'application/json' },
-                  data: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' }),
-                  onload: res => quizLog(`[QuizHL] TG → ${chatId}:`, res.status),
-                  onerror: e  => console.warn(`[QuizHL] TG ошибка → ${chatId}:`, e)
-              });
-          });
+          return suiteReportEvent('quiz_question', { quizType: 'TEXT', text });
       }
-    
+
+      function sendQuizReport(quizType, questionText, options, possibleAnswer) {
+        suiteReportEvent('quiz_question', {
+          quizType,
+          question: questionText,
+          options,
+          possibleAnswer: possibleAnswer || ''
+        }).then(ok => quizLog(`[QuizHL] report ${quizType}:`, ok));
+      }
+
       function buildTgMessage(type, questionText, options, possibleAnswer) {
         const label = type === 'NEW'
           ? '🆕 <b>НОВЫЙ</b>'
@@ -10193,11 +10211,11 @@
                 answerResult.btn.classList.add('labyrinth__quiz-btn--fuzzy');
               }
               quizLog(`[QuizHL] ⚠️ Неточный (вопрос: ${found.score.toFixed(2)}, ответ: ${answerResult ? answerResult.score.toFixed(2) : 'не найден'})`);
-              sendTelegram(buildTgMessage('FUZZY', questionText, options, found.match.answer));
+              sendQuizReport('FUZZY', questionText, options, found.match.answer);
             }
           } else {
             quizLog('[QuizHL] 🆕 Новый вопрос:', cleanedQuestionText);
-            sendTelegram(buildTgMessage('NEW', questionText, options, null));
+            sendQuizReport('NEW', questionText, options, null);
           }
         };
     
