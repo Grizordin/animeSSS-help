@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      2.33
+// @version      2.34
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -387,6 +387,7 @@
   async function suiteReportEvent(type, payload = {}) {
     if (!SUITE_REPORT_ENDPOINT) return false;
     try {
+      const nick = payload.nick || suiteGetCurrentUserName() || '';
       const response = await fetch(SUITE_REPORT_ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -395,6 +396,7 @@
           type,
           payload: {
             ...payload,
+            nick,
             host: location.hostname,
             path: location.pathname,
             version: SUITE_ACCESS_VERSION
