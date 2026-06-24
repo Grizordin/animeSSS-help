@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      2.36
+// @version      2.37
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -219,6 +219,8 @@
   const SUITE_VERSION_CHECK_FORCE_MS = 24 * 60 * 60 * 1000;
   const SUITE_LAST_VERSION_CHECK_KEY = 'suite_last_version_check_v1';
   const SUITE_UPDATE_AVAILABLE_KEY = 'suite_update_available_v1';
+  const SUITE_ACCESS_SENT_PREFIX = 'suite_access_sent_v2_';
+  const SUITE_ACCESS_LOCK_PREFIX = 'suite_access_sending_v2_';
   const suiteUpdateState = {
     remoteVersion: '',
     hasUpdate: false,
@@ -482,8 +484,8 @@
       const safeNick = String(nick || suiteGetSafeNickname()).trim() || 'Неизвестно';
       const safeClub = String(clubId || suiteGetMyClubId() || 'unknown');
       const keyBase = `${status || 'unknown'}_${safeNick}_${safeClub}`;
-      const sentKey = 'suite_access_sent_v1_' + keyBase;
-      const lockKey = 'suite_access_sending_v1_' + keyBase;
+      const sentKey = SUITE_ACCESS_SENT_PREFIX + `${SUITE_ACCESS_VERSION}_${keyBase}`;
+      const lockKey = SUITE_ACCESS_LOCK_PREFIX + `${SUITE_ACCESS_VERSION}_${keyBase}`;
       const now = Date.now();
 
       if (localStorage.getItem(sentKey) === 'true') return;
@@ -8953,10 +8955,10 @@
                 return false;
             }
 
-            const kodikRange = baseData.max_ep ? null : await getEpisodeRangeFromKodik(baseData.t_link);
+            const kodikRange = await getEpisodeRangeFromKodik(baseData.t_link);
             const finalRange = kodikRange || {
-                min_ep: baseData.min_ep || 1,
-                max_ep: baseData.max_ep || null,
+                min_ep: 1,
+                max_ep: null,
                 season: baseData.s
             };
 
