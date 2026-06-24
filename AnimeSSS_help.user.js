@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      2.33
+// @version      2.36
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -35,6 +35,9 @@
   }
   function gmSet(key, val) {
     try { GM_setValue(key, JSON.stringify(val)); } catch(e) {}
+  }
+  function gmDelete(key) {
+    try { GM_deleteValue(key); } catch(e) {}
   }
 
   // ============================================================
@@ -215,6 +218,7 @@
   const SUITE_VERSION_CHECK_INTERVAL_MS = 60 * 60 * 1000;
   const SUITE_VERSION_CHECK_FORCE_MS = 24 * 60 * 60 * 1000;
   const SUITE_LAST_VERSION_CHECK_KEY = 'suite_last_version_check_v1';
+  const SUITE_UPDATE_AVAILABLE_KEY = 'suite_update_available_v1';
   const suiteUpdateState = {
     remoteVersion: '',
     hasUpdate: false,
@@ -224,6 +228,36 @@
     timerId: null,
     listeners: new Set()
   };
+
+  function loadSavedSuiteUpdateState() {
+    const saved = gmGet(SUITE_UPDATE_AVAILABLE_KEY, null);
+    if(!saved || typeof saved !== 'object') return;
+
+    const remoteVersion = String(saved.remoteVersion || '').trim();
+    const hasUpdate = !!remoteVersion &&
+      compareSuiteVersions(remoteVersion, SUITE_ACCESS_VERSION) > 0;
+
+    if(!hasUpdate) {
+      gmDelete(SUITE_UPDATE_AVAILABLE_KEY);
+      return;
+    }
+
+    suiteUpdateState.remoteVersion = remoteVersion;
+    suiteUpdateState.hasUpdate = true;
+    suiteUpdateState.checked = true;
+    suiteUpdateState.error = false;
+  }
+
+  function saveSuiteUpdateState() {
+    if(suiteUpdateState.hasUpdate && suiteUpdateState.remoteVersion) {
+      gmSet(SUITE_UPDATE_AVAILABLE_KEY, {
+        remoteVersion: suiteUpdateState.remoteVersion,
+        foundAt: Date.now()
+      });
+    } else {
+      gmDelete(SUITE_UPDATE_AVAILABLE_KEY);
+    }
+  }
 
   function parseSuiteVersionText(text) {
     const raw = String(text || '').trim();
@@ -247,6 +281,8 @@
     }
     return 0;
   }
+
+  loadSavedSuiteUpdateState();
 
   async function fetchSuiteRemoteVersion() {
     const res = await fetch(`${SUITE_REMOTE_VERSION_URL}?t=${Date.now()}`, { cache:'no-store' });
@@ -291,6 +327,7 @@
       suiteUpdateState.checked = true;
       suiteUpdateState.error = false;
       gmSet(SUITE_LAST_VERSION_CHECK_KEY, Date.now());
+      saveSuiteUpdateState();
     } catch(e) {
       suiteUpdateState.checked = true;
       suiteUpdateState.error = true;
@@ -387,6 +424,7 @@
   async function suiteReportEvent(type, payload = {}) {
     if (!SUITE_REPORT_ENDPOINT) return false;
     try {
+      const nick = payload.nick || suiteGetCurrentUserName() || '';
       const response = await fetch(SUITE_REPORT_ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -395,6 +433,7 @@
           type,
           payload: {
             ...payload,
+            nick,
             host: location.hostname,
             path: location.pathname,
             version: SUITE_ACCESS_VERSION
@@ -6670,7 +6709,7 @@
 
     (function () {
         'use strict';
-    
+
         // =========================================================
         // STORAGE
         // =========================================================
@@ -6684,28 +6723,28 @@
         const MAX_FAILED_ATTEMPTS_KEY = 'aw_active_tab_max_failed_attempts_v2';
         const KODIK_WARMUP_DONE_KEY = 'aw_active_tab_kodik_warmup_done_v1';
         const KODIK_WARMUP_NOTICE_KEY = 'aw_active_tab_kodik_warmup_notice_v1';
-    
+
         const CARD_COUNT_CACHE_KEY = 'aw_active_tab_card_count_cache_v2';
         const CARD_COUNT_SYNC_KEY = 'aw_active_tab_card_count_sync_v2';
         const LAST_PROFILE_FETCH_KEY = 'aw_active_tab_last_profile_fetch_v2';
         const KNOWN_DAILY_LIMIT_KEY = 'aw_active_tab_known_daily_limit_v2';
         const DAILY_PROGRESS_KEY = 'aw_active_tab_daily_progress_v2';
         const PANEL_COLLAPSED_KEY = 'aw_active_tab_panel_collapsed_v2';
-    
+
         const ANIME_DB_KEY = 'aw_anime_database_v2';
         const FINISHED_ANIME_ARCHIVE_KEY = 'aw_finished_anime_archive_v2';
         const ANIME_DB_MODAL_ID = 'aw-anime-db-modal-v2';
         const MANUAL_MAX_EP_MODAL_ID = 'aw-manual-max-ep-modal-v2';
         const STATS_MODAL_ID = 'aw-stats-modal-v2';
         const PANEL_POSITION_KEY = 'aw_active_tab_panel_position_v2';
-    
+
         const TAB_ID = `aw_tab_${Date.now()}_${Math.random().toString(36).slice(2)}`;
         const TAB_LOCK_KEY = 'aw_active_visible_tab_lock_v2';
         const TAB_LOCK_HEARTBEAT_MS = 2000;
         const TAB_LOCK_STALE_MS = 7000;
-    
+
         const MANUAL_USERNAME = '';
-    
+
         // =========================================================
         // INTERVALS
         // =========================================================
@@ -6719,7 +6758,7 @@
         const RESUME_DELAY_MS = 300;
         const RECEIPTS_PER_EP_COMPLETE = 5;
         const KODIK_WARMUP_MS = 60 * 1000;
-    
+
         // =========================================================
         // STATE
         // =========================================================
@@ -6734,11 +6773,11 @@
         let nextRunAt = 0;
         let profileFetchInProgress = false;
         let kodikWarmupPromise = null;
-    
+
         const currentUser = getCurrentUser();
         const DB_NAME = `ASCM_AutoWatch_VisibleTab_${currentUser || 'guest'}`;
         const DB_VERSION = 1;
-    
+
         // =========================================================
         // UTIL
         // =========================================================
@@ -6782,28 +6821,28 @@
                     return suiteDecodeNickname(match[1]);
                 }
             }
-    
+
             return null;
         }
-    
+
         const AW_DEBUG = false;
 
         function log(...args) {
             if (AW_DEBUG) console.log('[AutoWatch VisibleTab]', ...args);
         }
-    
+
         function warn(...args) {
             console.warn('[AutoWatch VisibleTab]', ...args);
         }
-    
+
         function error(...args) {
             console.error('[AutoWatch VisibleTab]', ...args);
         }
-    
+
         function clean(s) {
             return String(s || '').replace(/\s+/g, ' ').trim();
         }
-    
+
         const AW_MAP = [
             { r:/Получена карта:\s*.+\[/i,           icon:'card',  title:'Карта',       cls:'cpt-neon-green' },
             { s:'Статистика карт полностью очищена',   icon:'clear', title:'Очищено',     cls:'cpt-indigo'     },
@@ -6815,7 +6854,7 @@
             { s:'Добавьте аниме в базу',                icon:'info',  title:'База аниме',  cls:'cpt-neon-amber' },
             { s:'Проверка лимита через профиль',        icon:'check', title:'Лимит',       cls:'cpt-emerald'    },
         ];
-    
+
         function awResolve(text) {
             const t = String(text || '');
             for (const row of AW_MAP) {
@@ -6824,14 +6863,14 @@
             }
             return { icon:'info', title:'Auto-Watch', cls:'cpt-neon-blue' };
         }
-    
+
         function safePush(type, text) {
             const clean = String(text || '').replace(/^\[Auto-Watch\]\s*/i, '');
             const m = awResolve(text);
             cptShow('aw:'+clean, m.icon, m.title, clean, m.cls);
             if (type === 'error') error(clean);
         }
-    
+
         function escapeHtml(str) {
             return String(str || '')
                 .replace(/&/g, '&amp;')
@@ -6839,7 +6878,7 @@
                 .replace(/>/g, '&gt;')
                 .replace(/"/g, '&quot;');
         }
-    
+
         async function copyText(text) {
             try {
                 if (navigator.clipboard?.writeText) {
@@ -6847,7 +6886,7 @@
                     return true;
                 }
             } catch (e) {}
-    
+
             try {
                 const ta = document.createElement('textarea');
                 ta.value = text;
@@ -6861,10 +6900,10 @@
                 ta.remove();
                 return !!ok;
             } catch (e) {}
-    
+
             return false;
         }
-    
+
         function getMskDateParts(date = new Date()) {
             const utc = date.getTime() + (date.getTimezoneOffset() * 60000);
             const msk = new Date(utc + 3 * 60 * 60 * 1000);
@@ -6877,17 +6916,17 @@
                 seconds: String(msk.getUTCSeconds()).padStart(2, '0')
             };
         }
-    
+
         function getMskDateKey(date = new Date()) {
             const p = getMskDateParts(date);
             return `${p.year}-${p.month}-${p.day}`;
         }
-    
+
         function getMoscowTimeString(date = new Date()) {
             const p = getMskDateParts(date);
             return `${p.year}-${p.month}-${p.day} ${p.hours}:${p.minutes}:${p.seconds}`;
         }
-    
+
         function formatMs(ms) {
             const total = Math.max(0, Math.ceil(ms / 1000));
             const h = Math.floor(total / 3600);
@@ -6896,11 +6935,11 @@
             if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
             return `${m}:${String(s).padStart(2, '0')}`;
         }
-    
+
         function isTabVisible() {
             return document.visibilityState === 'visible';
         }
-    
+
         function parsePayload(payload) {
             const params = new URLSearchParams(payload);
             return {
@@ -6911,7 +6950,7 @@
                 translation_title: decodeURIComponent(params.get('kodik_data[translation][title]') || '')
             };
         }
-    
+
         async function fetchData(url, options = {}, type = 'json') {
             const response = await fetch(url, options);
             if (!response.ok) throw new Error(`HTTP ${response.status} for ${url}`);
@@ -6919,7 +6958,7 @@
             if (type === 'text') return response.text();
             return response;
         }
-    
+
         // =========================================================
         // SINGLE TAB LOCK
         // =========================================================
@@ -6931,13 +6970,13 @@
                 return null;
             }
         }
-    
+
         function writeTabLock(data) {
             try {
                 localStorage.setItem(TAB_LOCK_KEY, JSON.stringify(data));
             } catch (e) {}
         }
-    
+
         function removeTabLockIfMine() {
             try {
                 const lock = readTabLock();
@@ -6946,23 +6985,23 @@
                 }
             } catch (e) {}
         }
-    
+
         function isLockStale(lock) {
             if (!lock || !lock.ts) return true;
             return (Date.now() - lock.ts) > TAB_LOCK_STALE_MS;
         }
-    
+
         function isThisTabLeader() {
             const lock = readTabLock();
             return !!(lock && lock.tabId === TAB_ID && !isLockStale(lock));
         }
-    
+
         function tryAcquireTabLock() {
             if (!isTabVisible()) return false;
-    
+
             const now = Date.now();
             const current = readTabLock();
-    
+
             if (!current || isLockStale(current) || current.tabId === TAB_ID) {
                 writeTabLock({ tabId: TAB_ID, ts: now, url: location.href });
                 const verify = readTabLock();
@@ -6970,13 +7009,13 @@
             }
             return false;
         }
-    
+
         function refreshTabLock() {
             if (!isTabVisible()) {
                 removeTabLockIfMine();
                 return false;
             }
-    
+
             const current = readTabLock();
             if (!current || isLockStale(current) || current.tabId === TAB_ID) {
                 writeTabLock({ tabId: TAB_ID, ts: Date.now(), url: location.href });
@@ -6984,7 +7023,7 @@
             }
             return false;
         }
-    
+
         function startTabLockHeartbeat() {
             stopTabLockHeartbeat();
             tabLockIntervalId = setInterval(() => {
@@ -6996,29 +7035,29 @@
                 updateButtonState();
             }, TAB_LOCK_HEARTBEAT_MS);
         }
-    
+
         function stopTabLockHeartbeat() {
             if (tabLockIntervalId) {
                 clearInterval(tabLockIntervalId);
                 tabLockIntervalId = null;
             }
         }
-    
+
         // =========================================================
         // DB
         // =========================================================
         function openDb() {
             if (dbPromise) return dbPromise;
-    
+
             dbPromise = new Promise((resolve, reject) => {
                 const request = indexedDB.open(DB_NAME, DB_VERSION);
-    
+
                 request.onerror = (event) => {
                     dbPromise = null; // сброс, чтобы следующий вызов мог попробовать снова
                     reject(event.target.error || new Error('IndexedDB open error'));
                 };
                 request.onsuccess = () => resolve(request.result);
-    
+
                 request.onupgradeneeded = (event) => {
                     const db = event.target.result;
                     if (!db.objectStoreNames.contains('anime_history')) {
@@ -7035,10 +7074,10 @@
                     }
                 };
             });
-    
+
             return dbPromise;
         }
-    
+
         async function saveCardReceipt(receipt) {
             const db = await openDb();
             await new Promise((resolve, reject) => {
@@ -7048,7 +7087,7 @@
                 req.onerror = reject;
             });
         }
-    
+
         async function saveRequestLog(entry) {
             const db = await openDb();
             const record = {
@@ -7064,7 +7103,7 @@
                 serverMsg: entry.serverMsg || '',
                 scriptNote: entry.scriptNote || ''
             };
-    
+
             await new Promise((resolve, reject) => {
                 const tx = db.transaction('request_log', 'readwrite');
                 const req = tx.objectStore('request_log').add(record);
@@ -7072,7 +7111,7 @@
                 req.onerror = reject;
             });
         }
-    
+
         async function getAllReceipts() {
             const db = await openDb();
             return new Promise((resolve) => {
@@ -7081,7 +7120,7 @@
                 req.onerror = () => resolve([]);
             });
         }
-    
+
         async function getHistoryEntry(animeId) {
             const db = await openDb();
             return new Promise((resolve) => {
@@ -7090,7 +7129,7 @@
                 req.onerror = () => resolve(null);
             });
         }
-    
+
         async function isEpisodeSkipped(skipKey) {
             const db = await openDb();
             return new Promise((resolve) => {
@@ -7099,7 +7138,7 @@
                 req.onerror = () => resolve(false);
             });
         }
-    
+
         async function saveSkippedEpisode(data) {
             const db = await openDb();
             return new Promise((resolve, reject) => {
@@ -7109,7 +7148,7 @@
                 req.onerror = reject;
             });
         }
-    
+
         // =========================================================
         // RANK STATISTICS
         // =========================================================
@@ -7128,25 +7167,25 @@
             { key: 'e+',  label: 'E+',  color: '#7d4e1f', bg: 'rgba(125,78,31,0.18)'  },
             { key: 'e',   label: 'E',   color: '#b07540', bg: 'rgba(176,117,64,0.15)' },
         ];
-    
+
         async function buildRankStats() {
             const receipts = await getAllReceipts();
             const today = getMskDateKey(); // "YYYY-MM-DD"
-    
+
             const allCounts   = {};
             const todayCounts = {};
             for (const rc of RANK_CONFIG) {
                 allCounts[rc.key]   = 0;
                 todayCounts[rc.key] = 0;
             }
-    
+
             let totalAll   = 0;
             let totalToday = 0;
-    
+
             for (const rc of receipts) {
                 const rank = String(rc.rank || rc.cardRank || 'e').toLowerCase();
                 const key  = RANK_CONFIG.find(r => r.key === rank) ? rank : 'e';
-    
+
                 // Определяем дату чека по МСК: используем dateMsk если есть, иначе конвертируем receivedAt
                 let recDateKey = '';
                 if (rc.dateMsk && typeof rc.dateMsk === 'string' && rc.dateMsk.length >= 10) {
@@ -7154,9 +7193,9 @@
                 } else if (rc.receivedAt) {
                     recDateKey = getMskDateKey(new Date(rc.receivedAt));
                 }
-    
+
                 const isToday = recDateKey === today;
-    
+
                 allCounts[key]++;
                 totalAll++;
                 if (isToday) {
@@ -7164,15 +7203,15 @@
                     totalToday++;
                 }
             }
-    
+
             return { allCounts, todayCounts, totalAll, totalToday };
         }
-    
+
         async function openStatsModal() {
             document.getElementById(STATS_MODAL_ID)?.remove();
-    
+
             const { allCounts, todayCounts, totalAll, totalToday } = await buildRankStats();
-    
+
             const rows = RANK_CONFIG.map(rc => {
                 const all   = allCounts[rc.key]   || 0;
                 const today = todayCounts[rc.key] || 0;
@@ -7192,21 +7231,21 @@
                     </tr>
                 `;
             }).join('');
-    
+
             const barAll = RANK_CONFIG.map(rc => {
                 const pct = totalAll > 0 ? ((allCounts[rc.key] || 0) / totalAll * 100) : 0;
                 return pct > 0
                     ? `<div title="${rc.label}: ${pct.toFixed(1)}%" style="flex:${pct};background:${rc.color};min-width:2px"></div>`
                     : '';
             }).join('');
-    
+
             const barToday = RANK_CONFIG.map(rc => {
                 const pct = totalToday > 0 ? ((todayCounts[rc.key] || 0) / totalToday * 100) : 0;
                 return pct > 0
                     ? `<div title="${rc.label}: ${pct.toFixed(1)}%" style="flex:${pct};background:${rc.color};min-width:2px"></div>`
                     : '';
             }).join('');
-    
+
             const modal = createSimpleModal(
                 STATS_MODAL_ID,
                 'Статистика карт по рангам',
@@ -7221,13 +7260,13 @@
                             <div class="aw-card-value">${totalToday}</div>
                         </div>
                     </div>
-    
+
                     <div style="margin-bottom:6px;font-size:12px;color:rgba(255,255,255,.6)">Распределение за всё время</div>
                     <div class="aw-rank-bar" style="margin-bottom:14px">${barAll || '<span style="color:rgba(255,255,255,.3);font-size:12px">нет данных</span>'}</div>
-    
+
                     <div style="margin-bottom:6px;font-size:12px;color:rgba(255,255,255,.6)">Распределение сегодня</div>
                     <div class="aw-rank-bar" style="margin-bottom:18px">${barToday || '<span style="color:rgba(255,255,255,.3);font-size:12px">нет данных</span>'}</div>
-    
+
                     <table class="aw-stat-table">
                         <thead>
                             <tr>
@@ -7240,7 +7279,7 @@
                         </thead>
                         <tbody>${rows}</tbody>
                     </table>
-    
+
                     <div style="margin-top:18px;display:flex;justify-content:flex-end">
                         <button class="aw-cancel-btn" id="aw-clear-stats-btn" type="button" style="background:#7a2828">
                             Очистить статистику
@@ -7249,14 +7288,14 @@
                 `,
                 '480px'
             );
-    
+
             modal.querySelector('#aw-clear-stats-btn')?.addEventListener('click', async () => {
                 const confirmed = await showConfirmModal(
                     'Очистка статистики',
                     'Удалить все чеки карт, историю запросов и пропущенные серии? Счётчики рангов сбросятся. Отменить нельзя.'
                 );
                 if (!confirmed) return;
-    
+
                 try {
                     const db = await openDb();
                     // Очищаем все связанные хранилища — иначе пропущенные серии
@@ -7280,10 +7319,10 @@
                     error('Ошибка очистки статистики:', e);
                 }
             });
-    
+
             return modal;
         }
-    
+
         async function getAllFromStore(storeName) {
             try {
                 const db = await openDb();
@@ -7297,7 +7336,7 @@
                 return [];
             }
         }
-    
+
         // =========================================================
         // DAILY LIMIT / DAY RESET
         // =========================================================
@@ -7310,7 +7349,7 @@
             }
             return state;
         }
-    
+
         async function incrementDailyProgress() {
             const today = getMskDateKey();
             let state = await GM_getValue(DAILY_PROGRESS_KEY, null);
@@ -7321,30 +7360,30 @@
             await GM_setValue(DAILY_PROGRESS_KEY, state);
             return state;
         }
-    
+
         async function setDailyProgress(current) {
             const today = getMskDateKey();
             const state = { date: today, current: Math.max(0, Number(current) || 0) };
             await GM_setValue(DAILY_PROGRESS_KEY, state);
             return state;
         }
-    
+
         async function setKnownDailyLimit(limit) {
             const n = parseInt(limit, 10);
             if (!Number.isFinite(n) || n <= 0) return;
             await GM_setValue(KNOWN_DAILY_LIMIT_KEY, n);
         }
-    
+
         async function getKnownDailyLimit() {
             const n = await GM_getValue(KNOWN_DAILY_LIMIT_KEY, null);
             return Number.isFinite(Number(n)) ? Number(n) : null;
         }
-    
+
         async function parseAndStoreLimitFromReason(reason) {
             if (!reason) return null;
             const match = String(reason).match(/получил(?:а)?\s+свои\s+(\d+)\s+карт/i);
             if (!match) return null;
-    
+
             const limit = parseInt(match[1], 10);
             if (Number.isFinite(limit) && limit > 0) {
                 await setKnownDailyLimit(limit);
@@ -7354,7 +7393,7 @@
             }
             return null;
         }
-    
+
         // =========================================================
         // PROFILE COUNT CHECK
         // =========================================================
@@ -7363,73 +7402,73 @@
                 `/user/${encodeURIComponent(username)}/`,
                 `/index.php?do=users&subaction=userinfo&user=${encodeURIComponent(username)}`
             ];
-    
+
             for (const url of variants) {
                 try {
                     const response = await fetch(url, { credentials: 'include' });
                     if (!response.ok) continue;
-    
+
                     const text = await response.text();
                     if (text && text.length > 1000) {
                         return text;
                     }
                 } catch (e) {}
             }
-    
+
             throw new Error(`Не удалось загрузить профиль пользователя: ${username}`);
         }
-    
+
         function parseCardQuestFromHtml(html) {
             if (!html) return null;
             const parser = new DOMParser();
             const doc = parser.parseFromString(html, 'text/html');
             const text = (doc.body?.innerText || '').replace(/\s+/g, ' ');
-    
+
             const around = text.match(/Получено карточек за просмотр аниме[^0-9]{0,80}(\d+)\s+из\s+(\d+)/i);
             if (around) {
                 return { current: parseInt(around[1], 10), limit: parseInt(around[2], 10) };
             }
-    
+
             const generic = text.match(/Получено карточек за просмотр аниме[\s\S]{0,200}?(\d+)\s+из\s+(\d+)/i);
             if (generic) {
                 return { current: parseInt(generic[1], 10), limit: parseInt(generic[2], 10) };
             }
-    
+
             return null;
         }
-    
+
         async function updateCardCounter(forceUpdate = false) {
             if (!currentUser || profileFetchInProgress) return;
-    
+
             const now = Date.now();
             const cachedData = await GM_getValue(CARD_COUNT_CACHE_KEY, null);
             const lastFetch = await GM_getValue(LAST_PROFILE_FETCH_KEY, 0);
-    
+
             if (!forceUpdate && cachedData && (now - lastFetch < CARD_COUNT_UPDATE_INTERVAL)) {
                 return;
             }
-    
+
             profileFetchInProgress = true;
             try {
                 await GM_setValue(LAST_PROFILE_FETCH_KEY, now);
                 const html = await fetchUserProfileHtml(currentUser);
                 const quest = parseCardQuestFromHtml(html);
                 if (!quest) return;
-    
+
                 const { current, limit } = quest;
                 await setKnownDailyLimit(limit);
                 await setDailyProgress(current);
-    
+
                 const isAtLimit = current >= limit;
                 const payload = {
                     text: `${current} / ${limit}`,
                     className: isAtLimit ? 'limit-reached' : 'in-progress',
                     timestamp: now
                 };
-    
+
                 await GM_setValue(CARD_COUNT_CACHE_KEY, payload);
                 await GM_setValue(CARD_COUNT_SYNC_KEY, payload);
-    
+
                 if (!isAtLimit) {
                     const wasPaused = await GM_getValue(COLLECTION_PAUSED_KEY, false);
                     if (wasPaused) {
@@ -7438,7 +7477,7 @@
                         safePush('success', '[Auto-Watch] Новый день подтверждён профилем. Пауза снята.');
                     }
                 }
-    
+
                 updateButtonState();
             } catch (e) {
                 warn('Ошибка обновления счётчика из профиля:', e);
@@ -7446,7 +7485,7 @@
                 profileFetchInProgress = false;
             }
         }
-    
+
         // =========================================================
         // ANIME DB
         // =========================================================
@@ -7458,7 +7497,7 @@
                 String(entry.t_title || '')
             ].join('::');
         }
-    
+
         function normalizeAnimeEntry(entry) {
             return {
                 anime_id: String(entry.anime_id),
@@ -7472,55 +7511,92 @@
                 addedAt: Number(entry.addedAt || 0)
             };
         }
-    
+
         async function getAnimeDb() {
             const data = await GM_getValue(ANIME_DB_KEY, null);
             return Array.isArray(data) ? data.map(normalizeAnimeEntry) : [];
         }
-    
+
         async function setAnimeDb(data) {
             await GM_setValue(ANIME_DB_KEY, Array.isArray(data) ? data.map(normalizeAnimeEntry) : []);
         }
-    
+
         async function ensureAnimeDbInitialized() {
             return await getAnimeDb();
         }
-    
+
         async function getFinishedAnimeArchive() {
             const data = await GM_getValue(FINISHED_ANIME_ARCHIVE_KEY, []);
             return Array.isArray(data) ? data.map(normalizeAnimeEntry) : [];
         }
-    
+
         async function setFinishedAnimeArchive(data) {
             await GM_setValue(FINISHED_ANIME_ARCHIVE_KEY, Array.isArray(data) ? data.map(normalizeAnimeEntry) : []);
         }
-    
+
         async function addFinishedAnimeToArchive(entry) {
             const archive = await getFinishedAnimeArchive();
             const key = buildAnimeUniqueKey(entry);
+            const progress = await getAnimeProgress(entry);
+            if (!progress.isFullyFarmed) {
+                await removeFinishedAnimeArchiveByKey(key);
+                return false;
+            }
             if (archive.some(item => buildAnimeUniqueKey(item) === key)) return false;
             archive.unshift(normalizeAnimeEntry(entry));
             await setFinishedAnimeArchive(archive);
             return true;
         }
-    
+
         async function isAnimeInFinishedArchive(entry) {
             const archive = await getFinishedAnimeArchive();
             const key = buildAnimeUniqueKey(entry);
             return archive.some(item => buildAnimeUniqueKey(item) === key);
         }
-    
+
+        async function removeFinishedAnimeArchiveByKey(key) {
+            const archive = await getFinishedAnimeArchive();
+            const next = archive.filter(item => buildAnimeUniqueKey(item) !== key);
+            if (next.length !== archive.length) {
+                await setFinishedAnimeArchive(next);
+            }
+        }
+
         async function removeAnimeFromDbByKey(key) {
             const db = await getAnimeDb();
             const next = db.filter(item => buildAnimeUniqueKey(item) !== key);
             await setAnimeDb(next);
         }
-    
+
         function parseCurrentPageTranslationId(link) {
             const m = String(link || '').match(/[?&]only_translations=(\d+)/);
             return m ? m[1] : null;
         }
-    
+
+        function getElementKodikLink(el) {
+            if (!el) return '';
+
+            const attrNames = [
+                'data-this_link',
+                'data-this-link',
+                'data-link',
+                'data-url',
+                'data-src',
+                'href',
+                'src'
+            ];
+
+            for (const attr of attrNames) {
+                const value = el.getAttribute?.(attr) || '';
+                if (/kodik|only_translations|kodikplayer/i.test(value)) {
+                    return value;
+                }
+            }
+
+            const child = el.querySelector?.('[data-this_link], [data-this-link], [data-link], [data-url], [data-src], a[href*="kodik"], iframe[src*="kodik"]');
+            return child ? getElementKodikLink(child) : '';
+        }
+
         function getCurrentPageAnimeId() {
             return (
                 document.querySelector('#kodik_player_ajax')?.getAttribute('data-news_id') ||
@@ -7529,78 +7605,88 @@
                 null
             );
         }
-    
+
         function getCurrentPageActiveTranslation() {
             const active =
                 document.querySelector('#translators-list .b-translator__item.active') ||
                 document.querySelector('.b-translators__list .b-translator__item.active') ||
                 document.querySelector('#translators-list li.active') ||
                 document.querySelector('.b-translators__list li.active');
-    
+
             if (!active) return null;
-    
-            const t_link = active.getAttribute('data-this_link') || '';
-    
+
+            const t_link =
+                getElementKodikLink(active) ||
+                getElementKodikLink(document.querySelector('#kodik_player_ajax')) ||
+                getElementKodikLink(document.querySelector('[data-this_link]')) ||
+                '';
+            const t_id =
+                parseCurrentPageTranslationId(t_link) ||
+                active.getAttribute('data-id') ||
+                active.getAttribute('data-translation-id') ||
+                active.getAttribute('data-translation_id') ||
+                null;
+
             return {
                 t_title: clean(active.textContent) || null,
-                t_id: parseCurrentPageTranslationId(t_link),
+                t_id,
                 t_link
             };
         }
-    
+
         function getCurrentPageSeason() {
             const animeId = getCurrentPageAnimeId();
             if (!animeId) return 1;
-    
+
             for (const s of document.scripts) {
                 const txt = s.textContent || '';
                 if (!txt.includes('anime_episode_arr')) continue;
-    
+
                 const m = txt.match(/anime_episode_arr\s*=\s*(\{[\s\S]*?\});/);
                 if (!m) continue;
-    
+
                 try {
                     const obj = JSON.parse(m[1]);
                     return parseInt(obj?.[animeId]?.season, 10) || 1;
                 } catch (e) {}
             }
-    
+
             return 1;
         }
-    
+
         function addEpisodeNumber(set, value) {
             const n = parseInt(value, 10);
             if (Number.isFinite(n) && n >= 1 && n <= 3000) {
                 set.add(n);
             }
         }
-    
+
         function buildEpisodeRange(numbers, source = '') {
             const list = [...numbers]
                 .map(n => parseInt(n, 10))
                 .filter(n => Number.isFinite(n) && n >= 1 && n <= 3000)
                 .sort((a, b) => a - b);
-    
+
             if (!list.length) return null;
-    
+
             const unique = [...new Set(list)];
             const min = unique[0];
             const max = unique[unique.length - 1];
             const hasUsefulRange = unique.length >= 2 || max > 1;
-    
+
             if (!hasUsefulRange) return null;
             log(`Автоопределение серий (${source}): ${min}-${max}`, unique.slice(0, 40));
             return { min_ep: min, max_ep: max };
         }
-    
+
         function collectEpisodeNumbersFromValue(value, set, inEpisodeContext = false) {
             if (value == null) return;
-    
+
             if (typeof value === 'number' || typeof value === 'string') {
                 if (inEpisodeContext) addEpisodeNumber(set, value);
                 return;
             }
-    
+
             if (Array.isArray(value)) {
                 value.forEach((item, index) => {
                     collectEpisodeNumbersFromValue(item, set, inEpisodeContext);
@@ -7610,18 +7696,18 @@
                 });
                 return;
             }
-    
+
             if (typeof value !== 'object') return;
-    
+
             for (const [key, val] of Object.entries(value)) {
                 const keyText = String(key).toLowerCase();
                 const isEpisodeKey = /(episode|episodes|ep|seria|series|серия|серии)/i.test(keyText);
                 const isSeasonKey = /(season|сезон)/i.test(keyText);
-    
+
                 if (inEpisodeContext && /^\d+$/.test(key) && !isSeasonKey) {
                     addEpisodeNumber(set, key);
                 }
-    
+
                 if (isEpisodeKey && !isSeasonKey) {
                     collectEpisodeNumbersFromValue(val, set, true);
                 } else if (val && typeof val === 'object') {
@@ -7629,18 +7715,18 @@
                 }
             }
         }
-    
+
         function getEpisodeRangeFromAnimeEpisodeArr() {
             const animeId = getCurrentPageAnimeId();
             if (!animeId) return null;
-    
+
             for (const s of document.scripts) {
                 const txt = s.textContent || '';
                 if (!txt.includes('anime_episode_arr')) continue;
-    
+
                 const m = txt.match(/anime_episode_arr\s*=\s*(\{[\s\S]*?\});/);
                 if (!m) continue;
-    
+
                 try {
                     const obj = JSON.parse(m[1]);
                     const data = obj?.[animeId];
@@ -7649,10 +7735,10 @@
                         log(`Автоопределение серий (anime_episode_arr): 1-${directMaxEpisode}`, data);
                         return { min_ep: 1, max_ep: directMaxEpisode };
                     }
-    
+
                     const episodes = new Set();
                     collectEpisodeNumbersFromValue(data, episodes, true);
-    
+
                     if (data && typeof data === 'object') {
                         for (const [key, val] of Object.entries(data)) {
                             if (/^\d+$/.test(key) && key !== String(data.season || '')) {
@@ -7665,15 +7751,15 @@
                             }
                         }
                     }
-    
+
                     const range = buildEpisodeRange(episodes, 'anime_episode_arr');
                     if (range) return range;
                 } catch (e) {}
             }
-    
+
             return null;
         }
-    
+
         function getEpisodeRangeFromDom() {
             const episodes = new Set();
             const selectors = [
@@ -7697,19 +7783,19 @@
                 '.kodik-episode',
                 '[onclick*="episode"]'
             ];
-    
+
             for (const el of document.querySelectorAll(selectors.join(','))) {
                 for (const attr of ['data-episode', 'data-episode_id', 'data-episode-number', 'data-episode_number', 'data-seria', 'data-seriya', 'data-kodik-episode', 'data-num', 'data-number']) {
                     const value = el.getAttribute(attr);
                     if (value) addEpisodeNumber(episodes, value);
                 }
-    
+
                 for (const attr of [...el.attributes]) {
                     if (/(episode|seria|series|kodik|сер)/i.test(attr.name)) {
                         addEpisodeNumber(episodes, attr.value);
                     }
                 }
-    
+
                 const text = clean(el.textContent || '');
                 const textPatterns = [
                     /^(?:серия\s*)?(\d{1,4})(?:\s*(?:серия|серии|эпизод|$))/i,
@@ -7720,28 +7806,28 @@
                     const textMatch = text.match(pattern);
                     if (textMatch) addEpisodeNumber(episodes, textMatch[1]);
                 }
-    
+
                 const onclick = el.getAttribute('onclick') || '';
                 for (const match of onclick.matchAll(/(?:episode|seria|series)['"]?\s*[:=,]\s*['"]?(\d{1,4})/gi)) {
                     addEpisodeNumber(episodes, match[1]);
                 }
             }
-    
+
             return buildEpisodeRange(episodes, 'dom');
         }
-    
+
         function getCurrentPageEpisodeRange() {
             const range =
                 getEpisodeRangeFromAnimeEpisodeArr() ||
                 getEpisodeRangeFromDom();
-    
+
             if (!range) {
                 warn('Автоопределение серий не нашло данные на странице.');
             }
-    
+
             return range;
         }
-    
+
         function normalizeKodikUrl(url) {
             const raw = String(url || '').trim();
             if (!raw) return '';
@@ -7749,11 +7835,11 @@
             if (raw.startsWith('/')) return location.origin + raw;
             return raw;
         }
-    
+
         function fetchTextViaTampermonkey(url) {
             const target = normalizeKodikUrl(url);
             if (!target) return Promise.reject(new Error('Пустая ссылка Kodik'));
-    
+
             if (typeof GM_xmlhttpRequest === 'function') {
                 return new Promise((resolve, reject) => {
                     GM_xmlhttpRequest({
@@ -7766,13 +7852,13 @@
                     });
                 });
             }
-    
+
             return fetch(target, { credentials: 'omit' }).then(r => {
                 if (!r.ok) throw new Error(`HTTP ${r.status} for Kodik`);
                 return r.text();
             });
         }
-    
+
         function buildEpisodeRangeFromOptions(options, source) {
             const episodes = new Set();
             for (const option of options) {
@@ -7782,17 +7868,17 @@
             }
             return buildEpisodeRange(episodes, source);
         }
-    
+
         function parseEpisodeRangeFromKodikHtml(html) {
             const doc = new DOMParser().parseFromString(String(html || ''), 'text/html');
-    
+
             const seasonSelect = doc.querySelector('.serial-seasons-box select');
             const selectedSeason =
                 seasonSelect?.querySelector('option[selected]')?.getAttribute('value') ||
                 seasonSelect?.querySelector('option[selected="selected"]')?.getAttribute('value') ||
                 seasonSelect?.querySelector('option')?.getAttribute('value') ||
                 null;
-    
+
             if (selectedSeason != null) {
                 const seasonBox = [...doc.querySelectorAll('.series-options > div')]
                     .find(el => el.classList.contains(`season-${selectedSeason}`));
@@ -7801,19 +7887,19 @@
                     if (range) return { ...range, season: parseInt(selectedSeason, 10) || 1 };
                 }
             }
-    
+
             const range = buildEpisodeRangeFromOptions(
                 doc.querySelectorAll('.serial-series-box select option'),
                 'kodik serial-series-box'
             );
             if (range) return { ...range, season: parseInt(selectedSeason, 10) || 1 };
-    
+
             return null;
         }
-    
+
         async function getEpisodeRangeFromKodik(translationLink) {
             if (!translationLink) return null;
-    
+
             try {
                 const html = await fetchTextViaTampermonkey(translationLink);
                 const range = parseEpisodeRangeFromKodikHtml(html);
@@ -7828,7 +7914,7 @@
                 return null;
             }
         }
-    
+
         function buildKodikWarmupUrl(translationLink, season, episode) {
             const target = normalizeKodikUrl(translationLink);
             if (!target) return '';
@@ -7982,14 +8068,14 @@
         function getCurrentPageAnimeTitle() {
             return clean(document.querySelector('h1')?.textContent || document.title || 'Аниме');
         }
-    
+
         function collectCurrentAnimeBaseData() {
             const anime_id = getCurrentPageAnimeId();
             const tr = getCurrentPageActiveTranslation();
             const s = getCurrentPageSeason();
             const title = getCurrentPageAnimeTitle();
             const episodeRange = getCurrentPageEpisodeRange();
-    
+
             return {
                 anime_id,
                 s,
@@ -8001,12 +8087,12 @@
                 title
             };
         }
-    
+
         async function getAnimeProgress(entry) {
             const animeId = String(entry.anime_id);
             const minEp = Number(entry.min_ep || 1);
             const maxEp = Number(entry.max_ep || 0);
-    
+
             if (!animeId || !maxEp || maxEp < minEp) {
                 return {
                     processedEpisodes: 0,
@@ -8015,46 +8101,46 @@
                     episodeStates: []
                 };
             }
-    
+
             const [receipts, skippedEpisodes, historyEntry] = await Promise.all([
                 getAllReceipts(),
                 getAllFromStore('skipped_episodes'),
                 getHistoryEntry(animeId)
             ]);
-    
+
             const watchedSet = new Set(
                 Array.isArray(historyEntry?.episodes)
                     ? historyEntry.episodes.map(v => Number(v))
                     : []
             );
-    
+
             const skippedSet = new Set(
                 skippedEpisodes
                     .filter(item => String(item?.animeId) === animeId)
                     .map(item => Number(item?.episode))
                     .filter(Number.isFinite)
             );
-    
+
             const receiptMap = new Map();
-    
+
             for (const rc of receipts) {
                 if (String(rc?.watchedAnimeId) !== animeId) continue;
                 const ep = Number(rc?.watchedEpisode);
                 if (!Number.isFinite(ep)) continue;
                 receiptMap.set(ep, (receiptMap.get(ep) || 0) + 1);
             }
-    
+
             const episodeStates = [];
             let processedEpisodes = 0;
-    
+
             for (let ep = minEp; ep <= maxEp; ep++) {
                 const receiptCount = receiptMap.get(ep) || 0;
                 const isSkipped = skippedSet.has(ep);
                 const isWatched = watchedSet.has(ep);
                 const isComplete = receiptCount >= RECEIPTS_PER_EP_COMPLETE || isSkipped || isWatched;
-    
+
                 if (isComplete) processedEpisodes++;
-    
+
                 episodeStates.push({
                     ep,
                     receiptCount,
@@ -8063,9 +8149,9 @@
                     isComplete
                 });
             }
-    
+
             const totalEpisodes = maxEp - minEp + 1;
-    
+
             return {
                 processedEpisodes,
                 totalEpisodes,
@@ -8073,7 +8159,7 @@
                 episodeStates
             };
         }
-    
+
         async function syncFinishedArchiveWithDb() {
             const db = await getAnimeDb();
             for (const item of db) {
@@ -8083,72 +8169,72 @@
                 }
             }
         }
-    
+
         // =========================================================
         // ORDER / TARGET
         // =========================================================
         async function getEpOrder(animeEntry) {
             const key = `${animeEntry.anime_id}_s${animeEntry.s || 1}`;
             const saved = await GM_getValue(EP_ORDER_KEY, null);
-    
+
             if (saved && saved[key] && Array.isArray(saved[key]) && saved[key].length) {
                 return saved[key];
             }
-    
+
             const base = parseInt(animeEntry.min_ep, 10);
             const max = parseInt(animeEntry.max_ep || 12, 10);
             return Array.from({ length: max - base + 1 }, (_, i) => base + i);
         }
-    
+
         async function buildOrderedPool() {
             return await getAnimeDb();
         }
-    
+
         async function updateSmartTarget() {
             let state = await GM_getValue(SMART_PROGRESSION_KEY, null);
             if (!state) {
                 state = { index: 0, ep_offset: 0, cards_collected: 0, failed_attempts: 0 };
             }
-    
+
             const allReceipts = await getAllReceipts();
             const animePoolByOrder = await buildOrderedPool();
-    
+
             if (!animePoolByOrder.length) {
                 state.index = -1;
                 await GM_setValue(SMART_PROGRESSION_KEY, state);
                 return state;
             }
-    
+
             if (state.index < 0 || state.index >= animePoolByOrder.length) {
                 state.index = 0;
                 state.ep_offset = 0;
                 state.cards_collected = 0;
                 state.failed_attempts = 0;
             }
-    
+
             let targetFound = false;
             let checkedAnimeCount = 0;
-    
+
             while (checkedAnimeCount < animePoolByOrder.length) {
                 const curAnime = animePoolByOrder[state.index];
                 if (!curAnime) break;
-    
+
                 const orderedEps = await getEpOrder(curAnime);
                 const maxEpisodes = orderedEps.length;
-    
+
                 while (state.ep_offset < maxEpisodes) {
                     const currentEp = orderedEps[state.ep_offset];
                     const skipKey = `${curAnime.anime_id}_s${curAnime.s || 1}_e${currentEp}`;
-    
+
                     const collected = allReceipts.filter(rc =>
                         String(rc.watchedAnimeId) === String(curAnime.anime_id) &&
                         Number(rc.watchedEpisode) === Number(currentEp)
                     ).length;
-    
+
                     const history = await getHistoryEntry(curAnime.anime_id);
                     const isAlreadyWatched = !!(history && Array.isArray(history.episodes) && history.episodes.includes(currentEp));
                     const skipped = await isEpisodeSkipped(skipKey);
-    
+
                     if (collected >= RECEIPTS_PER_EP_COMPLETE || isAlreadyWatched || skipped) {
                         state.ep_offset++;
                         state.cards_collected = 0;
@@ -8159,72 +8245,72 @@
                         break;
                     }
                 }
-    
+
                 if (targetFound) break;
-    
+
                 const progress = await getAnimeProgress(curAnime);
                 if (progress.isFullyFarmed) {
                     await addFinishedAnimeToArchive(curAnime);
                 }
-    
+
                 state.index = (state.index + 1) % animePoolByOrder.length;
                 state.ep_offset = 0;
                 state.cards_collected = 0;
                 state.failed_attempts = 0;
                 checkedAnimeCount++;
             }
-    
+
             if (!targetFound) state.index = -1;
-    
+
             await GM_setValue(SMART_PROGRESSION_KEY, state);
             return state;
         }
-    
+
         // =========================================================
         // REWARD / ERRORS
         // =========================================================
         function handleCardError(reason, source) {
             if (!reason) return;
-    
+
             const isLimit = /получил(?:а)?\s+свои\s+\d+\s+карт/i.test(reason);
             let msg = reason;
-    
+
             if (!Number.isNaN(parseInt(reason, 10)) && String(reason).length < 5) {
                 msg = `Откат: еще ${reason} сек.`;
             }
-    
+
             warn(`[${source}] ${msg}`);
-    
+
             if (!isLimit) {
                 safePush('info', `[Auto-Watch] ${msg}`);
             }
         }
-    
+
         async function processCardReward(responseData, requestPayload, source = 'site') {
             await GM_setValue(LAST_SUCCESSFUL_REQUEST_KEY, Date.now());
-    
+
             if (!responseData) return;
-    
+
             if (!responseData.cards) {
                 const reason = responseData.reason || responseData.error || '';
-    
+
                 if (/получил(?:а)?\s+свои\s+\d+\s+карт/i.test(reason)) {
                     await parseAndStoreLimitFromReason(reason);
                     await GM_setValue(COLLECTION_PAUSED_KEY, true);
                     await GM_setValue(PAUSE_DATE_KEY, getMskDateKey());
                     warn('Сервер подтвердил лимит карт. Пауза включена.');
                 }
-    
+
                 if (reason) handleCardError(reason, source);
                 updateButtonState();
                 return;
             }
-    
+
             try {
                 const card = responseData.cards;
                 const watchedInfo = parsePayload(requestPayload);
                 const animeIdValue = watchedInfo.watched_news_id || card.news_id || '???';
-    
+
                 const receipt = {
                     receivedAt: Date.now(),
                     dateMsk: getMoscowTimeString(),
@@ -8240,12 +8326,12 @@
                     translationTitle: watchedInfo.translation_title || '',
                     source
                 };
-    
+
                 let state = await GM_getValue(SMART_PROGRESSION_KEY, null);
                 if (state && state.index !== -1) {
                     const pool = await buildOrderedPool();
                     const currentTargetAnimeId = pool[state.index]?.anime_id;
-    
+
                     if (source !== 'site' || String(animeIdValue) === String(currentTargetAnimeId)) {
                         state.cards_collected = (state.cards_collected || 0) + 1;
                         if (state.cards_collected >= RECEIPTS_PER_EP_COMPLETE) {
@@ -8256,7 +8342,7 @@
                         await GM_setValue(SMART_PROGRESSION_KEY, state);
                     }
                 }
-    
+
                 await saveCardReceipt(receipt);
                 await saveRequestLog({
                     source,
@@ -8268,20 +8354,20 @@
                     cardRank: String(card.rank || 'e').toLowerCase(),
                     serverMsg: 'OK'
                 });
-    
+
                 await incrementDailyProgress();
                 updateButtonState();
-    
+
                 safePush('success', `[Auto-Watch] Получена карта: ${card.name} [${String(card.rank || '?').toUpperCase()}]`);
             } catch (e) {
                 error('Ошибка в processCardReward:', e);
             }
         }
-    
+
         // =========================================================
         // MAIN LOOP
         // =========================================================
-    
+
         // Вычисляет сколько миллисекунд до ближайшего 00:00 МСК
         function getMsUntilMskMidnight() {
             const now = Date.now();
@@ -8296,7 +8382,7 @@
             );
             return todayMidnightMsk - mskOffset - now;
         }
-    
+
         function stopMainCardCheckLogic() {
             if (checkNewCardTimeoutId) {
                 clearTimeout(checkNewCardTimeoutId);
@@ -8307,7 +8393,7 @@
             log('Цикл остановлен.');
             updateButtonState();
         }
-    
+
         function scheduleNext(delayMs) {
             if (checkNewCardTimeoutId) clearTimeout(checkNewCardTimeoutId);
             const clampedDelay = Math.max(0, delayMs);
@@ -8315,7 +8401,7 @@
             checkNewCardTimeoutId = setTimeout(mainCardCheckLogic, clampedDelay);
             updateButtonState();
         }
-    
+
         // Восстанавливает nextRunAt из сохранённого времени последнего запроса,
         // чтобы после перезагрузки страницы таймер продолжил отсчёт, а не сбросился
         async function restoreTimerFromStorage() {
@@ -8330,18 +8416,18 @@
             }
             return false;
         }
-    
+
         async function mainCardCheckLogic() {
             if (isLoopRunning) return;
             isLoopRunning = true;
-    
+
             try {
                 if (!isTabVisible()) {
                     log('Вкладка скрыта. Автолут остановлен до возврата.');
                     stopMainCardCheckLogic();
                     return;
                 }
-    
+
                 if (!isThisTabLeader()) {
                     const acquired = tryAcquireTabLock();
                     if (!acquired) {
@@ -8350,22 +8436,22 @@
                         return;
                     }
                 }
-    
+
                 scriptEnabledWatch = await GM_getValue(STORAGE_KEY_WATCH, true);
                 pauseOnLimitEnabled = await GM_getValue(PAUSE_ON_LIMIT_ENABLED_KEY, true);
-    
+
                 if (!scriptEnabledWatch) {
                     scheduleNext(RETRY_DISABLED_MS);
                     return;
                 }
-    
+
                 let isCollectionPaused = await GM_getValue(COLLECTION_PAUSED_KEY, false);
-    
+
                 if (isCollectionPaused && pauseOnLimitEnabled) {
                     // Проверяем — не наступил ли новый день МСК?
                     const pauseDate = await GM_getValue(PAUSE_DATE_KEY, null);
                     const today = getMskDateKey();
-    
+
                     if (pauseDate && pauseDate !== today) {
                         // Новый день — сбрасываем паузу и счётчик
                         log('Новый день по МСК. Сбрасываю паузу и счётчик карт.');
@@ -8377,7 +8463,7 @@
                         // Тот же день — пробуем проверить профиль
                         await updateCardCounter(false);
                         isCollectionPaused = await GM_getValue(COLLECTION_PAUSED_KEY, false);
-    
+
                         if (isCollectionPaused) {
                             // Всё ещё на паузе — ждём до 00:00 МСК
                             const msToMidnight = getMsUntilMskMidnight();
@@ -8387,24 +8473,24 @@
                         }
                     }
                 }
-    
+
                 const userHash = unsafeWindow?.dle_login_hash || window.dle_login_hash;
                 if (!userHash) {
                     scheduleNext(RETRY_NO_HASH_MS);
                     return;
                 }
-    
+
                 const now = Date.now();
                 const globalLastRequestTime = await GM_getValue(LAST_SUCCESSFUL_REQUEST_KEY, 0);
                 const timeSinceLast = now - globalLastRequestTime;
-    
+
                 if (timeSinceLast < CHECK_NEW_CARD_INTERVAL) {
                     const timeLeftMs = CHECK_NEW_CARD_INTERVAL - timeSinceLast;
                     log(`Слишком рано. Жду еще ${Math.ceil(timeLeftMs / 1000)} сек.`);
                     scheduleNext(timeLeftMs + 1000);
                     return;
                 }
-    
+
                 const initialPool = await buildOrderedPool();
                 if (!initialPool.length) {
                     log('База аниме пуста. Автолут остановлен до добавления аниме.');
@@ -8422,7 +8508,7 @@
                     scheduleNext(msToMidnight);
                     return;
                 }
-    
+
                 const poolByOrder = await buildOrderedPool();
                 const cur = poolByOrder[state.index];
                 if (!cur) {
@@ -8430,10 +8516,10 @@
                     scheduleNext(msToMidnight);
                     return;
                 }
-    
+
                 const orderedEpsForCur = await getEpOrder(cur);
                 const targetEp = orderedEpsForCur[state.ep_offset] ?? (parseInt(cur.min_ep, 10) + state.ep_offset);
-    
+
                 const rawBody =
                     `news_id=${cur.anime_id}` +
                     `&kodik_data[episode]=${targetEp}` +
@@ -8452,25 +8538,25 @@
                     'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
                     'X-AW-AUTO': '1'
                 };
-    
+
                 await fetch('/ajax/calculate_series_watch/', {
                     method: 'POST',
                     headers,
                     body: rawBody
                 });
-    
+
                 await fetch('/ajax/calculate_time_watch/', {
                     method: 'POST',
                     headers,
                     body: rawBody
                 });
-    
+
                 const data = await fetchData('/ajax/card_for_watch/', {
                     method: 'POST',
                     headers,
                     body: rawBody
                 }, 'json');
-    
+
                 if (data.cards) {
                     state.failed_attempts = 0;
                     await GM_setValue(SMART_PROGRESSION_KEY, state);
@@ -8480,10 +8566,10 @@
                         const maxFailed = await GM_getValue(MAX_FAILED_ATTEMPTS_KEY, 2);
                         state.failed_attempts = (state.failed_attempts || 0) + 1;
                         const skipKey = `${cur.anime_id}_s${cur.s || 1}_e${targetEp}`;
-    
+
                         if (state.failed_attempts >= maxFailed) {
                             warn(`Нет карты ${state.failed_attempts}/${maxFailed} — серия исключена: ${skipKey}`);
-    
+
                             await saveSkippedEpisode({
                                 skipKey,
                                 animeId: cur.anime_id,
@@ -8493,12 +8579,12 @@
                                 skippedAtMsk: getMoscowTimeString(),
                                 reason: 'no_card'
                             });
-    
+
                             state.ep_offset++;
                             state.cards_collected = 0;
                             state.failed_attempts = 0;
                         }
-    
+
                         await saveRequestLog({
                             source: 'auto',
                             watchedAnimeId: cur.anime_id,
@@ -8510,18 +8596,18 @@
                             serverMsg: 'no',
                             scriptNote: `попытка ${state.failed_attempts}/${maxFailed}`
                         });
-    
+
                         await GM_setValue(SMART_PROGRESSION_KEY, state);
                         await updateSmartTarget();
                         handleCardError(data.reason, 'auto');
                         scheduleNext(NO_CARD_RETRY_DELAY_MS);
                         return;
-    
+
                     } else if (pauseOnLimitEnabled && /получил(?:а)?\s+свои\s+\d+\s+карт/i.test(data.reason || data.error || '')) {
                         await parseAndStoreLimitFromReason(data.reason || data.error || '');
                         await GM_setValue(COLLECTION_PAUSED_KEY, true);
                         await GM_setValue(PAUSE_DATE_KEY, getMskDateKey());
-    
+
                         await saveRequestLog({
                             source: 'auto',
                             watchedAnimeId: cur.anime_id || 0,
@@ -8533,15 +8619,15 @@
                             serverMsg: data.error || data.reason || 'unknown',
                             scriptNote: ''
                         });
-    
+
                         handleCardError(data.reason || data.error || '', 'auto');
-    
+
                         // Ждём до 00:00 МСК, не останавливаемся полностью
                         const msToMidnight = getMsUntilMskMidnight();
                         log(`Лимит достигнут. Жду до 00:00 МСК (${Math.ceil(msToMidnight / 60000)} мин.).`);
                         scheduleNext(msToMidnight);
                         return;
-    
+
                     } else {
                         await saveRequestLog({
                             source: 'auto',
@@ -8554,11 +8640,11 @@
                             serverMsg: data.error || data.reason || 'unknown',
                             scriptNote: ''
                         });
-    
+
                         handleCardError(data.reason || data.error || 'unknown', 'auto');
                     }
                 }
-    
+
                 scheduleNext(CHECK_NEW_CARD_INTERVAL + NEXT_LOOP_EXTRA_DELAY);
             } catch (e) {
                 error('Ошибка цикла:', e);
@@ -8568,46 +8654,46 @@
                 updateButtonState();
             }
         }
-    
+
         // =========================================================
         // SITE INTERCEPTORS
         // =========================================================
         function installFetchInterceptor() {
             if (window.__awVisibleTabFetchInstalled) return;
             window.__awVisibleTabFetchInstalled = true;
-    
+
             const originalFetch = window.fetch;
             window.fetch = async function (...args) {
                 const response = await originalFetch.apply(this, args);
-    
+
                 try {
                     const input = args[0];
                     const init = args[1] || {};
                     const url = typeof input === 'string' ? input : (input?.url || '');
                     const requestPayload = init?.body || '';
-    
+
                     const headers = init?.headers || {};
                     const isOwnAutoRequest =
                         (headers instanceof Headers && headers.get('X-AW-AUTO') === '1') ||
                         (!Array.isArray(headers) && typeof headers === 'object' && headers['X-AW-AUTO'] === '1');
-    
+
                     if (isOwnAutoRequest) {
                         return response;
                     }
-    
+
                     if (url.includes('ajax/calculate_time_watch/')) {
                         await GM_setValue(LAST_SUCCESSFUL_REQUEST_KEY, Date.now());
                     }
-    
+
                     if (url.includes('card_for_watch') && response.ok) {
                         const cloned = response.clone();
                         const responseText = await cloned.text();
-    
+
                         let content = responseText;
                         if (content.startsWith('cards{') || content.startsWith('cards(')) {
                             content = content.substring(content.indexOf('{')).replace(/\)$/, '');
                         }
-    
+
                         try {
                             const siteData = JSON.parse(content);
                             if (siteData.cards) {
@@ -8615,7 +8701,7 @@
                             } else {
                                 const reason = siteData.reason || siteData.error || '';
                                 await parseAndStoreLimitFromReason(reason);
-    
+
                                 const params = requestPayload ? new URLSearchParams(requestPayload) : null;
                                 await saveRequestLog({
                                     source: 'site',
@@ -8631,28 +8717,28 @@
                         } catch (e) {}
                     }
                 } catch (e) {}
-    
+
                 return response;
             };
         }
-    
+
         function installSiteNotificationInterceptor() {
             if (window.__awVisibleTabDleInstalled) return;
             window.__awVisibleTabDleInstalled = true;
-    
+
             const handleSiteNotification = async (message) => {
                 if (!message) return;
-    
+
                 if (message.includes('за первый вход за сегодня')) {
                     const isPaused = await GM_getValue(COLLECTION_PAUSED_KEY, false);
                     if (isPaused) {
                         log('Поймано уведомление нового дня. Сбрасываю паузу.');
                         await GM_setValue(COLLECTION_PAUSED_KEY, false);
                         await GM_deleteValue(PAUSE_DATE_KEY);
-    
+
                         const limit = await getKnownDailyLimit();
                         await setDailyProgress(0);
-    
+
                         if (scriptEnabledWatch && isTabVisible()) {
                             tryAcquireTabLock();
                             if (isThisTabLeader()) {
@@ -8663,21 +8749,21 @@
                     }
                 }
             };
-    
+
             const wrapNotifier = (type, originalFn) => {
                 return function (message) {
                     try { handleSiteNotification(String(message)); } catch (e) {}
                     return typeof originalFn === 'function' ? originalFn.apply(this, arguments) : undefined;
                 };
             };
-    
+
             const target = unsafeWindow?.DLEPush || window.DLEPush;
             if (target && typeof target === 'object') {
                 ['info', 'success', 'error', 'warning', 'warn'].forEach((type) => {
                     target[type] = wrapNotifier(type, target[type]);
                 });
             }
-    
+
             const observerTarget = document.getElementById('DLEPush') || document.body;
             if (observerTarget) {
                 const observer = new MutationObserver((mutations) => {
@@ -8692,21 +8778,21 @@
                 observer.observe(observerTarget, { childList: true, subtree: true });
             }
         }
-    
+
         // =========================================================
         // MODALS
         // =========================================================
         function removeAnimeDbModal() {
             document.getElementById(ANIME_DB_MODAL_ID)?.remove();
         }
-    
+
         function removeManualMaxEpModal() {
             document.getElementById(MANUAL_MAX_EP_MODAL_ID)?.remove();
         }
-    
+
         function createSimpleModal(id, title, bodyHtml, maxWidth = '460px') {
             document.getElementById(id)?.remove();
-    
+
             const modal = document.createElement('div');
             modal.id = id;
             modal.className = 'aw-modal-overlay';
@@ -8719,17 +8805,17 @@
                     <div class="aw-modal-body">${bodyHtml}</div>
                 </div>
             `;
-    
+
             document.body.appendChild(modal);
-    
+
             modal.querySelector('.aw-modal-close')?.addEventListener('click', () => modal.remove());
             modal.addEventListener('click', (e) => {
                 if (e.target === modal) modal.remove();
             });
-    
+
             return modal;
         }
-    
+
         async function showMessageModal(title, message) {
             const modal = createSimpleModal(
                 MANUAL_MAX_EP_MODAL_ID,
@@ -8742,7 +8828,7 @@
                 `,
                 '420px'
             );
-    
+
             return new Promise(resolve => {
                 modal.querySelector('#aw-msg-ok')?.addEventListener('click', () => {
                     modal.remove();
@@ -8750,7 +8836,7 @@
                 });
             });
         }
-    
+
         async function showConfirmModal(title, message) {
             const modal = createSimpleModal(
                 'aw-confirm-modal',
@@ -8764,16 +8850,16 @@
                 `,
                 '380px'
             );
-    
+
             return new Promise(resolve => {
                 modal.querySelector('#aw-confirm-yes')?.addEventListener('click', () => { modal.remove(); resolve(true); });
                 modal.querySelector('#aw-confirm-no')?.addEventListener('click',  () => { modal.remove(); resolve(false); });
             });
         }
-    
+
         async function askMaxEpisodesModal(info) {
             removeManualMaxEpModal();
-    
+
             const modal = createSimpleModal(
                 MANUAL_MAX_EP_MODAL_ID,
                 'Добавление аниме',
@@ -8782,7 +8868,7 @@
                         Автоматически собраны основные данные. Введи вручную
                         <b>максимальное количество серий</b> для этого аниме.
                     </div>
-    
+
                     <div class="aw-preview">
                         <div><b>Название:</b> ${escapeHtml(info.title || '—')}</div>
                         <div><b>anime_id:</b> ${escapeHtml(info.anime_id || '—')}</div>
@@ -8790,7 +8876,7 @@
                         <div><b>Перевод:</b> ${escapeHtml(info.t_title || '—')}</div>
                         <div><b>translation id:</b> ${escapeHtml(info.t_id || '—')}</div>
                     </div>
-    
+
                     <label class="aw-input-label" for="aw-max-ep-input">Максимум серий</label>
                     <input
                         id="aw-max-ep-input"
@@ -8801,7 +8887,7 @@
                         placeholder="Например: 12"
                     />
                     <div class="aw-error" id="aw-max-ep-error"></div>
-    
+
                     <div class="aw-modal-actions">
                         <button class="aw-cancel-btn" id="aw-max-ep-cancel" type="button">Отмена</button>
                         <button class="aw-confirm-btn" id="aw-max-ep-ok" type="button">OK</button>
@@ -8809,16 +8895,16 @@
                 `,
                 '430px'
             );
-    
+
             return new Promise(resolve => {
                 const input = modal.querySelector('#aw-max-ep-input');
                 const errorEl = modal.querySelector('#aw-max-ep-error');
-    
+
                 function close(result) {
                     modal.remove();
                     resolve(result);
                 }
-    
+
                 function submit() {
                     const value = parseInt(input.value, 10);
                     if (!Number.isFinite(value) || value < 1) {
@@ -8828,26 +8914,26 @@
                     }
                     close(value);
                 }
-    
+
                 modal.querySelector('#aw-max-ep-ok')?.addEventListener('click', submit);
                 modal.querySelector('#aw-max-ep-cancel')?.addEventListener('click', () => close(null));
-    
+
                 input?.addEventListener('keydown', (e) => {
                     if (e.key === 'Enter') submit();
                     if (e.key === 'Escape') close(null);
                 });
-    
+
                 setTimeout(() => input?.focus(), 30);
             });
         }
-    
+
         // =========================================================
         // ANIME DB UI ACTIONS
         // =========================================================
         async function buildAnimeDbListWithProgress() {
             const db = await getAnimeDb();
             const result = [];
-    
+
             for (const item of db) {
                 const progress = await getAnimeProgress(item);
                 if (progress.isFullyFarmed) {
@@ -8855,28 +8941,28 @@
                 }
                 result.push({ ...item, progress });
             }
-    
+
             return result;
         }
-    
+
         async function addCurrentAnimeToDb() {
             const baseData = collectCurrentAnimeBaseData();
-    
+
             if (!baseData.anime_id || !baseData.t_title || !baseData.t_id) {
                 await showMessageModal('Ошибка', 'Не удалось автоматически собрать обязательные данные для текущего аниме.');
                 return false;
             }
-    
+
             const kodikRange = baseData.max_ep ? null : await getEpisodeRangeFromKodik(baseData.t_link);
             const finalRange = kodikRange || {
                 min_ep: baseData.min_ep || 1,
                 max_ep: baseData.max_ep || null,
                 season: baseData.s
             };
-    
+
             const max_ep = finalRange.max_ep || await askMaxEpisodesModal(baseData);
             if (max_ep == null) return false;
-    
+
             const entry = normalizeAnimeEntry({
                 anime_id: baseData.anime_id,
                 s: finalRange.season || baseData.s,
@@ -8888,49 +8974,70 @@
                 title: baseData.title,
                 addedAt: Date.now()
             });
-    
+
+            const progressNow = await getAnimeProgress(entry);
+            const key = buildAnimeUniqueKey(entry);
+            if (!progressNow.isFullyFarmed) {
+                await removeFinishedAnimeArchiveByKey(key);
+            }
+
             if (await isAnimeInFinishedArchive(entry)) {
                 await showMessageModal('Ошибка', 'В данном аниме уже все карты выфармлены');
                 return false;
             }
-    
-            const progressNow = await getAnimeProgress(entry);
+
             if (progressNow.isFullyFarmed) {
                 await addFinishedAnimeToArchive(entry);
                 await showMessageModal('Ошибка', 'В данном аниме уже все карты выфармлены');
                 return false;
             }
-    
+
             const db = await getAnimeDb();
-            const key = buildAnimeUniqueKey(entry);
+            const existingIndex = db.findIndex(item => buildAnimeUniqueKey(item) === key);
+            if (existingIndex !== -1) {
+                const existing = db[existingIndex];
+                const updated = normalizeAnimeEntry({
+                    ...existing,
+                    ...entry,
+                    addedAt: existing.addedAt || entry.addedAt
+                });
+
+                db[existingIndex] = updated;
+                await removeFinishedAnimeArchiveByKey(key);
+                await setAnimeDb(db);
+                await copyText(JSON.stringify(updated, null, 2));
+                await showMessageModal('\u0413\u043e\u0442\u043e\u0432\u043e', '\u0417\u0430\u043f\u0438\u0441\u044c \u0430\u043d\u0438\u043c\u0435 \u0432 \u0431\u0430\u0437\u0435 \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0430.');
+                return true;
+            }
+
             if (db.some(item => buildAnimeUniqueKey(item) === key)) {
                 await showMessageModal('Информация', 'Это аниме уже есть в базе.');
                 return false;
             }
-    
+
             db.push(entry);
             await setAnimeDb(db);
-    
+
             await copyText(JSON.stringify(entry, null, 2));
-    
-            await showMessageModal('Готово', 'Аниме успешно добавлено в базу.');
+
+            await showMessageModal('\u0413\u043e\u0442\u043e\u0432\u043e', '\u0410\u043d\u0438\u043c\u0435 \u0443\u0441\u043f\u0435\u0448\u043d\u043e \u0434\u043e\u0431\u0430\u0432\u043b\u0435\u043d\u043e \u0432 \u0431\u0430\u0437\u0443.');
             return true;
         }
-    
+
         async function openAnimeDbModal() {
             removeAnimeDbModal();
             await syncFinishedArchiveWithDb();
-    
+
             const items = await buildAnimeDbListWithProgress();
-    
+
             let processedEpisodesAll = 0;
             let totalEpisodesAll = 0;
-    
+
             for (const item of items) {
                 processedEpisodesAll += Number(item.progress?.processedEpisodes || 0);
                 totalEpisodesAll += Number(item.progress?.totalEpisodes || 0);
             }
-    
+
             const modal = createSimpleModal(
                 ANIME_DB_MODAL_ID,
                 'База аниме',
@@ -8949,19 +9056,19 @@
                             <div class="aw-card-value">${items.filter(x => x.progress?.isFullyFarmed).length}</div>
                         </div>
                     </div>
-    
+
                     <div class="aw-actions-top">
                         <button class="aw-action-btn" id="aw-add-current-anime-btn" type="button">Добавить текущее аниме</button>
                         <button class="aw-action-btn secondary" id="aw-refresh-anime-db-btn" type="button">Обновить</button>
                     </div>
-    
+
                     <div class="aw-list" id="aw-anime-db-list">
                         ${
                             items.length
                                 ? items.map(item => {
                                     const key = buildAnimeUniqueKey(item);
                                     const progressText = `${item.progress?.processedEpisodes || 0} / ${item.progress?.totalEpisodes || 0}`;
-    
+
                                     return `
                                         <div class="aw-item" data-anime-key="${escapeHtml(key)}">
                                             <div class="aw-item-top">
@@ -8988,12 +9095,12 @@
                 `,
                 '860px'
             );
-    
+
             modal.querySelector('#aw-refresh-anime-db-btn')?.addEventListener('click', async () => {
                 modal.remove();
                 await openAnimeDbModal();
             });
-    
+
             modal.querySelector('#aw-add-current-anime-btn')?.addEventListener('click', async () => {
                 const added = await addCurrentAnimeToDb();
                 if (added) {
@@ -9001,7 +9108,7 @@
                     await openAnimeDbModal();
                 }
             });
-    
+
             modal.querySelectorAll('.aw-remove-anime-btn').forEach(btn => {
                 btn.addEventListener('click', async () => {
                     const key = btn.getAttribute('data-anime-key');
@@ -9011,12 +9118,13 @@
                     const confirmed = await showConfirmModal('Удаление', `Удалить «${escapeHtml(title)}» из базы?`);
                     if (!confirmed) return;
                     await removeAnimeFromDbByKey(key);
+                    await removeFinishedAnimeArchiveByKey(key);
                     removeAnimeDbModal();
                     await openAnimeDbModal();
                 });
             });
         }
-    
+
         // =========================================================
         // UI
         // =========================================================
@@ -9031,15 +9139,15 @@
             const lastCardEl = document.getElementById('aw-active-tab-last-card');
             const title = document.querySelector('#aw-active-tab-panel .aw-title');
             if (!btn || !info || !timer || !daily || !pause || !holder) return;
-    
+
             const visible = isTabVisible();
             const leader = isThisTabLeader();
             const paused = await GM_getValue(COLLECTION_PAUSED_KEY, false);
             const active = scriptEnabledWatch && visible && leader && !paused;
-    
+
             btn.textContent = active ? 'Автолут: ВКЛ' : 'Автолут: ВЫКЛ';
             btn.style.background = active ? '#14532d' : '#7f1d1d';
-    
+
             if (!scriptEnabledWatch) {
                 info.textContent = 'Модуль выключен';
             } else if (!visible) {
@@ -9049,7 +9157,7 @@
             } else {
                 info.textContent = 'Эта вкладка выполняет автолут';
             }
-    
+
             let compactTimerText = '-';
             if (nextRunAt > Date.now()) {
                 const left = nextRunAt - Date.now();
@@ -9070,7 +9178,7 @@
             } else {
                 timer.textContent = 'До попытки: —';
             }
-    
+
             // прогресс-бар
             const progressState = await GM_getValue(DAILY_PROGRESS_KEY, null);
             const limit = await getKnownDailyLimit();
@@ -9093,10 +9201,10 @@
                 }
             }
             daily.textContent = `Сегодня: ${limit ? `${current} / ${limit}` : (current > 0 ? current : '?')}`;
-    
+
             pause.textContent = `Пауза: ${paused ? 'да' : 'нет'}`;
             holder.textContent = `Вкладка: ${leader ? 'ведущая' : 'ожидание'}`;
-    
+
             // последняя полученная карта
             if (lastCardEl) {
                 try {
@@ -9117,14 +9225,14 @@
                 }
             }
         }
-    
+
         async function toggleWatch() {
             scriptEnabledWatch = !(await GM_getValue(STORAGE_KEY_WATCH, true));
             await GM_setValue(STORAGE_KEY_WATCH, scriptEnabledWatch);
-    
+
             if (scriptEnabledWatch) {
                 tryAcquireTabLock();
-    
+
                 if (isTabVisible() && isThisTabLeader()) {
                     safePush('success', 'Автолут включён');
                     scheduleNext(500);
@@ -9137,30 +9245,30 @@
                 safePush('info', 'Автолут выключен');
                 stopMainCardCheckLogic();
             }
-    
+
             updateButtonState();
         }
-    
+
         async function togglePanelCollapsed() {
             const panel = document.getElementById('aw-active-tab-panel');
             const body = document.getElementById('aw-active-tab-panel-body');
             const btn = document.getElementById('aw-active-tab-collapse');
             if (!body || !btn || !panel) return;
-    
+
             const current = await GM_getValue(PANEL_COLLAPSED_KEY, false);
             const next = !current;
             await GM_setValue(PANEL_COLLAPSED_KEY, next);
-    
+
             if (!next) {
                 // Раскрываем: переключаемся на top, чтобы тело росло вниз
                 const rect = panel.getBoundingClientRect();
                 panel.style.top    = rect.top + 'px';
                 panel.style.bottom = 'auto';
             }
-    
+
             body.style.display = next ? 'none' : 'block';
             btn.textContent = next ? '▣' : '—';
-    
+
             if (!next) {
                 // Сохраняем новую позицию (top-based)
                 await GM_setValue(PANEL_POSITION_KEY, {
@@ -9168,24 +9276,24 @@
                     top:  panel.style.top
                 });
             }
-    
+
             updateButtonState();
         }
-    
+
         async function applyPanelCollapsedState() {
             const body = document.getElementById('aw-active-tab-panel-body');
             const btn = document.getElementById('aw-active-tab-collapse');
             if (!body || !btn) return;
-    
+
             const collapsed = await GM_getValue(PANEL_COLLAPSED_KEY, false);
             body.style.display = collapsed ? 'none' : 'block';
             btn.textContent = collapsed ? '▣' : '—';
             updateButtonState();
         }
-    
+
         async function createPanel() {
             if (document.getElementById('aw-active-tab-panel')) return;
-    
+
             GM_addStyle(`
                 #aw-active-tab-panel {
                     position: fixed;
@@ -9621,7 +9729,7 @@
                     }
                 }
             `);
-    
+
             const panel = document.createElement('div');
             panel.id = 'aw-active-tab-panel';
             panel.innerHTML = `
@@ -9648,7 +9756,7 @@
                 </div>
             `;
             document.body.appendChild(panel);
-    
+
             panel.querySelector('#aw-active-tab-toggle').addEventListener('click', toggleWatch);
             panel.querySelector('#aw-open-anime-db').addEventListener('click', openAnimeDbModal);
             panel.querySelector('#aw-open-stats').addEventListener('click', openStatsModal);
@@ -9657,22 +9765,22 @@
                 safePush('info', 'Проверка лимита через профиль выполнена');
             });
             panel.querySelector('#aw-active-tab-collapse').addEventListener('click', togglePanelCollapsed);
-    
+
             installPanelDrag(panel);
             await applyPanelPosition(panel);
-    
+
             applyPanelCollapsedState();
             updateButtonState();
         }
-    
+
         function installPanelDrag(panel) {
             const head = panel.querySelector('.aw-head');
             if (!head) return;
-    
+
             head.style.cursor = 'grab';
             let dragging = false;
             let startX = 0, startY = 0, origLeft = 0, origTop = 0;
-    
+
             head.addEventListener('mousedown', (e) => {
                 if (e.button !== 0) return;
                 dragging = true;
@@ -9687,7 +9795,7 @@
                 head.style.cursor = 'grabbing';
                 e.preventDefault();
             });
-    
+
             document.addEventListener('mousemove', (e) => {
                 if (!dragging) return;
                 const dx = e.clientX - startX;
@@ -9699,7 +9807,7 @@
                 panel.style.right  = 'auto';
                 panel.style.bottom = 'auto';
             });
-    
+
             document.addEventListener('mouseup', async () => {
                 if (!dragging) return;
                 dragging = false;
@@ -9710,7 +9818,7 @@
                 });
             });
         }
-    
+
         async function applyPanelPosition(panel) {
             const pos = await GM_getValue(PANEL_POSITION_KEY, null);
             if (pos && pos.left) {
@@ -9722,35 +9830,35 @@
                 }
             }
         }
-    
+
         function startPanelTicker() {
             stopPanelTicker();
             panelTickerIntervalId = setInterval(() => {
                 updateButtonState();
             }, 1000);
         }
-    
+
         function stopPanelTicker() {
             if (panelTickerIntervalId) {
                 clearInterval(panelTickerIntervalId);
                 panelTickerIntervalId = null;
             }
         }
-    
+
         // =========================================================
         // EVENTS
         // =========================================================
         function handleTabActivityChange() {
             updateButtonState();
-    
+
             if (!isTabVisible()) {
                 removeTabLockIfMine();
                 stopMainCardCheckLogic();
                 return;
             }
-    
+
             tryAcquireTabLock();
-    
+
             if (scriptEnabledWatch && isThisTabLeader()) {
                 scheduleNext(RESUME_DELAY_MS);
             }
@@ -9759,13 +9867,13 @@
         function handleBeforeUnload() {
             removeTabLockIfMine();
         }
-    
+
         function installStorageListener() {
             if (storageHandler) return;
             storageHandler = (e) => {
                 if (e.key === TAB_LOCK_KEY) {
                     updateButtonState();
-    
+
                     if (scriptEnabledWatch && isTabVisible() && isThisTabLeader()) {
                         scheduleNext(RESUME_DELAY_MS);
                     } else if (!isThisTabLeader()) {
@@ -9781,7 +9889,7 @@
             window.removeEventListener('storage', storageHandler);
             storageHandler = null;
         }
-    
+
         // =========================================================
         // INIT
         // =========================================================
@@ -9790,34 +9898,34 @@
                 log('Пользователь не найден, скрипт остановлен.');
                 return;
             }
-    
+
             scriptEnabledWatch = await GM_getValue(STORAGE_KEY_WATCH, true);
             pauseOnLimitEnabled = await GM_getValue(PAUSE_ON_LIMIT_ENABLED_KEY, true);
-    
+
             if (await GM_getValue(MAX_FAILED_ATTEMPTS_KEY, null) === null) {
                 await GM_setValue(MAX_FAILED_ATTEMPTS_KEY, 2);
             }
             if (await GM_getValue(PAUSE_ON_LIMIT_ENABLED_KEY, null) === null) {
                 await GM_setValue(PAUSE_ON_LIMIT_ENABLED_KEY, true);
             }
-    
+
             await ensureDailyProgressState();
             await ensureAnimeDbInitialized();
             await syncFinishedArchiveWithDb();
-    
+
             createPanel();
             installFetchInterceptor();
             installSiteNotificationInterceptor();
             installStorageListener();
             startTabLockHeartbeat();
             startPanelTicker();
-    
+
             document.addEventListener('visibilitychange', handleTabActivityChange);
             window.addEventListener('beforeunload', handleBeforeUnload);
-    
+
             tryAcquireTabLock();
             await updateCardCounter(false);
-    
+
             if (isTabVisible() && scriptEnabledWatch && isThisTabLeader()) {
                 // Восстанавливаем таймер из прошлого запроса — не сбрасываем при перезагрузке
                 const restored = await restoreTimerFromStorage();
@@ -9827,7 +9935,7 @@
             } else {
                 stopMainCardCheckLogic();
             }
-    
+
             log('Инициализация завершена.');
         }
 
@@ -9851,7 +9959,7 @@
 
             window.__suiteAutoLootCardsInstalled = false;
         };
-    
+
         init();
     })();
   }
@@ -9864,7 +9972,7 @@
 
     (function () {
       'use strict';
-    
+
       // ═══════════════════════════════════════════════════════════════
       //  НАСТРОЙКИ — заполни токен бота и ID чата
       // ═══════════════════════════════════════════════════════════════
@@ -9872,11 +9980,11 @@
       const GITHUB_REPO  = 'victorina';
       const META_FILE    = 'meta.json';
       const DB_FILE      = 'quiz_db.json';
-    
+
       const RAW_BASE     = `https://raw.githubusercontent.com/${GITHUB_USER}/${GITHUB_REPO}/main`;
       const META_URL     = `${RAW_BASE}/${META_FILE}`;
       const DB_URL       = `${RAW_BASE}/${DB_FILE}`;
-    
+
       // Порог нечёткого совпадения (0.0–1.0): 0.9 = почти точно, 0.6 = похожее
       const FUZZY_THRESHOLD       = 0.6;
       const EXACT_THRESHOLD       = 0.9;
@@ -9885,7 +9993,7 @@
       function quizLog(...args) {
         if (QUIZ_DEBUG) console.log(...args);
       }
-    
+
       // ═══════════════════════════════════════════════════════════════
       //  CSS
       // ═══════════════════════════════════════════════════════════════
@@ -9900,7 +10008,7 @@
           0%, 100% { box-shadow: 0 0 8px 2px rgba(255,210,50,0.5), 0 0 0 0px rgba(255,210,50,0.3); }
           50%       { box-shadow: 0 0 18px 6px rgba(255,210,50,0.25), 0 0 30px 10px rgba(255,210,50,0.1); }
         }
-    
+
         /* Точный ответ — зелёный */
         .labyrinth__quiz-btn--correct {
           background:  #1a6e42 !important;
@@ -9915,7 +10023,7 @@
           transform: translateY(-50%);
           font-size: 16px; color: #7effc0;
         }
-    
+
         /* Неточный ответ — жёлтый */
         .labyrinth__quiz-btn--fuzzy {
           background:  #3d3010 !important;
@@ -9932,7 +10040,7 @@
         }
       `;
       document.head.appendChild(style);
-    
+
       // ═══════════════════════════════════════════════════════════════
       //  ЛОКАЛЬНОЕ ХРАНИЛИЩЕ
       // ═══════════════════════════════════════════════════════════════
@@ -9948,14 +10056,14 @@
       function setLastCheck()   { GM_setValue('last_db_check', Date.now()); }
       function getLocalMeta()   { return GM_getValue('local_meta_count', -1); }
       function setLocalMeta(n)  { GM_setValue('local_meta_count', n); }
-    
+
       // ═══════════════════════════════════════════════════════════════
       //  НЕЧЁТКОЕ СРАВНЕНИЕ (расстояние Левенштейна)
       // ═══════════════════════════════════════════════════════════════
       function normalize(str) {
         return String(str).trim().toLowerCase().replace(/\s+/g, ' ');
       }
-    
+
       // ═══════════════════════════════════════════════════════════════
       //  ИГРОВЫЕ ПРЕФИКСЫ — фразы, которые появляются перед вопросом
       //  и не являются его частью. Просто добавь новую строку в массив.
@@ -9965,7 +10073,7 @@
         'Ты отказался от отголоска и выбрал свой путь.',
         // 'Лабиринт открыл новые пути.',   // ← пример как добавить новую фразу
       ];
-    
+
       // Убирает игровой префикс из текста вопроса перед поиском в базе.
       // Сравнение нечёткое (без учёта регистра и лишних пробелов).
       function cleanQuestionText(text) {
@@ -9979,7 +10087,7 @@
         }
         return text;
       }
-    
+
       function similarity(a, b) {
         a = normalize(a); b = normalize(b);
         if (a === b) return 1;
@@ -9996,25 +10104,25 @@
         }
         return 1 - dp[m][n] / Math.max(m, n);
       }
-    
+
       function findQuestion(text, db) {
         let best = null, bestScore = 0;
         const normText = normalize(text);
         const textLen  = normText.length;
-    
+
         for (const q of db.questions) {
           const normQ = normalize(q.question);
           // Быстрая предфильтрация по длине: если длины отличаются более чем вдвое — пропускаем
           const ratio = normQ.length / textLen;
           if (ratio < 0.5 || ratio > 2) continue;
-    
+
           const score = similarity(normText, normQ);
           if (score > bestScore) { bestScore = score; best = q; }
         }
         if (!best || bestScore < FUZZY_THRESHOLD) return null;
         return { match: best, score: bestScore };
       }
-    
+
       // Найти кнопку с лучшим совпадением ответа
       function findAnswerButton(answerText, buttons) {
         let best = null, bestScore = 0;
@@ -10025,7 +10133,7 @@
         if (!best || bestScore < FUZZY_THRESHOLD) return null;
         return { btn: best, score: bestScore };
       }
-    
+
       // ═══════════════════════════════════════════════════════════════
       //  GITHUB FETCH
       // ═══════════════════════════════════════════════════════════════
@@ -10046,7 +10154,7 @@
           });
         });
       }
-    
+
       // ═══════════════════════════════════════════════════════════════
       //  TELEGRAM
       // ═══════════════════════════════════════════════════════════════
@@ -10074,7 +10182,7 @@
         }
         return msg;
       }
-    
+
       // ═══════════════════════════════════════════════════════════════
       //  СИНХРОНИЗАЦИЯ БАЗЫ
       // ═══════════════════════════════════════════════════════════════
@@ -10085,19 +10193,19 @@
         setLastCheck();
         quizLog(`[QuizHL] База загружена: ${db.questions.length} вопросов`);
       }
-    
+
       async function checkSync() {
         const localDB   = getLocalDB();
         const localMeta = getLocalMeta();
         const ONE_DAY   = 24 * 60 * 60 * 1000;
-    
+
         // Первый запуск — базы нет
         if (!localDB.questions.length) {
           quizLog('[QuizHL] Первый запуск — загружаю базу...');
           await downloadDB();
           return;
         }
-    
+
         // Каждый заход — проверяем лёгкий meta.json
         try {
           const meta = await gmFetch(META_URL);
@@ -10109,14 +10217,14 @@
         } catch(e) {
           console.warn('[QuizHL] Не удалось получить meta.json:', e);
         }
-    
+
         // Раз в сутки — принудительная полная проверка
         if (Date.now() - getLastCheck() > ONE_DAY) {
           quizLog('[QuizHL] Суточная проверка базы...');
           await downloadDB();
         }
       }
-    
+
       // ═══════════════════════════════════════════════════════════════
       //  ОБРАБОТКА ВИКТОРИНЫ
       // ═══════════════════════════════════════════════════════════════
@@ -10162,47 +10270,47 @@
         clearTimeout(processTimer);
         processTimer = setTimeout(processQuiz, delay);
       }
-    
+
       function processQuiz() {
         if (!quizDbReady) return;
 
         const quiz = getQuizRoot();
         if (!quiz || !isQuizVisible(quiz)) return;
-    
+
         const buttons = [...quiz.querySelectorAll('.labyrinth__quiz-btn')].filter(isQuizVisible);
         if (!buttons.length) return;
-    
+
         const questionText = getQuizQuestionText(quiz);
         if (!questionText) return;
-    
+
         // Не обрабатывать один вопрос дважды, но сброс происходит через минуту
         if (questionText === lastProcessedQuestion) return;
         lastProcessedQuestion = questionText;
-    
+
         // Сброс через 60 сек — КД на ход минута, тот же вопрос может появиться снова
         clearTimeout(resetTimer);
         resetTimer = setTimeout(() => { lastProcessedQuestion = ''; }, 60_000);
-    
+
         // Сброс предыдущей подсветки
         buttons.forEach(b => b.classList.remove(
           'labyrinth__quiz-btn--correct',
           'labyrinth__quiz-btn--fuzzy'
         ));
-    
+
         // Поиск запускаем асинхронно, чтобы не блокировать рендер страницы
         const db      = getLocalDB();
         const options = buttons.map(b => b.textContent.trim());
         // Очищаем текст от возможного игрового префикса перед поиском в базе,
         // но оригинальный текст сохраняем для отправки в Telegram
         const cleanedQuestionText = cleanQuestionText(questionText);
-    
+
         const runSearch = () => {
           const found = findQuestion(cleanedQuestionText, db);
-    
+
           if (found) {
             const isExactQuestion = found.score >= EXACT_THRESHOLD;
             const answerResult    = findAnswerButton(found.match.answer, buttons);
-    
+
             if (isExactQuestion && answerResult && answerResult.score >= EXACT_THRESHOLD) {
               answerResult.btn.classList.add('labyrinth__quiz-btn--correct');
               quizLog(`[QuizHL] ✅ Точный ответ: "${found.match.answer}"`);
@@ -10218,14 +10326,14 @@
             sendQuizReport('NEW', questionText, options, null);
           }
         };
-    
+
         if (typeof requestIdleCallback === 'function') {
           requestIdleCallback(runSearch, { timeout: 500 });
         } else {
           setTimeout(runSearch, 0);
         }
       }
-    
+
       // ═══════════════════════════════════════════════════════════════
       //  OBSERVER
       // ═══════════════════════════════════════════════════════════════
@@ -10238,7 +10346,7 @@
         characterData: true,
         attributeFilter: ['style', 'class', 'hidden']
       });
-    
+
       // ═══════════════════════════════════════════════════════════════
       //  СТАРТ
       // ═══════════════════════════════════════════════════════════════
@@ -10246,7 +10354,7 @@
         quizDbReady = true;
         scheduleProcessQuiz(0);
       });
-    
+
     })();
   }
 
