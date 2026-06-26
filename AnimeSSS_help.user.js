@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      2.38
+// @version      2.37
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -83,8 +83,6 @@
     leftKey:       'KeyA',
     middleKey:     'KeyW',
     rightKey:      'KeyD',
-    guardConfirmKey:'KeyQ',
-    guardCancelKey: 'KeyE',
     panelCollapsed: false,
 
     // Позиции панелей (сохраняются при перетаскивании)
@@ -839,27 +837,6 @@
     #suite-settings-panel * { box-sizing:border-box; }
     #suite-settings-panel .neon-outline-wrapper { display:none !important; }
     #suite-settings-panel input[type=range] { width:100%;accent-color:#0ea5e9; }
-    #suite-menu-tooltip {
-      position: fixed;
-      z-index: 2147483647;
-      max-width: 270px;
-      padding: 10px 12px;
-      border-radius: 6px;
-      color: #fef3c7;
-      background: rgba(28,25,23,.98);
-      border-left: 3px solid var(--suite-tip-accent,#f59e0b);
-      box-shadow: 0 12px 30px rgba(0,0,0,.42);
-      font: 12px/1.35 "Segoe UI", Arial, sans-serif;
-      pointer-events: none;
-      opacity: 0;
-      transform: translateY(-50%) translateX(-4px);
-      transition: opacity .12s ease, transform .12s ease;
-      white-space: normal;
-    }
-    #suite-menu-tooltip.show {
-      opacity: 1;
-      transform: translateY(-50%) translateX(0);
-    }
     .suite-toggle {
       position:relative;display:inline-block;width:36px;height:20px;flex-shrink:0;
     }
@@ -1122,18 +1099,6 @@
   // ============================================================
 
   let confirmedCard=null, confirmDialog=null;
-  function confirmGuardSelection(){
-    if(!confirmDialog || confirmDialog.style.display !== 'flex') return false;
-    confirmDialog.style.display='none';
-    if(confirmedCard){ const c=confirmedCard; confirmedCard=null; c.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,view:window})); }
-    return true;
-  }
-  function cancelGuardSelection(){
-    if(!confirmDialog || confirmDialog.style.display !== 'flex') return false;
-    confirmDialog.style.display='none';
-    confirmedCard=null;
-    return true;
-  }
 
   function createConfirmDialog() {
     const overlay=document.createElement('div');
@@ -1145,16 +1110,20 @@
     const title=document.createElement('div'); title.textContent='Карта значительно хуже'; title.style.cssText='font-size:16px;font-weight:700;margin-bottom:10px;color:#f87171';
     const msg=document.createElement('div'); msg.id='cv-confirm-msg'; msg.style.cssText='font-size:13px;color:#94a3b8;line-height:1.6;margin-bottom:20px';
     const btns=document.createElement('div'); btns.style.cssText='display:flex;gap:10px;justify-content:center';
-    const btnOk=document.createElement('button'); btnOk.id='cv-confirm-ok'; btnOk.textContent='Да, выбрать';
+    const btnOk=document.createElement('button'); btnOk.textContent='Да, выбрать';
     btnOk.style.cssText='padding:9px 22px;border:none;border-radius:9px;cursor:pointer;background:#7f1d1d;color:#fca5a5;font-weight:600;font-size:13px;';
     btnOk.onmouseover=()=>btnOk.style.background='#991b1b'; btnOk.onmouseout=()=>btnOk.style.background='#7f1d1d';
-    const btnCancel=document.createElement('button'); btnCancel.id='cv-confirm-cancel'; btnCancel.textContent='Отмена';
+    const btnCancel=document.createElement('button'); btnCancel.textContent='Отмена';
     btnCancel.style.cssText='padding:9px 22px;border:none;border-radius:9px;cursor:pointer;background:#1e293b;color:#94a3b8;font-weight:600;font-size:13px;';
     btnCancel.onmouseover=()=>btnCancel.style.background='#334155'; btnCancel.onmouseout=()=>btnCancel.style.background='#1e293b';
     btns.append(btnOk,btnCancel); box.append(icon,title,msg,btns); overlay.appendChild(box); document.body.appendChild(overlay);
-    btnOk.addEventListener('click',confirmGuardSelection);
-    btnCancel.addEventListener('click',cancelGuardSelection);
-    overlay.addEventListener('click',e=>{ if(e.target===overlay)cancelGuardSelection(); });
+    btnOk.addEventListener('click',()=>{
+      overlay.style.display='none';
+      if(confirmedCard){ const c=confirmedCard; c.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,view:window})); }
+    });
+    const close=()=>{ overlay.style.display='none'; confirmedCard=null; };
+    btnCancel.addEventListener('click',close);
+    overlay.addEventListener('click',e=>{ if(e.target===overlay)close(); });
     return overlay;
   }
 
@@ -1847,7 +1816,6 @@
     {s:'заблокирована вами и не может быть переплавлена',        icon:'fire',   title:'Внимание',    theme:'rose'      },
     {s:'в очереди на обмен и не может быть переплавлена',        icon:'fire',   title:'Внимание',    theme:'rose'      },
     {s:'в очереди на обмен и не может быть заблокирована',        icon:'lock',   title:'Внимание',    theme:'rose'      },
-    {s:'Одна из карт которую вы превращаете в энергию находится в очереди на обмен', icon:'fire', title:'Внимание', theme:'rose'},
     {s:'Вы удалены из списка',                                    icon:'user',   title:'Список',      theme:'neon-pink' },
     {s:'Вы добавлены в список',                                   icon:'user',   title:'Список',      theme:'neon-green'},
     {s:'Пользователь удалён из игнора',                           icon:'user',   title:'Игнор',       theme:'emerald'   },
@@ -1900,7 +1868,6 @@
       theme:'rose'
     },
     {s:'уже находится в очереди на обмен',                       icon:'trade',  title:'Внимание',    theme:'neon-amber'},
-    {s:'Слишком большая разница в спросе',                       icon:'warn',   title:'Обмен',       theme:'neon-amber'},
     {s:'уже добавлена в обмен',                                  icon:'trade',  title:'Внимание',    theme:'neon-amber'},
     {s:'больше трёх карт',                                       icon:'shield', title:'Внимание',    theme:'neon-amber'},
     {s:'больше двух карт ранга A',                               icon:'shield', title:'Внимание',    theme:'neon-amber'},
@@ -1987,7 +1954,6 @@
     {s:'сняли блокировку с пользователя',                         icon:'shield', title:'Разблокировка','theme':'emerald'},
     // ── Порция 3 ─────────────────────────────────────────
     {s:'Сначала победи сундук-мимик',                             icon:'warn',   title:'Внимание',    theme:'neon-amber'},
-    {s:'Ты сбежал от мимика',                                     icon:'warn',   title:'Сундук',      theme:'neon-amber'},
     {s:'Активный сундук-мимик не найден',                         icon:'warn',   title:'Сундук',      theme:'neon-amber'},
     {s:'Вы отклонили заявку',                                     icon:'user',   title:'Заявка',      theme:'rose'      },
     {s:'Заявка на замену арта не найдена',                        icon:'warn',   title:'Заявка',      theme:'neon-amber'},
@@ -2034,8 +2000,6 @@
     // ── Порция 5 ─────────────────────────────────────────
     {s:'Риск не оправдался',                                       icon:'warn',   title:'Неудача',     theme:'rose'      },
     {s:'Ловушка активирована',                                     icon:'warn',   title:'Ловушка',     theme:'rose'      },
-    {s:'Ты выбрался из ловушки',                                   icon:'check',  title:'Ловушка',     theme:'emerald'   },
-    {s:'Сначала выберись из ловушки',                              icon:'warn',   title:'Ловушка',     theme:'neon-amber'},
     {s:'Сначала выполни условие коллекции',                        icon:'warn',   title:'Внимание',    theme:'neon-amber'},
     {s:'Путь закрыт. Сначала собери нужное количество одинаковых карт.', icon:'lock', title:'Путь закрыт', theme:'neon-amber'},
     {s:'Вы уже выставили свою оценку для данной статьи',           icon:'warn',   title:'Внимание',    theme:'neon-amber'},
@@ -2043,9 +2007,6 @@
     {s:'Сначала сделай выбор в Комнате отголосков',                icon:'warn',   title:'Отголосок',   theme:'neon-amber'},
     {r:/Лабиринт временно недоступен с \d{1,2}:\d{2} до \d{1,2}:\d{2}/i, icon:'clock', title:'Лабиринт', theme:'neon-amber'},
     {s:'Лабиринт откликнулся на твой путь',                        icon:'bolt',   title:'Лабиринт',    theme:'neon-blue' },
-    {s:'Следующий шаг ещё недоступен',                             icon:'clock',  title:'Лабиринт',    theme:'neon-amber'},
-    {s:'Купить ход можно только когда доступных ходов не осталось', icon:'coin',   title:'Лабиринт',    theme:'neon-amber'},
-    {s:'На сегодня попытки закончились',                           icon:'clock',  title:'Лабиринт',    theme:'rose'      },
     {s:'Щит активирован',                                          icon:'shield', title:'Щит',         theme:'neon-blue' },
     {s:'Алтарь наградил тебя',                                     icon:'star',   title:'Награда',     theme:'neon-green'},
     {s:'Сундук открыт',                                            icon:'star',   title:'Сундук',      theme:'neon-green'},
@@ -2053,12 +2014,10 @@
     {s:'Участник принят в клуб',                                   icon:'user',   title:'Клуб',        theme:'emerald'   },
     {s:'Участник исключён из клуба',                               icon:'user',   title:'Клуб',        theme:'rose'      },
     {s:'Статус изменён',                                           icon:'save',   title:'Статус',      theme:'indigo'    },
-    {s:'Подписка на уведомления обновлена',                        icon:'bell',   title:'Уведомления', theme:'neon-blue' },
     {s:'Чат временно закрыт на ежедневное обслуживание',           icon:'clock',  title:'Обслуживание',theme:'neon-amber'},
     {r:/Возможность создания карточек отключена с \d{1,2}:\d{2} до \d{1,2}:\d{2}/i, icon:'clock', title:'Обслуживание', theme:'neon-amber'},
     {r:/Обмены между пользователями отключены с \d{1,2}:\d{2} до \d{1,2}:\d{2}/i, icon:'clock', title:'Обслуживание', theme:'neon-amber'},
     {r:/Куплен \+\d+ ход/i,                                       icon:'coin',   title:'Покупка',     theme:'neon-green'},
-    {r:/У вас уже есть активная ставка на \d{1,2}:\d{2}\. Новую можно сделать только после того, как это время пройдёт/i, icon:'clock', title:'Ставка', theme:'neon-amber'},
     {s:'Жалоба отправлена',                                        icon:'warn',   title:'Жалоба',      theme:'indigo'    },
     {s:'Вы уже выставили свою оценку для данного комментария',     icon:'warn',   title:'Внимание',    theme:'neon-amber'},
     // ── Порция 6 ─────────────────────────────────────────
@@ -2080,7 +2039,6 @@
     {s:'Карта куплена',                                           icon:'bag',    title:'Покупка',     theme:'neon-green'},
     {s:'Недостаточно AСС',                                         icon:'coin',   title:'Ошибка',      theme:'rose'      },
     {s:'Недостаточно ходов для установки ловушки',                  icon:'clock',  title:'Ловушка',     theme:'rose'      },
-    {s:'Сначала купи карту у торговца или откажись',                icon:'bag',    title:'Торговец',    theme:'neon-amber'},
     {s:'Возможность пробуждения карт приостановлена',               icon:'lock',   title:'Пробуждение', theme:'neon-amber'},
     {
       s:'Карта пока не доступна к пробуждению, модераторы уже получили вашу заявку ' +
@@ -2140,7 +2098,6 @@
     },
     {s:'Ты уже захватывал комнату для клуба', icon:'shield', title:'Клуб', theme:'neon-amber'},
     {s:'Вы уже получали карту с этого пака', icon:'warn', title:'Пак', theme:'neon-amber'},
-    {s:'Публикация успешно убрана из ваших закладок на сайте', icon:'save', title:'Закладки', theme:'emerald'},
     {
       r:/с момента Вашего отсутствия на сайте Вам было прислано .* сообщения/i,
       icon:'bell',
@@ -2749,7 +2706,7 @@
       }
       .cv-stones-floating-btn:hover{background:#123044;border-color:#22d3ee;filter:brightness(1.08);}
       .cv-stones-progress{
-        position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:2147483600;
+        position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:999;
         background:rgba(12,12,22,.98);color:#e2e8f0;padding:9px 14px;border-radius:12px;
         font-size:13px;font-family:'Segoe UI',Arial,sans-serif;display:none;
         border:1px solid rgba(34,211,238,.35);box-shadow:0 8px 32px rgba(0,0,0,.65);
@@ -2989,21 +2946,11 @@
   }
 
   function mountProgressBox() {
+    cptInjectStyles();
     const el = document.createElement('div');
-    el.className = 'cv-stones-progress';
+    el.className = 'cv-stones-progress cpt-toast cpt-neon-blue';
     document.body.appendChild(el);
     return el;
-  }
-
-  function showStonesProgress(el, text) {
-    if(!el) return;
-    el.style.display = 'block';
-    el.textContent = text;
-  }
-
-  function hideStonesProgress(el, delay = 800) {
-    if(!el) return;
-    setTimeout(() => { el.style.display = 'none'; }, delay);
   }
 
   /** Блокирует кнопку на время async-операции, исключая двойной клик */
@@ -3058,7 +3005,8 @@
       // Вся логика клика обёрнута в withButtonLock — двойной клик невозможен
       refreshBtn.addEventListener('click', withButtonLock(refreshBtn, async () => {
         try {
-          showStonesProgress(progressBox, 'ИДЕТ ПОДСЧЕТ КАМНЕЙ');
+          progressBox.style.display = 'block';
+          progressBox.textContent = 'ИДЕТ ОБНОВЛЕНИЕ';
 
           await Promise.all([
             save(CACHE_KEY, '[]'),
@@ -3068,25 +3016,26 @@
 
           const maxPages = await getMaxPageCount();
           await updateCacheIncremental({
-            showProgress: (page, total) => { showStonesProgress(progressBox, `Подсчитано: ${page} / ${total}`); },
+            showProgress: (page, total) => { progressBox.textContent = `Подсчитано: ${page} / ${total}`; },
             maxPages,
             forceFull: true,
             onTotals: updateTotalsUI,
           });
         } catch (e) {
           console.error(e);
-          showStonesProgress(progressBox, 'Ошибка подсчета камней');
+          progressBox.textContent = 'Ошибка обновления';
         } finally {
-          hideStonesProgress(progressBox);
+          setTimeout(() => { progressBox.style.display = 'none'; }, 800);
         }
       }));
 
       document.body.appendChild(refreshBtn);
 
-      showStonesProgress(progressBox, 'ИДЕТ ПОДСЧЕТ КАМНЕЙ');
+      progressBox.style.display = 'block';
+      progressBox.textContent = 'ИДЕТ ОБНОВЛЕНИЕ';
       const maxPages = await getMaxPageCount();
       const transactions = await updateCacheIncremental({ maxPages, forceFull: false, onTotals: updateTotalsUI });
-      hideStonesProgress(progressBox, 300);
+      progressBox.style.display = 'none';
       updateTotalsUI(calculateTotals(transactions));
 
       const extraBox = document.createElement('div');
@@ -4234,7 +4183,7 @@
     refreshHkSummary();
   }
   function cancelKeyCapture(){ if(!captureState)return; captureState.input.value=codeToLabel(cfg[captureState.settingKey]); captureState.input.style.borderColor='#1e293b'; captureState=null; }
-  function refreshHkSummary(){ if(!hkSummary)return; hkSummary.innerHTML=`Купить: <b style="color:#e2e8f0">${codeToLabel(cfg.buyKey)}</b><br>← <b style="color:#e2e8f0">${codeToLabel(cfg.leftKey)}</b> &nbsp;↕ <b style="color:#e2e8f0">${codeToLabel(cfg.middleKey)}</b> &nbsp;→ <b style="color:#e2e8f0">${codeToLabel(cfg.rightKey)}</b><br>Защитное окно: <b style="color:#e2e8f0">${codeToLabel(cfg.guardConfirmKey)}</b> выбрать &nbsp; <b style="color:#e2e8f0">${codeToLabel(cfg.guardCancelKey)}</b> отмена`; }
+  function refreshHkSummary(){ if(!hkSummary)return; hkSummary.innerHTML=`Купить: <b style="color:#e2e8f0">${codeToLabel(cfg.buyKey)}</b><br>← <b style="color:#e2e8f0">${codeToLabel(cfg.leftKey)}</b> &nbsp;↕ <b style="color:#e2e8f0">${codeToLabel(cfg.middleKey)}</b> &nbsp;→ <b style="color:#e2e8f0">${codeToLabel(cfg.rightKey)}</b>`; }
   function setHkPanelCollapsed(c){ cfg.panelCollapsed=!!c; saveCfg(); if(!hkExpanded||!hkCollapsedBtn)return; hkExpanded.style.display=c?'none':'block'; hkCollapsedBtn.style.display=c?'flex':'none'; }
 
   function createHotkeyPanel(){
@@ -4249,11 +4198,10 @@
     const body=document.createElement('div'); body.style.cssText='padding:12px';
     const info=document.createElement('div'); info.textContent='Кликни поле и нажми клавишу'; info.style.cssText='font-size:11px;color:#334155;margin-bottom:10px';
     const buyF=makeHkField('Купить пак','buyKey'), leftF=makeHkField('Левая карта','leftKey'), midF=makeHkField('Средняя карта','middleKey'), rightF=makeHkField('Правая карта','rightKey');
-    const guardOkF=makeHkField('Защитное окно: да','guardConfirmKey'), guardCancelF=makeHkField('Защитное окно: отмена','guardCancelKey');
     hkSummary=document.createElement('div'); hkSummary.style.cssText='margin-top:10px;padding:9px;border-radius:8px;background:#0f172a;font-size:11px;line-height:1.8;color:#64748b'; refreshHkSummary();
     const resetBtn=document.createElement('button'); resetBtn.type='button'; resetBtn.textContent='По умолчанию'; resetBtn.style.cssText='width:100%;margin-top:10px;border:none;border-radius:8px;background:#1e293b;color:#94a3b8;padding:8px;cursor:pointer;font-size:12px';
-    resetBtn.addEventListener('click',()=>{ ['buyKey','leftKey','middleKey','rightKey','guardConfirmKey','guardCancelKey'].forEach(k=>{ cfg[k]=DEFAULT_SETTINGS[k]; }); saveCfg(); [buyF,leftF,midF,rightF,guardOkF,guardCancelF].forEach(f=>f.input.value=codeToLabel(cfg[f.input.dataset.settingKey])); refreshHkSummary(); setHkPanelCollapsed(false); });
-    body.append(info,buyF.row,leftF.row,midF.row,rightF.row,guardOkF.row,guardCancelF.row,hkSummary,resetBtn); hkExpanded.append(hdr,body);
+    resetBtn.addEventListener('click',()=>{ ['buyKey','leftKey','middleKey','rightKey'].forEach(k=>{ cfg[k]=DEFAULT_SETTINGS[k]; }); saveCfg(); [buyF,leftF,midF,rightF].forEach(f=>f.input.value=codeToLabel(cfg[f.input.dataset.settingKey])); refreshHkSummary(); setHkPanelCollapsed(false); });
+    body.append(info,buyF.row,leftF.row,midF.row,rightF.row,hkSummary,resetBtn); hkExpanded.append(hdr,body);
     hkCollapsedBtn=document.createElement('button'); hkCollapsedBtn.type='button'; hkCollapsedBtn.textContent='⌨'; hkCollapsedBtn.title='Горячие клавиши';
     hkCollapsedBtn.style.cssText='width:44px;height:44px;display:none;align-items:center;justify-content:center;border:1px solid #1e293b;border-radius:12px;background:#0a0f1a;color:#e2e8f0;cursor:pointer;font-size:20px;box-shadow:0 6px 20px rgba(0,0,0,.5)';
     hkCollapsedBtn.addEventListener('click',()=>setHkPanelCollapsed(false));
@@ -4295,10 +4243,6 @@
     if(captureState){ e.preventDefault(); e.stopPropagation(); if(e.code==='Escape'){cancelKeyCapture();return;} if(/^(Shift|Control|Alt|Meta)(Left|Right)$/.test(e.code))return; finishKeyCapture(e.code); return; }
     if(isTypingTarget(document.activeElement)||e.repeat)return;
     if(!cfg.modHotkeys||!location.pathname.includes('/cards/pack'))return;
-    if(isConfirmDialogOpen()){
-      if(e.code===normalizeKeyCode(cfg.guardConfirmKey)){ e.preventDefault(); if(!isKeyCoolingDown(e.code)) confirmGuardSelection(); return; }
-      if(e.code===normalizeKeyCode(cfg.guardCancelKey)){ e.preventDefault(); if(!isKeyCoolingDown(e.code)) cancelGuardSelection(); return; }
-    }
     if(e.code===normalizeKeyCode(cfg.buyKey)){ e.preventDefault(); if(!isKeyCoolingDown(e.code)){ selectPack20(); setTimeout(()=>isPack20Active()&&clickBuyButton(),50); } return; }
     if(e.code===normalizeKeyCode(cfg.leftKey)){ e.preventDefault(); if(!isKeyCoolingDown(e.code)) clickCardByIndex(0); return; }
     if(e.code===normalizeKeyCode(cfg.middleKey)){ e.preventDefault(); if(!isKeyCoolingDown(e.code)) clickCardByIndex(1); return; }
@@ -4729,82 +4673,6 @@
     el.appendChild(txt);
   }
 
-  const SUITE_MENU_TOOLTIPS = {
-    modCardValue: 'добавляет ценность карты в значение зафисящем от спроса. готовых обменять. количество карт, так же наличие у вас дублей и хотите ли вы ее или нет, работает как в паках так и в трейдах (в трейдах хорошо раскрывается на S ранге).',
-    modBestCard: 'Выделяет самую ценную карту при открытии пака.',
-    modGuard: 'не дает выбрать карт с меньшей ценнностью чем есть в паке, разницу можно отрегулировать ползунком ниже.',
-    modAutoOpen: 'Автоматически открывает паки выбирая лучшую карту, можно выставить нужное количество паков, при выпадение нескольких лучших карт нужно выбрать самому.',
-    modStats: 'Собирает историю выпавших и выбранных карт.',
-    modHotkeys: 'Включает быстрые действия с клавиатуры.',
-    modGuarantee: 'Показывает прогресс до гарантированной карты.',
-    modOnlyPack20: 'Ограничивает покупку паков только паком за 1600.',
-    modNeon: 'Добавляет цветные обводки и подсветку карт (красный - в блоке, фиолетовый - зафиксирована, зеленый - в листе желаемого, оранжевый - дубль, синий - в трейде).',
-    modNeonAnimation: 'Включает движение и мерцание неоновой рамки.',
-    modMenuBg: 'растягивает фон на все меню в окошке которое открывается по нажатию на свою аватарку на любой странице сайта.',
-    modProfileBtns: 'Добавляет быстрые кнопки на страницах в профиля по которым можно быстро перейти на нужную страницу пользователя.',
-    modEnlightenment: 'подсчитывает полное просветление у клуба на странице всех клубов.',
-    modVoteCardsToggle: 'Сворачивает блоки голосования за карты.',
-    modCustomPush: 'Заменяет стандартные уведомления сайта на красивые всплывающие.',
-    modStones: 'Отслеживает камни и прогресс их накопления.',
-    modAutoLootCards: 'Автоматически получает карты за просмотр аниме.',
-    modWantCards: 'Добавляет инструменты для добавления в желаемое в библиотеке карт и на странице аниме.',
-    wantButtonsAlways: 'Показывает кнопки всегда, а не только при наведении, если выключить функцию кнопки будут появляться только при наведения на ряд карт.',
-    modNoNeedCards: 'Добавляет инструменты для работы с ненужными картами на странице ваших карт.',
-    noNeedButtonsAlways: 'Показывает кнопки всегда, а не только при наведении, если выключить функцию кнопки будут появляться только при наведения на ряд карт.',
-    modBrickFill: 'Подбирает карты для превращения в энергию кирпича.',
-    modRemelt: 'Помогает выбирать карты для переплавки.',
-    modLabyrinthQuiz: 'Подсвечивает ответы в викторине лабиринта.',
-    modLabyrinthEmission: 'Добавляет окончания выброса и таймер до начала нового выброса.',
-    modLabyrinthClubWar: 'Подсвечивает союзные и вражеские клубы.'
-  };
-
-  const SUITE_MENU_SLIDER_TOOLTIPS = {
-    menuBgDim: 'Регулирует затемнение фона меню.',
-    menuTextClarity: 'Делает текст меню контрастнее на фоне.'
-  };
-
-  const SUITE_TOOLTIP_ACCENTS = ['#f59e0b','#38bdf8','#22c55e','#a78bfa','#fb7185','#facc15'];
-  let suiteMenuTooltipEl = null;
-
-  function getSuiteMenuTooltip(){
-    if(suiteMenuTooltipEl && document.body.contains(suiteMenuTooltipEl)) return suiteMenuTooltipEl;
-    suiteMenuTooltipEl = document.createElement('div');
-    suiteMenuTooltipEl.id = 'suite-menu-tooltip';
-    document.body.appendChild(suiteMenuTooltipEl);
-    return suiteMenuTooltipEl;
-  }
-
-  function placeSuiteMenuTooltip(row, tip){
-    const rect = row.getBoundingClientRect();
-    const width = 270;
-    const gap = 12;
-    let left = rect.right + gap;
-    if(left + width > window.innerWidth - 8) left = rect.left - width - gap;
-    let top = rect.top + rect.height / 2;
-    top = Math.max(18, Math.min(window.innerHeight - 18, top));
-    tip.style.left = `${Math.max(8, left)}px`;
-    tip.style.top = `${top}px`;
-  }
-
-  function bindSuiteMenuTooltip(row, text){
-    if(!row || !text || row.dataset.suiteTooltipBound === '1') return;
-    row.dataset.suiteTooltipBound = '1';
-    row.addEventListener('mouseenter',()=>{
-      const tip = getSuiteMenuTooltip();
-      tip.textContent = text;
-      tip.style.setProperty('--suite-tip-accent', SUITE_TOOLTIP_ACCENTS[Math.floor(Math.random() * SUITE_TOOLTIP_ACCENTS.length)]);
-      placeSuiteMenuTooltip(row, tip);
-      tip.classList.add('show');
-    });
-    row.addEventListener('mousemove',()=>{
-      if(!suiteMenuTooltipEl?.classList.contains('show')) return;
-      placeSuiteMenuTooltip(row, suiteMenuTooltipEl);
-    });
-    row.addEventListener('mouseleave',()=>{
-      suiteMenuTooltipEl?.classList.remove('show');
-    });
-  }
-
   function makeToggle(key, label){
     const row=document.createElement('div');
     row.style.cssText=[
@@ -4845,7 +4713,6 @@
     slider.className='suite-slider';
     toggle.append(input,slider);
     row.append(lbl,toggle);
-    bindSuiteMenuTooltip(row, SUITE_MENU_TOOLTIPS[key]);
     applyPremiumLockToToggle(row,key);
     return row;
   }
@@ -4917,7 +4784,6 @@
     val.textContent=Math.round(Number(slider.value)*100)+'%';
     top.append(lbl,val);
     row.append(top,slider);
-    bindSuiteMenuTooltip(row, SUITE_MENU_SLIDER_TOOLTIPS[key]);
     return row;
   }
 
@@ -5336,8 +5202,8 @@
     menuBgRow.querySelector('input').addEventListener('change', syncMenuBgRows);
     syncMenuBgRows();
     uiSection.append(menuBgRow, menuDimRow, menuTextRow);
-    uiSection.appendChild(makeToggle('modProfileBtns',   '🔍 Кнопки в профиле'));
-    uiSection.appendChild(makeToggle('modEnlightenment', '🧘 Просветление на странице клубов'));
+    uiSection.appendChild(makeToggle('modProfileBtns',   '🔍 Кнопки профиля'));
+    uiSection.appendChild(makeToggle('modEnlightenment', '🧘 Клубное просветление'));
     const voteCardsRow = makeToggle('modVoteCardsToggle', '🗳️ Скрытие голосования');
     voteCardsRow.querySelector('input').addEventListener('change', () => {
       if(cfg.modVoteCardsToggle) initVoteCardsToggle();
@@ -5354,7 +5220,7 @@
     });
     uiSection.appendChild(customPushRow);
     uiSection.appendChild(makeCustomPushScaleRow());
-    const stonesRow = makeToggle('modStones',        '💎 Учет камней');
+    const stonesRow = makeToggle('modStones',        '💎 Камни');
     stonesRow.querySelector('input').addEventListener('change', () => { if(cfg.modStones) initStones(); });
     uiSection.appendChild(stonesRow);
 
@@ -6795,8 +6661,8 @@
     }
     function createUI() {
       enabled=true; localStorage.setItem(ENABLE_KEY,JSON.stringify(enabled));
-      refreshButton=makeCircleBtn('📚','#9C27B0','50%',()=>{ if(!enabled) return; scanLocked(); },'ПОИСК ЗАБЛОКИРОВАННЫХ ДУБЛЕЙ КАРТ');
-      scanButton   =makeCircleBtn('🔍','#FFA500','calc(50% + 60px)',()=>{ if(!enabled) return; scanAllPages(); },'ПРОЙТИ ПО ВСЕМ ОТКРЫТЫМ КАРТАМ И ОТПРАВИТЬ В НЕНУЖНОЕ');
+      refreshButton=makeCircleBtn('📚','#9C27B0','50%',()=>{ if(!enabled) return; scanLocked(); },'ЗАБЛОКИРОВАННЫЕ ДУБЛИ');
+      scanButton   =makeCircleBtn('🔍','#FFA500','calc(50% + 60px)',()=>{ if(!enabled) return; scanAllPages(); },'Сканировать все страницы');
       stopScanButton=makeCircleBtn('🛑','#d9534f','calc(50% + 120px)',()=>{ requestStop(); },'Остановить сканирование и отправить буфер');
       applyNoNeedButtonMode();
       updateBtnState();
@@ -8089,8 +7955,8 @@
             const lastNotice = await GM_getValue(KODIK_WARMUP_NOTICE_KEY, '');
             if (lastNotice === noticeKey) return;
             await GM_setValue(KODIK_WARMUP_NOTICE_KEY, noticeKey);
-            warn('[Auto-Watch] Daily watch quest skipped: this anime entry has no translation data. Re-add it from the anime page.');
-            safePush('info', '[Auto-Watch] Daily watch quest data is missing. Re-add this anime from its page.');
+            warn('[Auto-Watch] Kodik warmup skipped: this anime entry has no saved player link. Re-add it from the anime page to enable daily playback.');
+            safePush('info', '[Auto-Watch] Kodik playback is not available for this saved anime yet. Re-add it from the anime page.');
         }
 
         function removeKodikWarmupPlayer() {
@@ -8160,43 +8026,38 @@
             if (kodikWarmupPromise) return kodikWarmupPromise;
 
             kodikWarmupPromise = (async () => {
-                if (!entry?.anime_id || !entry?.t_id || !entry?.t_title) {
+                if (!entry?.t_link) {
                     await showKodikMissingLinkNotice(entry);
                     return false;
                 }
 
-                const targetEpisode = parseInt(episode || entry.min_ep || 1, 10) || 1;
-                const watchData = {
-                    episode: targetEpisode,
-                    season: parseInt(entry.s || 1, 10) || 1,
-                    translation: {
-                        id: parseInt(entry.t_id, 10) || entry.t_id,
-                        title: entry.t_title
-                    }
-                };
-
-                const result = await fetchData('/index.php?controller=ajax&mod=anime_grabber&module=kodik_watched', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                        'X-Requested-With': 'XMLHttpRequest'
-                    },
-                    body: new URLSearchParams({
-                        action: 'save_watched',
-                        news_id: entry.anime_id,
-                        kodik_data: JSON.stringify(watchData)
-                    }).toString()
-                }, 'json');
-
-                if (result?.status) {
-                    await markKodikWarmupDoneToday(entry, targetEpisode);
-                    log('[Auto-Watch] Daily watch quest saved via Kodik watched endpoint.');
-                    safePush('success', '[Auto-Watch] Daily watch quest saved.');
-                    return true;
+                const url = buildKodikWarmupUrl(entry.t_link, entry.s || 1, episode || entry.min_ep || 1);
+                if (!url) {
+                    await showKodikMissingLinkNotice(entry);
+                    return false;
                 }
 
-                warn('[Auto-Watch] Daily watch quest was not accepted:', result);
-                return false;
+                const player = createKodikWarmupPlayer(url, entry, episode);
+                const startedAt = Date.now();
+                log(`[Auto-Watch] Kodik daily warmup started for ${Math.ceil(KODIK_WARMUP_MS / 1000)} sec.`);
+                safePush('info', `[Auto-Watch] Kodik playback warmup: ${Math.ceil(KODIK_WARMUP_MS / 1000)} sec.`);
+
+                await new Promise(resolve => {
+                    const tick = setInterval(() => {
+                        const left = Math.max(0, KODIK_WARMUP_MS - (Date.now() - startedAt));
+                        player.timer.textContent = formatMs(left);
+                    }, 1000);
+
+                    setTimeout(() => {
+                        clearInterval(tick);
+                        resolve();
+                    }, KODIK_WARMUP_MS);
+                });
+
+                removeKodikWarmupPlayer();
+                await markKodikWarmupDoneToday(entry, episode);
+                log('[Auto-Watch] Kodik daily warmup finished.');
+                return true;
             })();
 
             try {
@@ -8670,7 +8531,7 @@
                     `&user_hash=${userHash}`;
 
                 ensureDailyKodikWarmup(cur, targetEp).catch(e => {
-                    warn('[Auto-Watch] Daily watch quest save failed:', e);
+                    warn('[Auto-Watch] Kodik daily warmup failed:', e);
                 });
 
                 const headers = {
