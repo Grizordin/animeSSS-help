@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      2.38
+// @version      2.39
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -1125,7 +1125,11 @@
   function confirmGuardSelection(){
     if(!confirmDialog || confirmDialog.style.display !== 'flex') return false;
     confirmDialog.style.display='none';
-    if(confirmedCard){ const c=confirmedCard; confirmedCard=null; c.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,view:window})); }
+    if(confirmedCard){
+      const c=confirmedCard;
+      c.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,view:window}));
+      if(confirmedCard===c) confirmedCard=null;
+    }
     return true;
   }
   function cancelGuardSelection(){
