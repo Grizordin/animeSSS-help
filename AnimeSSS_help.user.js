@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      2.39
+// @version      2.40
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -1837,6 +1837,7 @@
     {s:'Витрина карточек сохранена',                             icon:'save',   title:'Сохранено',   theme:'emerald'   },
     {s:'Витрина достижений сохранена',                           icon:'star',   title:'Сохранено',   theme:'emerald'   },
     {s:'Витрина',                                                icon:'save',   title:'Сохранено',   theme:'emerald'   },
+    {s:'В витрину можно выставить максимум три звёздные карты',   icon:'star',   title:'Витрина',     theme:'neon-amber'},
     {s:'Загруженная вами карточка была отправлена на модерацию', icon:'mod',    title:'Модерация',   theme:'neon-pink' },
     {s:'Карточка отправлена на модерацию',                       icon:'mod',    title:'Модерация',   theme:'neon-pink' },
     {s:'Для вступления изменений',                               icon:'refresh',title:'Обновление',  theme:'neon-pink' },
@@ -1861,6 +1862,7 @@
     {r:/Вы отменили заявку на дружбу с .+!?/i,                    icon:'user',   title:'Друзья',      theme:'rose'},
     {s:'Комментарий удалён',                                      icon:'check',  title:'Готово',      theme:'emerald'   },
     {s:'Выберите сообщения для удаления',                         icon:'warn',   title:'Сообщения',   theme:'neon-amber'},
+    {s:'Сообщение содержит запрещённые слова.',                   icon:'warn',   title:'Сообщение',   theme:'rose'      },
     {s:'История очищена',                                         icon:'check',  title:'Сообщения',   theme:'emerald'   },
     {s:'Сообщение не найдено',                                    icon:'warn',   title:'Внимание',    theme:'neon-amber'},
     {s:'Ваш голос учтён',                                         icon:'check',  title:'Голос',       theme:'emerald'   },
@@ -1922,6 +1924,7 @@
     {s:'Коллекция доступна только',                              icon:'user',   title:'Внимание',    theme:'indigo'    },
     {s:'Уведомления доступны только',                            icon:'bell',   title:'Внимание',    theme:'indigo'    },
     {s:'Управление уведомлениями отключено',                     icon:'mute',   title:'Внимание',    theme:'neon-pink' },
+    {s:'Уведомление успешно отправлено',                         icon:'bell',   title:'Уведомления', theme:'neon-green'},
     {s:'Нет уведомлений для отметки',                            icon:'bell',   title:'Внимание',    theme:'neon-amber'},
     {s:'Слишком часто',                                          icon:'clock',  title:'Стоп',        theme:'rose'      },
     {s:'не доступна к улучшению',                                icon:'star',   title:'Внимание',    theme:'rose'      },
@@ -1939,6 +1942,7 @@
     {s:'Неизвестный ответ сервера',                              icon:'err',    title:'Ошибка',      theme:'neon-amber'},
     {s:'Ошибка при копировании',                                  icon:'err',    title:'Ошибка',      theme:'neon-amber'},
     {s:'Не корректный промо-код',                                 icon:'warn',   title:'Промокод',    theme:'rose'},
+    {s:'Вы уже активировали этот промо-код',                      icon:'clock',  title:'Промокод',    theme:'rose'},
     {
       s:'Вы уже вводили этот промо-код или он был использован на вашем IP но на другом аккаунте',
       icon:'clock',
@@ -2045,8 +2049,11 @@
     {s:'Вы уже выставили свою оценку для данной статьи',           icon:'warn',   title:'Внимание',    theme:'neon-amber'},
     {s:'зафиксирована в колоде и не может быть разблокирована',    icon:'lock',   title:'Внимание',    theme:'rose'      },
     {s:'Сначала сделай выбор в Комнате отголосков',                icon:'warn',   title:'Отголосок',   theme:'neon-amber'},
+    {s:'Сначала выбери судьбу комнаты',                            icon:'warn',   title:'Комната',     theme:'neon-amber'},
     {r:/Лабиринт временно недоступен с \d{1,2}:\d{2} до \d{1,2}:\d{2}/i, icon:'clock', title:'Лабиринт', theme:'neon-amber'},
     {s:'Лабиринт откликнулся на твой путь',                        icon:'bolt',   title:'Лабиринт',    theme:'neon-blue' },
+    {s:'Резонанс вызван',                                          icon:'bolt',   title:'Резонанс',    theme:'neon-blue' },
+    {s:'Время вышло',                                              icon:'clock',  title:'Время',       theme:'rose'      },
     {s:'Следующий шаг ещё недоступен',                             icon:'clock',  title:'Лабиринт',    theme:'neon-amber'},
     {s:'Купить ход можно только когда доступных ходов не осталось', icon:'coin',   title:'Лабиринт',    theme:'neon-amber'},
     {s:'На сегодня попытки закончились',                           icon:'clock',  title:'Лабиринт',    theme:'rose'      },
@@ -2063,10 +2070,13 @@
     {r:/Обмены между пользователями отключены с \d{1,2}:\d{2} до \d{1,2}:\d{2}/i, icon:'clock', title:'Обслуживание', theme:'neon-amber'},
     {r:/Куплен \+\d+ ход/i,                                       icon:'coin',   title:'Покупка',     theme:'neon-green'},
     {r:/У вас уже есть активная ставка на \d{1,2}:\d{2}\. Новую можно сделать только после того, как это время пройдёт/i, icon:'clock', title:'Ставка', theme:'neon-amber'},
+    {r:/Время \d{1,2}:\d{2} уже занято пользователем .+\. Выберите другое/i, icon:'clock', title:'Ставка', theme:'neon-amber'},
+    {r:/Можно выбрать только время с \d{1,2}:\d{2} до \d{1,2}:\d{2}/i, icon:'clock', title:'Ставка', theme:'neon-amber'},
     {s:'Жалоба отправлена',                                        icon:'warn',   title:'Жалоба',      theme:'indigo'    },
     {s:'Вы уже выставили свою оценку для данного комментария',     icon:'warn',   title:'Внимание',    theme:'neon-amber'},
     // ── Порция 6 ─────────────────────────────────────────
     {s:'данная карта добавлена в список ненужных, нельзя добавлять карты в оба списка', icon:'warn', title:'Внимание', theme:'neon-amber'},
+    {s:'У вас данная карта добавлена в список хочу получить, нельзя добавлять карты в оба списка', icon:'warn', title:'Список', theme:'neon-amber'},
     {s:'Отголосок сорвался',                                       icon:'warn',   title:'Неудача',     theme:'rose'      },
     {s:'Кирпич полностью заряжен',                                 icon:'bolt',   title:'Кирпич',      theme:'neon-green'},
     {s:'Неудача. Ты не пройдешь',                                  icon:'warn',   title:'Неудача',     theme:'rose'      },
@@ -2108,6 +2118,7 @@
     {s:'За выбор судьбы комнаты ты получаешь',                     icon:'coin',   title:'Награда',     theme:'neon-green'},
     {s:'Дань уплачена',                                            icon:'coin',   title:'Оплата',      theme:'emerald'   },
     {s:'Шахта пока ничего не накопила',                            icon:'warn',   title:'Шахта',       theme:'neon-amber'},
+    {s:'Шахта ограблена',                                          icon:'warn',   title:'Шахта',       theme:'rose'      },
     {r:/Шахта: собрано \d+ AСС(?: \+ \d+ карт)?/i,                 icon:'coin',   title:'Шахта',       theme:'neon-green'},
     {
       r:/Ты улучшил персональную шахту до \d+ уровня.*Получено AСС: \+\d+(?:.*Получено карт: \d+)?/i,
@@ -2119,6 +2130,8 @@
     {s:'Отголосок повторён',                                       icon:'check',  title:'Готово',      theme:'emerald'   },
     {s:'Ты отказался от отголоска',                                icon:'warn',   title:'Отголосок',   theme:'rose'      },
     {s:'Всевидящее око показало соседние комнаты',                 icon:'bolt',   title:'Лабиринт',    theme:'neon-blue' },
+    {s:'Нельзя использовать Всевидящее око: следующий ход ещё недоступен', icon:'clock', title:'Лабиринт', theme:'neon-amber'},
+    {s:'Ты открыл золотые врата и обрёл карту ранга S!',           icon:'star',   title:'Награда',     theme:'neon-green'},
     {s:'Штурм провален',                                           icon:'warn',   title:'Штурм',       theme:'rose'      },
     {s:'Ты прошёл по уже открытому пути. Лабиринт не засчитал этот шаг в общий прогресс.', icon:'warn', title:'Лабиринт', theme:'neon-amber'},
     {s:'Вы не выбрали карту',                                      icon:'warn',   title:'Внимание',    theme:'neon-amber'},
@@ -5047,6 +5060,35 @@
       'color:#e2e8f0'
     ].join(';');
 
+    const keepSettingsPanelInViewport = () => {
+      const margin = 12;
+      const maxHeight = Math.max(260, window.innerHeight - margin * 2);
+      panel.style.maxHeight = maxHeight + 'px';
+      if (panel.style.display === 'none') return;
+
+      if (panel.style.transform && panel.style.transform !== 'none') return;
+
+      const rect = panel.getBoundingClientRect();
+      let top = rect.top;
+      let left = rect.left;
+
+      if (rect.bottom > window.innerHeight - margin) {
+        top -= rect.bottom - (window.innerHeight - margin);
+      }
+      if (top < margin) top = margin;
+      if (rect.right > window.innerWidth - margin) {
+        left -= rect.right - (window.innerWidth - margin);
+      }
+      if (left < margin) left = margin;
+
+      panel.style.transform = 'none';
+      panel.style.top = Math.round(top) + 'px';
+      panel.style.left = Math.round(left) + 'px';
+      panel.style.right = 'auto';
+      panel.style.bottom = 'auto';
+    };
+    panel._suiteKeepInViewport = keepSettingsPanelInViewport;
+
     const hdr=document.createElement('div');
     hdr.style.cssText=[
       'background:#0f172a',
@@ -5203,6 +5245,7 @@
         content.style.display=open?'block':'none';
         state.textContent=open?'▾ Свернуть':'▸ Развернуть';
         state.style.color=open?'#93c5fd':'#fbbf24';
+        requestAnimationFrame(keepSettingsPanelInViewport);
       };
       head.addEventListener('click',()=>setOpen(!cfg.settingsSections[key]));
       head.append(label,state);
@@ -5428,8 +5471,11 @@
       panel.style.left=cfg.settingsPanelLeft+'px';
       panel.style.right='auto';
     }
+    window.addEventListener('resize', keepSettingsPanelInViewport);
     makeDraggable(panel, '#suite-settings-panel > div:first-child', (left,top)=>{
-      cfg.settingsPanelLeft=left; cfg.settingsPanelTop=top; saveCfg();
+      keepSettingsPanelInViewport();
+      const rect = panel.getBoundingClientRect();
+      cfg.settingsPanelLeft=rect.left; cfg.settingsPanelTop=rect.top; saveCfg();
     });
     return panel;
   }
@@ -5484,6 +5530,7 @@
     btn.addEventListener('click',()=>{
       if(btnMoved)return; // не открываем если тащили
       panel.style.display=panel.style.display==='none'?'block':'none';
+      if(panel.style.display !== 'none') requestAnimationFrame(() => panel._suiteKeepInViewport?.());
     });
   }
 
@@ -10218,11 +10265,17 @@
         'Ты отказался от отголоска и выбрал свой путь.',
         // 'Лабиринт открыл новые пути.',   // ← пример как добавить новую фразу
       ];
+      const QUESTION_SUFFIX_PATTERNS = [
+        /\s*\u0420\u0435\u0437\u043e\u043d\u0430\u043d\u0441\s+\u043f\u0440\u0438\u0448[\u0435\u0451]\u043b\s+\u0438\u0437:\s*.*$/i,
+      ];
 
-      // Убирает игровой префикс из текста вопроса перед поиском в базе.
+      // Убирает игровые префиксы и хвосты из текста вопроса перед поиском в базе.
       // Сравнение нечёткое (без учёта регистра и лишних пробелов).
       function cleanQuestionText(text) {
         text = text.trim();
+        for (const pattern of QUESTION_SUFFIX_PATTERNS) {
+          text = text.replace(pattern, '').trim();
+        }
         const normText = normalize(text);
         for (const prefix of QUESTION_PREFIXES) {
           const normPrefix = normalize(prefix);
