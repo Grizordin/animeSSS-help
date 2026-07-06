@@ -970,6 +970,20 @@
     }
     #suite-settings-panel {
       scrollbar-color: rgba(103,232,249,.45) transparent;
+      background:transparent !important;
+      box-shadow:none !important;
+      opacity:1 !important;
+      filter:none !important;
+      backdrop-filter:none !important;
+    }
+    .suite-settings-header,
+    .suite-section-nav,
+    .suite-section-panel {
+      background:linear-gradient(135deg,#0b5063,#0f172a) !important;
+      opacity:1 !important;
+      filter:none !important;
+      backdrop-filter:none !important;
+      isolation:isolate;
     }
     .suite-section-tab {
       position:relative;
@@ -5291,6 +5305,7 @@
     panel._suiteKeepInViewport = keepSettingsPanelInViewport;
 
     const hdr=document.createElement('div');
+    hdr.className='suite-settings-header';
     hdr.style.cssText=[
       'background:linear-gradient(135deg,rgba(8,145,178,.55),rgba(15,23,42,.96))',
       'padding:14px 18px',
@@ -5301,8 +5316,7 @@
       'border-radius:20px',
       'box-shadow:0 14px 34px rgba(0,0,0,.34),0 0 24px rgba(34,211,238,.14),inset 0 1px 0 rgba(255,255,255,.08)',
       'margin-bottom:12px',
-      'z-index:1',
-      'backdrop-filter:blur(10px)'
+      'z-index:1'
     ].join(';');
     const titleWrap=document.createElement('div');
     titleWrap.style.cssText='display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap;';
