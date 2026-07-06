@@ -879,6 +879,22 @@
       opacity: 1;
       transform: translateY(-50%) translateX(0);
     }
+    #suite-menu-tooltip.is-touch {
+      max-width:calc(100vw - 16px);
+      transform:none;
+    }
+    #suite-menu-tooltip.is-touch.show {
+      transform:none;
+    }
+    #suite-menu-tooltip .suite-menu-tooltip-premium {
+      display:block;
+      margin-top:8px;
+      padding-top:7px;
+      border-top:1px solid rgba(245,158,11,.35);
+      color:#fde68a;
+      font-weight:800;
+      text-shadow:0 0 10px rgba(245,158,11,.28);
+    }
     .suite-toggle {
       position:relative;
       display:inline-block;
@@ -1514,8 +1530,10 @@
       : panel;
     if (!handle) return;
     handle.style.cursor = 'grab';
+    handle.style.touchAction = 'none';
 
     let startX, startY, startLeft, startTop, isDragging = false;
+    const getPoint = (e) => e.touches?.[0] || e.changedTouches?.[0] || e;
 
     handle.addEventListener('mousedown', function(e) {
       // Не перехватываем клики по кнопкам внутри хедера
@@ -1539,6 +1557,27 @@
       handle.style.cursor = 'grabbing';
     });
 
+    handle.addEventListener('touchstart', function(e) {
+      if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT') return;
+      e.preventDefault();
+      const point = getPoint(e);
+      isDragging = true;
+
+      const rect = panel.getBoundingClientRect();
+      panel.style.transform = 'none';
+      panel.style.top  = rect.top  + 'px';
+      panel.style.left = rect.left + 'px';
+      panel.style.right  = 'auto';
+      panel.style.bottom = 'auto';
+
+      startX = point.clientX;
+      startY = point.clientY;
+      startLeft = rect.left;
+      startTop  = rect.top;
+
+      handle.style.cursor = 'grabbing';
+    }, { passive:false });
+
     document.addEventListener('mousemove', function(e) {
       if (!isDragging) return;
       const dx = e.clientX - startX;
@@ -1549,11 +1588,35 @@
       panel.style.top  = newTop  + 'px';
     });
 
+    document.addEventListener('touchmove', function(e) {
+      if (!isDragging) return;
+      e.preventDefault();
+      const point = getPoint(e);
+      const dx = point.clientX - startX;
+      const dy = point.clientY - startY;
+      const newLeft = Math.max(0, Math.min(window.innerWidth  - panel.offsetWidth,  startLeft + dx));
+      const newTop  = Math.max(0, Math.min(window.innerHeight - panel.offsetHeight, startTop  + dy));
+      panel.style.left = newLeft + 'px';
+      panel.style.top  = newTop  + 'px';
+    }, { passive:false });
+
     document.addEventListener('mouseup', function() {
       if (!isDragging) return;
       isDragging = false;
       handle.style.cursor = 'grab';
       // Вызываем callback с финальными координатами (если передан)
+      if (onDrop) onDrop(parseFloat(panel.style.left)||0, parseFloat(panel.style.top)||0);
+    });
+    document.addEventListener('touchend', function() {
+      if (!isDragging) return;
+      isDragging = false;
+      handle.style.cursor = 'grab';
+      if (onDrop) onDrop(parseFloat(panel.style.left)||0, parseFloat(panel.style.top)||0);
+    });
+    document.addEventListener('touchcancel', function() {
+      if (!isDragging) return;
+      isDragging = false;
+      handle.style.cursor = 'grab';
       if (onDrop) onDrop(parseFloat(panel.style.left)||0, parseFloat(panel.style.top)||0);
     });
   }
@@ -4997,6 +5060,7 @@
 
   const SUITE_TOOLTIP_ACCENTS = ['#f59e0b','#38bdf8','#22c55e','#a78bfa','#fb7185','#facc15'];
   let suiteMenuTooltipEl = null;
+  let suiteMenuTooltipTimer = null;
 
   function getSuiteMenuTooltip(){
     if(suiteMenuTooltipEl && document.body.contains(suiteMenuTooltipEl)) return suiteMenuTooltipEl;
@@ -5018,22 +5082,66 @@
     tip.style.top = `${top}px`;
   }
 
+  function placeSuiteMenuTouchTooltip(row, tip){
+    const rect = row.getBoundingClientRect();
+    const width = Math.min(270, window.innerWidth - 16);
+    let left = Math.min(Math.max(8, rect.left), window.innerWidth - width - 8);
+    let top = rect.bottom + 8;
+    if(top + tip.offsetHeight > window.innerHeight - 8) top = Math.max(8, rect.top - tip.offsetHeight - 8);
+    tip.style.width = `${width}px`;
+    tip.style.left = `${left}px`;
+    tip.style.top = `${top}px`;
+  }
+
+  function renderSuiteMenuTooltip(tip, text){
+    tip.textContent = '';
+    const premiumIndex = text.indexOf(SUITE_PREMIUM_TOOLTIP_TEXT);
+    if(premiumIndex < 0) {
+      tip.textContent = text;
+      return;
+    }
+    const mainText = text.slice(0, premiumIndex).trim();
+    if(mainText) tip.appendChild(document.createTextNode(mainText));
+    const premiumText = document.createElement('span');
+    premiumText.className = 'suite-menu-tooltip-premium';
+    premiumText.textContent = SUITE_PREMIUM_TOOLTIP_TEXT;
+    tip.appendChild(premiumText);
+  }
+
   function bindSuiteMenuTooltip(row, text){
     if(!row || !text || row.dataset.suiteTooltipBound === '1') return;
     row.dataset.suiteTooltipBound = '1';
-    row.addEventListener('mouseenter',()=>{
+    const showTip = (touch=false)=>{
       const tip = getSuiteMenuTooltip();
-      tip.textContent = text;
+      clearTimeout(suiteMenuTooltipTimer);
+      renderSuiteMenuTooltip(tip, text);
+      tip.classList.toggle('is-touch', touch);
+      tip.style.width = '';
       tip.style.setProperty('--suite-tip-accent', SUITE_TOOLTIP_ACCENTS[Math.floor(Math.random() * SUITE_TOOLTIP_ACCENTS.length)]);
-      placeSuiteMenuTooltip(row, tip);
-      tip.classList.add('show');
+      if(touch) {
+        tip.classList.add('show');
+        placeSuiteMenuTouchTooltip(row, tip);
+        suiteMenuTooltipTimer = setTimeout(()=>tip.classList.remove('show','is-touch'), 4200);
+      } else {
+        placeSuiteMenuTooltip(row, tip);
+        tip.classList.add('show');
+      }
+    };
+    row.addEventListener('mouseenter',()=>{
+      showTip(false);
     });
     row.addEventListener('mousemove',()=>{
       if(!suiteMenuTooltipEl?.classList.contains('show')) return;
+      if(suiteMenuTooltipEl.classList.contains('is-touch')) return;
       placeSuiteMenuTooltip(row, suiteMenuTooltipEl);
     });
     row.addEventListener('mouseleave',()=>{
-      suiteMenuTooltipEl?.classList.remove('show');
+      if(!suiteMenuTooltipEl?.classList.contains('is-touch')) suiteMenuTooltipEl?.classList.remove('show');
+    });
+    row.addEventListener('click',e=>{
+      if(!window.matchMedia?.('(hover: none)').matches) return;
+      if(e.target.closest('input,button,label,.suite-toggle,[type="range"]')) return;
+      showTip(true);
     });
   }
 
@@ -9639,12 +9747,23 @@
                     min-width: 280px;
                     font-family: 'Segoe UI', Arial, sans-serif;
                 }
+                @media (max-width: 520px) {
+                    #aw-active-tab-panel {
+                        left: 10px;
+                        right: auto;
+                        bottom: 74px;
+                        width: min(320px, calc(100vw - 20px));
+                        min-width: 0;
+                        max-width: calc(100vw - 20px);
+                    }
+                }
                 #aw-active-tab-panel .aw-head {
                     display: flex;
                     justify-content: space-between;
                     align-items: center;
                     gap: 8px;
                     margin-bottom: 8px;
+                    touch-action: none;
                 }
                 #aw-active-tab-panel .aw-title {
                     display: flex;
@@ -10106,8 +10225,10 @@
             if (!head) return;
 
             head.style.cursor = 'grab';
+            head.style.touchAction = 'none';
             let dragging = false;
             let startX = 0, startY = 0, origLeft = 0, origTop = 0;
+            const getPoint = (e) => e.touches?.[0] || e.changedTouches?.[0] || e;
 
             head.addEventListener('mousedown', (e) => {
                 if (e.button !== 0) return;
@@ -10118,11 +10239,30 @@
                 origLeft = rect.left;
                 origTop  = rect.top;
                 // Переключаемся на top-позиционирование при начале drag
+                panel.style.left   = origLeft + 'px';
                 panel.style.top    = origTop + 'px';
+                panel.style.right  = 'auto';
                 panel.style.bottom = 'auto';
                 head.style.cursor = 'grabbing';
                 e.preventDefault();
             });
+
+            head.addEventListener('touchstart', (e) => {
+                if (e.target.closest('button')) return;
+                const point = getPoint(e);
+                dragging = true;
+                startX = point.clientX;
+                startY = point.clientY;
+                const rect = panel.getBoundingClientRect();
+                origLeft = rect.left;
+                origTop  = rect.top;
+                panel.style.left   = origLeft + 'px';
+                panel.style.top    = origTop + 'px';
+                panel.style.right  = 'auto';
+                panel.style.bottom = 'auto';
+                head.style.cursor = 'grabbing';
+                e.preventDefault();
+            }, { passive:false });
 
             document.addEventListener('mousemove', (e) => {
                 if (!dragging) return;
@@ -10136,15 +10276,51 @@
                 panel.style.bottom = 'auto';
             });
 
+            document.addEventListener('touchmove', (e) => {
+                if (!dragging) return;
+                const point = getPoint(e);
+                const dx = point.clientX - startX;
+                const dy = point.clientY - startY;
+                const newLeft = Math.max(0, Math.min(window.innerWidth  - panel.offsetWidth,  origLeft + dx));
+                const newTop  = Math.max(0, Math.min(window.innerHeight - panel.offsetHeight, origTop  + dy));
+                panel.style.left  = newLeft + 'px';
+                panel.style.top   = newTop  + 'px';
+                panel.style.right  = 'auto';
+                panel.style.bottom = 'auto';
+                e.preventDefault();
+            }, { passive:false });
+
             document.addEventListener('mouseup', async () => {
                 if (!dragging) return;
                 dragging = false;
                 head.style.cursor = 'grab';
+                clampPanelToViewport(panel);
                 await GM_setValue(PANEL_POSITION_KEY, {
                     left: panel.style.left,
                     top:  panel.style.top
                 });
             });
+            document.addEventListener('touchend', async () => {
+                if (!dragging) return;
+                dragging = false;
+                head.style.cursor = 'grab';
+                clampPanelToViewport(panel);
+                await GM_setValue(PANEL_POSITION_KEY, {
+                    left: panel.style.left,
+                    top:  panel.style.top
+                });
+            });
+            document.addEventListener('touchcancel', async () => {
+                if (!dragging) return;
+                dragging = false;
+                head.style.cursor = 'grab';
+                clampPanelToViewport(panel);
+                await GM_setValue(PANEL_POSITION_KEY, {
+                    left: panel.style.left,
+                    top:  panel.style.top
+                });
+            });
+            window.addEventListener('resize', () => clampPanelToViewport(panel));
         }
 
         async function applyPanelPosition(panel) {
@@ -10157,6 +10333,20 @@
                     panel.style.bottom = 'auto';
                 }
             }
+            requestAnimationFrame(() => clampPanelToViewport(panel));
+        }
+
+        function clampPanelToViewport(panel) {
+            const margin = 8;
+            const rect = panel.getBoundingClientRect();
+            const maxLeft = Math.max(margin, window.innerWidth - rect.width - margin);
+            const maxTop = Math.max(margin, window.innerHeight - rect.height - margin);
+            const left = Math.min(Math.max(rect.left, margin), maxLeft);
+            const top = Math.min(Math.max(rect.top, margin), maxTop);
+            panel.style.left = `${Math.round(left)}px`;
+            panel.style.top = `${Math.round(top)}px`;
+            panel.style.right = 'auto';
+            panel.style.bottom = 'auto';
         }
 
         function startPanelTicker() {
