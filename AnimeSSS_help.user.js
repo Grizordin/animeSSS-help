@@ -963,7 +963,7 @@
       margin:0 0 12px;
       padding:8px;
       border-radius:999px;
-      background:linear-gradient(135deg,rgba(8,145,178,.55),rgba(15,23,42,.96));
+      background:linear-gradient(135deg,#0b5063,#0f172a);
       border:1px solid rgba(103,232,249,.24);
       box-shadow:0 14px 34px rgba(0,0,0,.34),0 0 24px rgba(34,211,238,.14), inset 0 1px 0 rgba(255,255,255,.08);
       overflow:visible;
@@ -1027,7 +1027,7 @@
       display:none;
       padding:10px 12px 12px;
       border-radius:20px;
-      background:linear-gradient(135deg,rgba(8,145,178,.55),rgba(15,23,42,.96));
+      background:linear-gradient(135deg,#0b5063,#0f172a);
       border:1px solid rgba(103,232,249,.24);
       box-shadow:0 14px 34px rgba(0,0,0,.26),0 0 24px rgba(34,211,238,.14), inset 0 1px 0 rgba(255,255,255,.08);
     }
@@ -5292,7 +5292,7 @@
 
     const hdr=document.createElement('div');
     hdr.style.cssText=[
-      'background:linear-gradient(135deg,rgba(8,145,178,.55),rgba(15,23,42,.96))',
+      'background:linear-gradient(135deg,#0b5063,#0f172a)',
       'padding:14px 18px',
       'display:flex',
       'align-items:center',
