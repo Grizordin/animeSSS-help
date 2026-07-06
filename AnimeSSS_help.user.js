@@ -994,7 +994,7 @@
     }
     .suite-section-tab:hover,
     .suite-section-tab.is-active {
-      width:148px;
+      width:188px;
       justify-content:flex-start;
       background:rgba(255,255,255,.12);
       color:#f8fafc;
@@ -1023,7 +1023,7 @@
     .suite-section-tab:hover .suite-section-tab-label,
     .suite-section-tab.is-active .suite-section-tab-label {
       opacity:1;
-      max-width:110px;
+      max-width:150px;
       transform:translateX(0);
     }
     .suite-section-panel {
@@ -4847,7 +4847,7 @@
       'box-sizing:border-box',
       'border:1px solid #164e63',
       'border-radius:8px',
-      'background:#0f172a',
+      'background:rgba(15,23,42,.72)',
       'color:#e2e8f0',
       'padding:7px 9px',
       'font-size:13px',
@@ -5247,10 +5247,10 @@
       'max-width:calc(100vw - 24px)',
       'max-height:90vh',
       'overflow-y:auto',
-      'background:#0a0f1a',
-      'border:1px solid #1e293b',
-      'border-radius:16px',
-      'box-shadow:none',
+      'background:linear-gradient(180deg,rgba(15,23,42,.98),rgba(2,6,23,.94))',
+      'border:1px solid rgba(103,232,249,.26)',
+      'border-radius:20px',
+      'box-shadow:0 22px 55px rgba(0,0,0,.58),0 0 36px rgba(34,211,238,.13),inset 0 1px 0 rgba(255,255,255,.06)',
       'z-index:999',
       "font-family:'Segoe UI',sans-serif",
       'color:#e2e8f0'
@@ -5292,7 +5292,7 @@
       'display:flex',
       'align-items:center',
       'justify-content:space-between',
-      'border-bottom:1px solid #1e293b',
+      'border-bottom:1px solid rgba(103,232,249,.16)',
       'position:sticky',
       'top:0',
       'z-index:1'
@@ -5311,7 +5311,7 @@
       'padding:0 7px',
       'border-radius:999px',
       'background:#111c2f',
-      'border:1px solid #1e293b',
+      'border:1px solid rgba(103,232,249,.18)',
       'color:#93c5fd',
       'font-size:11px',
       'font-weight:800',
@@ -5374,8 +5374,8 @@
       'margin-bottom:0',
       'padding:7px 9px',
       'border:1px solid #1e293b',
-      'border-radius:9px',
-      'background:#0f172a',
+      'border-radius:12px',
+      'background:linear-gradient(135deg,rgba(15,23,42,.96),rgba(8,47,73,.42))',
       'color:#cbd5e1',
       'font-size:12px',
       'font-weight:700'
@@ -5398,8 +5398,10 @@
       return { icon: icon || '•', text: parts.join(' ') || raw };
     };
     const setActiveSection=(key)=>{
+      const current=sectionEntries.find(entry=>entry.key===key && entry.content.classList.contains('is-active'));
+      const nextKey=current ? '' : key;
       sectionEntries.forEach(entry=>{
-        const active=entry.key===key;
+        const active=entry.key===nextKey;
         entry.content.classList.toggle('is-active',active);
         entry.tab.classList.toggle('is-active',active);
         entry.tab.setAttribute('aria-selected',active?'true':'false');
@@ -5638,8 +5640,13 @@
     });
     labyrinthSection.appendChild(clubWarRow);
 
-    const initialSection = sectionEntries.find(entry => cfg.settingsSections[entry.key] !== false) || sectionEntries[0];
-    if(initialSection) setActiveSection(initialSection.key);
+    sectionEntries.forEach(entry=>{
+      entry.content.classList.remove('is-active');
+      entry.tab.classList.remove('is-active');
+      entry.tab.setAttribute('aria-selected','false');
+      cfg.settingsSections[entry.key]=false;
+    });
+    saveCfg();
 
     panel.append(hdr,body); document.body.appendChild(panel);
     // Восстанавливаем сохранённую позицию панели настроек
