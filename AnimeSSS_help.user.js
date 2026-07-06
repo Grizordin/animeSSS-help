@@ -879,6 +879,15 @@
       opacity: 1;
       transform: translateY(-50%) translateX(0);
     }
+    #suite-menu-tooltip .suite-menu-tooltip-premium {
+      display:block;
+      margin-top:8px;
+      padding-top:7px;
+      border-top:1px solid rgba(245,158,11,.35);
+      color:#fde68a;
+      font-weight:800;
+      text-shadow:0 0 10px rgba(245,158,11,.28);
+    }
     .suite-toggle {
       position:relative;
       display:inline-block;
@@ -4969,9 +4978,10 @@
     modLabyrinthClubWar: 'Подсвечивает союзные и вражеские клубы.'
   };
 
+  const SUITE_PREMIUM_TOOLTIP_TEXT = 'Требуется Возвышение.';
   PREMIUM_REQUIRED_SETTINGS.forEach(key=>{
-    if(SUITE_MENU_TOOLTIPS[key] && !/Возвышение/.test(SUITE_MENU_TOOLTIPS[key])) {
-      SUITE_MENU_TOOLTIPS[key] += ' Требуется Возвышение.';
+    if(SUITE_MENU_TOOLTIPS[key] && !SUITE_MENU_TOOLTIPS[key].includes(SUITE_PREMIUM_TOOLTIP_TEXT)) {
+      SUITE_MENU_TOOLTIPS[key] += `\n${SUITE_PREMIUM_TOOLTIP_TEXT}`;
     }
   });
 
@@ -5003,12 +5013,27 @@
     tip.style.top = `${top}px`;
   }
 
+  function renderSuiteMenuTooltip(tip, text){
+    tip.textContent = '';
+    const premiumIndex = text.indexOf(SUITE_PREMIUM_TOOLTIP_TEXT);
+    if(premiumIndex < 0) {
+      tip.textContent = text;
+      return;
+    }
+    const mainText = text.slice(0, premiumIndex).trim();
+    if(mainText) tip.appendChild(document.createTextNode(mainText));
+    const premiumText = document.createElement('span');
+    premiumText.className = 'suite-menu-tooltip-premium';
+    premiumText.textContent = SUITE_PREMIUM_TOOLTIP_TEXT;
+    tip.appendChild(premiumText);
+  }
+
   function bindSuiteMenuTooltip(row, text){
     if(!row || !text || row.dataset.suiteTooltipBound === '1') return;
     row.dataset.suiteTooltipBound = '1';
     row.addEventListener('mouseenter',()=>{
       const tip = getSuiteMenuTooltip();
-      tip.textContent = text;
+      renderSuiteMenuTooltip(tip, text);
       tip.style.setProperty('--suite-tip-accent', SUITE_TOOLTIP_ACCENTS[Math.floor(Math.random() * SUITE_TOOLTIP_ACCENTS.length)]);
       placeSuiteMenuTooltip(row, tip);
       tip.classList.add('show');
