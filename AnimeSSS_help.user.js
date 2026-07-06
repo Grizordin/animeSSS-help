@@ -956,12 +956,6 @@
       outline:2px solid rgba(125,211,252,.8);
       outline-offset:3px;
     }
-    .suite-menu-top-card {
-      display:flex;
-      flex-direction:column;
-      gap:9px;
-      margin-bottom:12px;
-    }
     .suite-section-nav {
       display:flex;
       align-items:center;
@@ -971,22 +965,11 @@
       border-radius:999px;
       background:linear-gradient(135deg,rgba(8,145,178,.55),rgba(15,23,42,.96));
       border:1px solid rgba(103,232,249,.24);
-      box-shadow:0 14px 34px rgba(0,0,0,.34), inset 0 1px 0 rgba(255,255,255,.08);
+      box-shadow:0 14px 34px rgba(0,0,0,.34),0 0 24px rgba(34,211,238,.14), inset 0 1px 0 rgba(255,255,255,.08);
       overflow:visible;
     }
     #suite-settings-panel {
-      scrollbar-color: rgba(103,232,249,.45) rgba(2,6,23,.55);
-    }
-    #suite-settings-panel::before {
-      content:'';
-      position:absolute;
-      inset:0;
-      pointer-events:none;
-      border-radius:inherit;
-      background:
-        radial-gradient(circle at 16% 10%,rgba(34,211,238,.18),transparent 34%),
-        radial-gradient(circle at 88% 28%,rgba(20,184,166,.12),transparent 32%);
-      opacity:.9;
+      scrollbar-color: rgba(103,232,249,.45) transparent;
     }
     .suite-section-tab {
       position:relative;
@@ -1044,9 +1027,9 @@
       display:none;
       padding:10px 12px 12px;
       border-radius:20px;
-      background:linear-gradient(135deg,rgba(8,145,178,.18),rgba(15,23,42,.96));
+      background:linear-gradient(135deg,rgba(8,145,178,.55),rgba(15,23,42,.96));
       border:1px solid rgba(103,232,249,.24);
-      box-shadow:0 14px 34px rgba(0,0,0,.26), inset 0 1px 0 rgba(255,255,255,.08);
+      box-shadow:0 14px 34px rgba(0,0,0,.26),0 0 24px rgba(34,211,238,.14), inset 0 1px 0 rgba(255,255,255,.08);
     }
     .suite-section-panel.is-active {
       display:block;
@@ -1943,7 +1926,7 @@
   function addProfileButtons(){
     if(!cfg.modProfileBtns)return;
     const header=document.querySelector('.usn-sect__header.d-flex.ai-center.c-gap-10.r-gap-10'); if(!header)return;
-    if(header.querySelector('.open-s-button')||header.querySelector('.wish-button')||header.querySelector('.created-button'))return;
+    if(header.querySelector('.open-s-button')||header.querySelector('.wish-button')||header.querySelector('.created-button')||header.querySelector('.replacements-button'))return;
     const link=header.querySelector('a.usn-sect__title[href*="/user/cards/?name="]'); if(!link)return;
     const url=new URL(link.href,location.origin); const username=url.searchParams.get('name'); if(!username)return;
     const encodedUsername=encodeURIComponent(username);
@@ -1953,11 +1936,13 @@
     const wIcon=document.createElement('span'); wIcon.className='fal fa-yin-yang'; wBtn.appendChild(wIcon); wBtn.append(' Желаемое');
     const cBtn=document.createElement('a'); cBtn.href=`https://${location.hostname}/user/${encodeURIComponent(username)}/cards_created/?moderation=1`; cBtn.className='usn-sect__title created-button'; cBtn.style.marginLeft='55px';
     const cIcon=document.createElement('span'); cIcon.className='fal fa-yin-yang'; cBtn.appendChild(cIcon); cBtn.append(' На модерации');
-    link.insertAdjacentElement('afterend',cBtn); link.insertAdjacentElement('afterend',wBtn); link.insertAdjacentElement('afterend',sBtn);
+    const rBtn=document.createElement('a'); rBtn.href=`https://${location.hostname}/user/${encodeURIComponent(username)}/cards_replacements/`; rBtn.className='usn-sect__title replacements-button'; rBtn.style.marginLeft='55px';
+    const rIcon=document.createElement('span'); rIcon.className='fal fa-yin-yang'; rBtn.appendChild(rIcon); rBtn.append(' Замены');
+    link.insertAdjacentElement('afterend',rBtn); link.insertAdjacentElement('afterend',cBtn); link.insertAdjacentElement('afterend',wBtn); link.insertAdjacentElement('afterend',sBtn);
   }
 
   function cleanupProfileButtons(){
-    document.querySelectorAll('.open-s-button,.wish-button,.created-button').forEach(el=>el.remove());
+    document.querySelectorAll('.open-s-button,.wish-button,.created-button,.replacements-button').forEach(el=>el.remove());
   }
 
   // ============================================================
@@ -4984,6 +4969,12 @@
     modLabyrinthClubWar: 'Подсвечивает союзные и вражеские клубы.'
   };
 
+  PREMIUM_REQUIRED_SETTINGS.forEach(key=>{
+    if(SUITE_MENU_TOOLTIPS[key] && !/Возвышение/.test(SUITE_MENU_TOOLTIPS[key])) {
+      SUITE_MENU_TOOLTIPS[key] += ' Требуется Возвышение.';
+    }
+  });
+
   const SUITE_MENU_SLIDER_TOOLTIPS = {
     menuBgDim: 'Регулирует затемнение фона меню.',
     menuTextClarity: 'Делает текст меню контрастнее на фоне.'
@@ -5261,10 +5252,10 @@
       'max-width:calc(100vw - 24px)',
       'max-height:90vh',
       'overflow-y:auto',
-      'background:linear-gradient(135deg,rgba(8,145,178,.24),rgba(15,23,42,.98) 34%,rgba(2,6,23,.96))',
-      'border:1px solid rgba(103,232,249,.38)',
-      'border-radius:20px',
-      'box-shadow:0 24px 60px rgba(0,0,0,.62),0 0 0 1px rgba(34,211,238,.08),0 0 42px rgba(34,211,238,.22),inset 0 1px 0 rgba(255,255,255,.08)',
+      'background:transparent',
+      'border:0',
+      'border-radius:0',
+      'box-shadow:none',
       'z-index:999',
       "font-family:'Segoe UI',sans-serif",
       'color:#e2e8f0'
@@ -5301,14 +5292,15 @@
 
     const hdr=document.createElement('div');
     hdr.style.cssText=[
-      'background:linear-gradient(135deg,rgba(8,145,178,.20),rgba(15,23,42,.94))',
+      'background:linear-gradient(135deg,rgba(8,145,178,.55),rgba(15,23,42,.96))',
       'padding:14px 18px',
       'display:flex',
       'align-items:center',
       'justify-content:space-between',
-      'border-bottom:1px solid rgba(103,232,249,.16)',
-      'position:sticky',
-      'top:0',
+      'border:1px solid rgba(103,232,249,.24)',
+      'border-radius:20px',
+      'box-shadow:0 14px 34px rgba(0,0,0,.34),0 0 24px rgba(34,211,238,.14),inset 0 1px 0 rgba(255,255,255,.08)',
+      'margin-bottom:12px',
       'z-index:1',
       'backdrop-filter:blur(10px)'
     ].join(';');
@@ -5378,27 +5370,7 @@
       }
     });
 
-    const body=document.createElement('div'); body.style.cssText='padding:14px 18px';
-    const topCard=document.createElement('div');
-    topCard.className='suite-menu-top-card';
-    const crownLegend=document.createElement('div');
-    crownLegend.style.cssText=[
-      'display:flex',
-      'align-items:center',
-      'gap:7px',
-      'margin-bottom:0',
-      'padding:7px 9px',
-      'border:1px solid rgba(103,232,249,.22)',
-      'border-radius:14px',
-      'background:linear-gradient(135deg,rgba(8,145,178,.18),rgba(15,23,42,.96))',
-      'box-shadow:inset 0 1px 0 rgba(255,255,255,.06)',
-      'color:#cbd5e1',
-      'font-size:12px',
-      'font-weight:700'
-    ].join(';');
-    crownLegend.append(makeCrownIcon(18),document.createTextNode('— Возвышение'));
-    topCard.appendChild(crownLegend);
-    body.appendChild(topCard);
+    const body=document.createElement('div'); body.style.cssText='padding:0';
 
     cfg.settingsSections = { ...DEFAULT_SETTINGS.settingsSections, ...(cfg.settingsSections||{}) };
     const sectionNav=document.createElement('div');
