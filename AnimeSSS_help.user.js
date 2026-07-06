@@ -10384,11 +10384,14 @@
         function installStorageListener() {
             if (storageHandler || storageListenerId) return;
 
-            const onTabLockChange = () => {
+            const onTabLockChange = (name, oldValue, newValue) => {
                 updateButtonState();
+                const lock = newValue || readTabLock();
+                if (lock?.tabId === TAB_ID) return;
 
                 if (scriptEnabledWatch && isTabVisible() && isThisTabLeader()) {
-                    scheduleNext(RESUME_DELAY_MS);
+                    const hasFutureRun = checkNewCardTimeoutId && nextRunAt > Date.now() + RESUME_DELAY_MS;
+                    if (!hasFutureRun) scheduleNext(RESUME_DELAY_MS);
                 } else if (!isThisTabLeader()) {
                     stopMainCardCheckLogic();
                 }
