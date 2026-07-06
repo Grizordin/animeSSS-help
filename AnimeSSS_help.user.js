@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      2.40
+// @version      2.41
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -13,6 +13,8 @@
 // @grant        GM.getValue
 // @grant        GM.setValue
 // @grant        GM_deleteValue
+// @grant        GM_addValueChangeListener
+// @grant        GM_removeValueChangeListener
 // @grant        GM_addStyle
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
@@ -37,6 +39,23 @@
     try { GM_setValue(key, JSON.stringify(val)); } catch(e) {}
   }
   function gmDelete(key) {
+    try { GM_deleteValue(key); } catch(e) {}
+  }
+  function gmStoreGet(key, def = null) {
+    try {
+      const missing = '__suite_gm_missing__';
+      const v = GM_getValue(key, missing);
+      if (v === missing || v === null || typeof v === 'undefined') return def;
+      if (typeof v !== 'string') return v;
+      try { return JSON.parse(v); } catch(e) { return v; }
+    } catch(e) {
+      return def;
+    }
+  }
+  function gmStoreSet(key, val) {
+    try { GM_setValue(key, val); } catch(e) {}
+  }
+  function gmStoreDelete(key) {
     try { GM_deleteValue(key); } catch(e) {}
   }
 
@@ -861,19 +880,187 @@
       transform: translateY(-50%) translateX(0);
     }
     .suite-toggle {
-      position:relative;display:inline-block;width:36px;height:20px;flex-shrink:0;
+      position:relative;
+      display:inline-block;
+      width:58px;
+      height:32px;
+      flex:0 0 58px;
     }
     .suite-toggle input { opacity:0;width:0;height:0; }
     .suite-slider {
-      position:absolute;inset:0;background:#334155;border-radius:20px;
-      transition:background .2s;cursor:pointer;
+      position:absolute;
+      inset:0;
+      cursor:pointer;
+      border-radius:999px;
+      background:linear-gradient(145deg,#121821,#05080d);
+      border:1px solid rgba(148,163,184,.18);
+      box-shadow:
+        inset 6px 6px 10px rgba(0,0,0,.78),
+        inset -4px -4px 8px rgba(148,163,184,.08),
+        0 3px 8px rgba(0,0,0,.55);
+      transition:border-color .22s ease, box-shadow .22s ease, background .22s ease;
     }
     .suite-slider:before {
-      content:'';position:absolute;width:14px;height:14px;left:3px;top:3px;
-      background:#fff;border-radius:50%;transition:transform .2s;
+      content:'';
+      position:absolute;
+      width:24px;
+      height:24px;
+      left:3px;
+      top:3px;
+      border-radius:50%;
+      background:linear-gradient(145deg,#303743,#171c25);
+      border:1px solid rgba(226,232,240,.34);
+      box-shadow:
+        0 4px 9px rgba(0,0,0,.75),
+        inset 2px 2px 4px rgba(255,255,255,.08),
+        inset -3px -3px 5px rgba(0,0,0,.45);
+      transition:transform .24s cubic-bezier(.2,.8,.2,1), border-color .22s ease, box-shadow .22s ease;
+      z-index:2;
     }
-    .suite-toggle input:checked + .suite-slider { background:#0ea5e9; }
-    .suite-toggle input:checked + .suite-slider:before { transform:translateX(16px); }
+    .suite-slider:after {
+      content:'';
+      position:absolute;
+      width:7px;
+      height:7px;
+      left:-9px;
+      top:2px;
+      border-radius:50%;
+      background:#ef4444;
+      box-shadow:0 0 9px rgba(239,68,68,.85);
+      transition:background .22s ease, box-shadow .22s ease;
+    }
+    .suite-toggle input:checked + .suite-slider {
+      border-color:rgba(94,234,212,.95);
+      background:linear-gradient(145deg,#101720,#05080d);
+      box-shadow:
+        inset 6px 6px 10px rgba(0,0,0,.78),
+        inset -4px -4px 8px rgba(94,234,212,.10),
+        0 0 0 1px rgba(74,222,128,.72),
+        0 0 16px rgba(74,222,128,.55),
+        0 0 22px rgba(45,212,191,.42);
+    }
+    .suite-toggle input:checked + .suite-slider:before {
+      transform:translateX(26px);
+      border-color:rgba(226,232,240,.58);
+      box-shadow:
+        0 4px 10px rgba(0,0,0,.8),
+        0 0 10px rgba(45,212,191,.26),
+        inset 2px 2px 4px rgba(255,255,255,.10),
+        inset -3px -3px 5px rgba(0,0,0,.48);
+    }
+    .suite-toggle input:checked + .suite-slider:after {
+      background:#4ade80;
+      box-shadow:0 0 10px rgba(74,222,128,.9),0 0 16px rgba(45,212,191,.55);
+    }
+    .suite-toggle input:focus-visible + .suite-slider {
+      outline:2px solid rgba(125,211,252,.8);
+      outline-offset:3px;
+    }
+    .suite-menu-top-card {
+      display:flex;
+      flex-direction:column;
+      gap:9px;
+      margin-bottom:12px;
+    }
+    .suite-section-nav {
+      display:flex;
+      align-items:center;
+      gap:8px;
+      margin:0 0 12px;
+      padding:8px;
+      border-radius:999px;
+      background:linear-gradient(135deg,rgba(8,145,178,.55),rgba(15,23,42,.96));
+      border:1px solid rgba(103,232,249,.24);
+      box-shadow:0 14px 34px rgba(0,0,0,.34), inset 0 1px 0 rgba(255,255,255,.08);
+      overflow:visible;
+    }
+    .suite-section-tab {
+      position:relative;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      gap:8px;
+      width:44px;
+      height:44px;
+      padding:0 13px;
+      border:0;
+      border-radius:999px;
+      color:#67e8f9;
+      background:transparent;
+      cursor:pointer;
+      overflow:hidden;
+      font:700 13px/1 "Segoe UI",Arial,sans-serif;
+      transition:width .28s cubic-bezier(.22,1,.36,1),background .2s ease,box-shadow .2s ease,color .2s ease;
+    }
+    .suite-section-tab:hover,
+    .suite-section-tab.is-active {
+      width:148px;
+      justify-content:flex-start;
+      background:rgba(255,255,255,.12);
+      color:#f8fafc;
+      box-shadow:0 0 24px rgba(34,211,238,.20), inset 0 1px 0 rgba(255,255,255,.10);
+    }
+    .suite-section-tab.is-active {
+      background:rgba(240,249,255,.94);
+      color:#0f172a;
+    }
+    .suite-section-tab-icon {
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      min-width:18px;
+      font-size:17px;
+      line-height:1;
+    }
+    .suite-section-tab-label {
+      opacity:0;
+      max-width:0;
+      transform:translateX(-7px);
+      white-space:nowrap;
+      overflow:hidden;
+      transition:opacity .2s ease,max-width .28s ease,transform .28s ease;
+    }
+    .suite-section-tab:hover .suite-section-tab-label,
+    .suite-section-tab.is-active .suite-section-tab-label {
+      opacity:1;
+      max-width:110px;
+      transform:translateX(0);
+    }
+    .suite-section-panel {
+      display:none;
+      padding:10px 12px 12px;
+      border-radius:14px;
+      background:linear-gradient(180deg,rgba(15,23,42,.92),rgba(2,6,23,.72));
+      border:1px solid rgba(51,65,85,.9);
+      box-shadow:inset 0 1px 0 rgba(255,255,255,.04);
+    }
+    .suite-section-panel.is-active {
+      display:block;
+      animation:suiteSectionIn .16s ease-out;
+    }
+    @keyframes suiteSectionIn {
+      from { opacity:0; transform:translateY(5px); }
+      to { opacity:1; transform:translateY(0); }
+    }
+    @media (max-width: 620px) {
+      .suite-section-nav {
+        align-items:stretch;
+        flex-direction:column;
+        border-radius:16px;
+        padding:7px;
+      }
+      .suite-section-tab,
+      .suite-section-tab:hover,
+      .suite-section-tab.is-active {
+        width:100%;
+        justify-content:flex-start;
+      }
+      .suite-section-tab-label {
+        opacity:1;
+        max-width:none;
+        transform:none;
+      }
+    }
     /* Ценность карт — перенос на новую строку на узких экранах */
     @media (max-width: 600px) {
       .card-stats {
@@ -1122,6 +1309,7 @@
   // ============================================================
 
   let confirmedCard=null, confirmDialog=null;
+  let autoOpenSuppressGuard=false;
   function confirmGuardSelection(){
     if(!confirmDialog || confirmDialog.style.display !== 'flex') return false;
     confirmDialog.style.display='none';
@@ -1184,7 +1372,7 @@
       e.preventDefault(); e.stopImmediatePropagation(); return;
     }
     if(confirmedCard===card){ confirmedCard=null; setTimeout(()=>onCardPicked(card),80); return; }
-    if(cfg.modGuard){
+    if(cfg.modGuard && !autoOpenSuppressGuard){
       const vals=[...row.querySelectorAll('.lootbox__card')].map(c=>{ const r=computeCardValue(c); return r?r.value:0; });
       const bv=Math.max(...vals);
       const cr=computeCardValue(card); const cv=cr?cr.value:0;
@@ -2538,11 +2726,11 @@
   }
 
   function getVoteBlockOpened(cfgItem){
-    return localStorage.getItem(cfgItem.openKey) === 'true';
+    return gmStoreGet(cfgItem.openKey, false) === true;
   }
 
   function setVoteBlockOpened(cfgItem, opened){
-    localStorage.setItem(cfgItem.openKey, opened ? 'true' : 'false');
+    gmStoreSet(cfgItem.openKey, !!opened);
   }
 
   function applySingleVoteToggle(cfgItem){
@@ -2564,13 +2752,13 @@
     title.style.removeProperty('display');
 
     let oldIds = [];
-    try { oldIds = JSON.parse(localStorage.getItem(cfgItem.idsKey) || '[]'); }
+    try { oldIds = gmStoreGet(cfgItem.idsKey, []); }
     catch(e) { oldIds = []; }
 
     if(ids.some(id => !oldIds.includes(id))){
-      localStorage.setItem(cfgItem.newKey, 'true');
+      gmStoreSet(cfgItem.newKey, true);
     }
-    localStorage.setItem(cfgItem.idsKey, JSON.stringify(ids));
+    gmStoreSet(cfgItem.idsKey, ids);
 
     const wrapper = document.createElement('span');
     wrapper.className = 'suite-vote-toggle-wrapper';
@@ -2592,7 +2780,7 @@
     function render(){
       button.textContent = opened ? 'Свернуть' : 'Развернуть';
       counter.textContent = `${cfgItem.countLabel}: ${ids.length}`;
-      newLabel.style.display = (!opened && localStorage.getItem(cfgItem.newKey) === 'true') ? 'inline-flex' : 'none';
+      newLabel.style.display = (!opened && gmStoreGet(cfgItem.newKey, false) === true) ? 'inline-flex' : 'none';
       if(opened) block.style.removeProperty('display');
       else block.style.setProperty('display','none','important');
     }
@@ -2600,7 +2788,7 @@
     button.addEventListener('click', () => {
       opened = !opened;
       setVoteBlockOpened(cfgItem, opened);
-      if(opened) localStorage.removeItem(cfgItem.newKey);
+      if(opened) gmStoreDelete(cfgItem.newKey);
       render();
     });
 
@@ -2631,13 +2819,13 @@
     title.style.removeProperty('display');
 
     let oldIds = [];
-    try { oldIds = JSON.parse(localStorage.getItem(cfgItem.idsKey) || '[]'); }
+    try { oldIds = gmStoreGet(cfgItem.idsKey, []); }
     catch(e) { oldIds = []; }
 
     if(ids.some(id => !oldIds.includes(id))){
-      localStorage.setItem(cfgItem.newKey, 'true');
+      gmStoreSet(cfgItem.newKey, true);
     }
-    localStorage.setItem(cfgItem.idsKey, JSON.stringify(ids));
+    gmStoreSet(cfgItem.idsKey, ids);
 
     if(!wrapper){
       wrapper = document.createElement('span');
@@ -2655,7 +2843,7 @@
       const opened = getVoteBlockOpened(cfgItem);
       button.textContent = opened ? 'Свернуть' : 'Развернуть';
       counter.textContent = `${cfgItem.countLabel}: ${ids.length}`;
-      newLabel.style.display = (!opened && localStorage.getItem(cfgItem.newKey) === 'true') ? 'inline-flex' : 'none';
+      newLabel.style.display = (!opened && gmStoreGet(cfgItem.newKey, false) === true) ? 'inline-flex' : 'none';
       if(opened) block.style.removeProperty('display');
       else block.style.setProperty('display','none','important');
     }
@@ -2665,7 +2853,7 @@
       button.addEventListener('click', () => {
         const nextOpened = !getVoteBlockOpened(cfgItem);
         setVoteBlockOpened(cfgItem, nextOpened);
-        if(nextOpened) localStorage.removeItem(cfgItem.newKey);
+        if(nextOpened) gmStoreDelete(cfgItem.newKey);
         render();
       });
     }
@@ -2775,8 +2963,8 @@
     document.head.appendChild(s);
   }
 
-  function loadStonesPanelPos(){try{return JSON.parse(localStorage.getItem(STONES_EXTRA_POS_KEY)||'null');}catch(e){return null;}}
-  function saveStonesPanelPos(left,top){localStorage.setItem(STONES_EXTRA_POS_KEY,JSON.stringify({left,top}));}
+  function loadStonesPanelPos(){return gmStoreGet(STONES_EXTRA_POS_KEY, null);}
+  function saveStonesPanelPos(left,top){gmStoreSet(STONES_EXTRA_POS_KEY,{left,top});}
 
   /*** Утилиты ***/
   const DAY_MS = 24 * 60 * 60 * 1000;
@@ -3231,8 +3419,7 @@
     };
     function loadBrickSettings(){
       try{
-        const raw=localStorage.getItem(BRICK_SETTINGS_KEY);
-        const s=raw?JSON.parse(raw):defaultBrickSettings();
+        const s=gmStoreGet(BRICK_SETTINGS_KEY, defaultBrickSettings());
         if(!('excludeWishlist' in s))s.excludeWishlist=!!s.wishlistUser;
         delete s.wishlistUser;
         if(!('targetEnergy' in s))s.targetEnergy=0;
@@ -3240,9 +3427,9 @@
         return s;
       }catch(e){return defaultBrickSettings();}
     }
-    function saveBrickSettings(s){localStorage.setItem(BRICK_SETTINGS_KEY,JSON.stringify(s));}
-    function loadBrickCache(){try{const raw=localStorage.getItem(BRICK_WISHLIST_KEY);return raw?JSON.parse(raw):null;}catch(e){return null;}}
-    function saveBrickCache(username,images){localStorage.setItem(BRICK_WISHLIST_KEY,JSON.stringify({ts:Date.now(),username,images:[...images]}));}
+    function saveBrickSettings(s){gmStoreSet(BRICK_SETTINGS_KEY,s);}
+    function loadBrickCache(){return gmStoreGet(BRICK_WISHLIST_KEY, null);}
+    function saveBrickCache(username,images){gmStoreSet(BRICK_WISHLIST_KEY,{ts:Date.now(),username,images:[...images]});}
     function isBrickCacheValid(cache,username){return cache&&cache.username===username&&(Date.now()-cache.ts)<BRICK_CACHE_TTL;}
 
     function brickNotify(text,duration=3500){
@@ -3565,7 +3752,7 @@
       const chk=document.createElement('input');chk.type='checkbox';chk.checked=!!settings.excludeWishlist;chk.style.cssText='width:15px;height:15px;cursor:pointer;accent-color:#6b46c1;';
       row.append(chk,el('span',{style:'font-weight:600;',text:'🔒 Исключать желаемое'}));
       const hint=el('div',{style:'font-size:11px;color:#718096;padding-left:22px;',text:`Ник: ${suiteGetCurrentUserName()||'не найден'}`});
-      chk.addEventListener('change',()=>{settings.excludeWishlist=chk.checked;saveBrickSettings(settings);localStorage.removeItem(BRICK_WISHLIST_KEY);renderBrickBody(document.getElementById('stone-brick-body'));});
+      chk.addEventListener('change',()=>{settings.excludeWishlist=chk.checked;saveBrickSettings(settings);gmStoreDelete(BRICK_WISHLIST_KEY);renderBrickBody(document.getElementById('stone-brick-body'));});
       wrap.append(row,hint);return wrap;
     }
     function makeBrickTargetRow(settings){
@@ -3615,8 +3802,8 @@
       setBrickReady(getFutureEnergy()>0&&brickReadyToTrade);
       updateBrickButton(false);
     }
-    function saveBrickPanelPos(left,top){localStorage.setItem(BRICK_POS_KEY,JSON.stringify({left,top}));}
-    function loadBrickPanelPos(){try{const raw=localStorage.getItem(BRICK_POS_KEY);return raw?JSON.parse(raw):null;}catch(e){return null;}}
+    function saveBrickPanelPos(left,top){gmStoreSet(BRICK_POS_KEY,{left,top});}
+    function loadBrickPanelPos(){return gmStoreGet(BRICK_POS_KEY, null);}
     function applyBrickPanelPos(panel){
       const pos=loadBrickPanelPos();if(!pos)return;
       panel.style.right='auto';panel.style.bottom='auto';panel.style.left=Math.max(0,pos.left)+'px';panel.style.top=Math.max(0,pos.top)+'px';
@@ -3698,17 +3885,16 @@
     };
     function loadRemeltSettings(){
       try{
-        const raw=localStorage.getItem(REMELT_SETTINGS_KEY);
-        const s=raw?JSON.parse(raw):defaultRemeltSettings();
+        const s=gmStoreGet(REMELT_SETTINGS_KEY, defaultRemeltSettings());
         if(!('targetCount' in s))s.targetCount=1;
         if(!('excludeWishlist' in s))s.excludeWishlist=true;
         REMELT_RANKS.forEach(r=>{if(!s[r])s[r]=defaultRankCfg();});
         return s;
       }catch(e){return defaultRemeltSettings();}
     }
-    function saveRemeltSettings(s){localStorage.setItem(REMELT_SETTINGS_KEY,JSON.stringify(s));}
-    function loadRemeltWishlistCache(){try{const raw=localStorage.getItem(REMELT_WISHLIST_KEY);return raw?JSON.parse(raw):null;}catch(e){return null;}}
-    function saveRemeltWishlistCache(username,images){localStorage.setItem(REMELT_WISHLIST_KEY,JSON.stringify({ts:Date.now(),username,images:[...images]}));}
+    function saveRemeltSettings(s){gmStoreSet(REMELT_SETTINGS_KEY,s);}
+    function loadRemeltWishlistCache(){return gmStoreGet(REMELT_WISHLIST_KEY, null);}
+    function saveRemeltWishlistCache(username,images){gmStoreSet(REMELT_WISHLIST_KEY,{ts:Date.now(),username,images:[...images]});}
     function isRemeltWishlistCacheValid(cache,username){return cache&&cache.username===username&&(Date.now()-cache.ts)<REMELT_CACHE_TTL;}
     function remeltNotify(text){
       const clean=String(text||'').replace(/^[\u{1F000}-\u{1FFFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}⚠️✅⬇️⏳🔄⛔⚡🔥]+\s*/u,'');
@@ -4040,7 +4226,7 @@
       const chk=document.createElement('input');chk.type='checkbox';chk.checked=!!settings.excludeWishlist;chk.style.cssText='width:15px;height:15px;cursor:pointer;accent-color:#c2410c;';
       row.append(chk,remeltEl('span',{style:'font-weight:600;',text:'🔒 Исключать желаемое'}));
       const hint=remeltEl('div',{style:'font-size:11px;color:#718096;padding-left:22px;',text:`Ник: ${suiteGetCurrentUserName()||'не найден'}`});
-      chk.addEventListener('change',()=>{settings.excludeWishlist=chk.checked;saveRemeltSettings(settings);localStorage.removeItem(REMELT_WISHLIST_KEY);renderRemeltBody(document.getElementById('remelt-panel-body'));});
+      chk.addEventListener('change',()=>{settings.excludeWishlist=chk.checked;saveRemeltSettings(settings);gmStoreDelete(REMELT_WISHLIST_KEY);renderRemeltBody(document.getElementById('remelt-panel-body'));});
       wrap.append(row,hint);return wrap;
     }
     function renderRemeltBody(body){
@@ -4063,8 +4249,8 @@
       const btn=makeRemeltBtn('🔥 Переплавка','#c2410c');btn.id='remelt-main-btn';btn.style.width='100%';btn.addEventListener('click',runRemelt);body.appendChild(btn);
       updateRemeltButton(false);
     }
-    function saveRemeltPanelPos(left,top){localStorage.setItem(REMELT_POS_KEY,JSON.stringify({left,top}));}
-    function loadRemeltPanelPos(){try{const raw=localStorage.getItem(REMELT_POS_KEY);return raw?JSON.parse(raw):null;}catch(e){return null;}}
+    function saveRemeltPanelPos(left,top){gmStoreSet(REMELT_POS_KEY,{left,top});}
+    function loadRemeltPanelPos(){return gmStoreGet(REMELT_POS_KEY, null);}
     function makeRemeltPanelDraggable(panel,handle){
       let sx,sy,sl,st;
       handle.addEventListener('mousedown',e=>{
@@ -4378,6 +4564,7 @@
     if(autoRunInput) autoRunInput.checked=false;
     clearTimeout(autoLoopTimer); autoLoopTimer=null;
     autoBusy=false; autoWaitingManual=false;
+    autoOpenSuppressGuard=false;
     autoPausedAfterReload=false;
     autoLastChosenPackId=''; autoManualPackId='';
     setAutoStatus(reason);
@@ -4387,6 +4574,7 @@
     cfg.autoOpenEnabled=true; saveCfg();
     if(autoRunInput) autoRunInput.checked=true;
     autoBusy=false; autoWaitingManual=true;
+    autoOpenSuppressGuard=true;
     autoManualPackId=packId||getActiveRow()?.getAttribute('data-pack-id')||'';
     clearTimeout(autoLoopTimer); autoLoopTimer=null;
     setAutoStatus(reason);
@@ -4398,6 +4586,7 @@
     const packId=row.getAttribute('data-pack-id')||'';
     if(autoManualPackId && packId && packId!==autoManualPackId) return;
     autoWaitingManual=false;
+    autoOpenSuppressGuard=false;
     autoManualPackId='';
     autoLastChosenPackId=packId;
     autoOpenedCount++;
@@ -4476,6 +4665,7 @@
     cfg.autoOpenEnabled=true; saveCfg();
     autoPausedAfterReload=false;
     autoWaitingManual=false;
+    autoOpenSuppressGuard=false;
     autoBusy=false;
     setAutoStatus('Запуск...');
     updateAutoCount();
@@ -4489,7 +4679,12 @@
     setTimeout(()=>{
       if(!cfg.autoOpenEnabled){ autoBusy=false; return; }
       autoLastChosenPackId=getActiveRow()?.getAttribute('data-pack-id')||'';
-      card.click();
+      autoOpenSuppressGuard=true;
+      try {
+        card.click();
+      } finally {
+        autoOpenSuppressGuard=false;
+      }
       autoOpenedCount++;
       saveAutoOpenedCount();
       updateAutoCount();
@@ -5048,7 +5243,8 @@
       'top:50%',
       'right:20px',
       'transform:translateY(-50%)',
-      'width:320px',
+      'width:560px',
+      'max-width:calc(100vw - 24px)',
       'max-height:90vh',
       'overflow-y:auto',
       'background:#0a0f1a',
@@ -5168,12 +5364,14 @@
     });
 
     const body=document.createElement('div'); body.style.cssText='padding:14px 18px';
+    const topCard=document.createElement('div');
+    topCard.className='suite-menu-top-card';
     const crownLegend=document.createElement('div');
     crownLegend.style.cssText=[
       'display:flex',
       'align-items:center',
       'gap:7px',
-      'margin-bottom:10px',
+      'margin-bottom:0',
       'padding:7px 9px',
       'border:1px solid #1e293b',
       'border-radius:9px',
@@ -5183,78 +5381,55 @@
       'font-weight:700'
     ].join(';');
     crownLegend.append(makeCrownIcon(18),document.createTextNode('— Возвышение'));
-    body.appendChild(crownLegend);
+    topCard.appendChild(crownLegend);
+    body.appendChild(topCard);
 
     cfg.settingsSections = { ...DEFAULT_SETTINGS.settingsSections, ...(cfg.settingsSections||{}) };
+    const sectionNav=document.createElement('div');
+    sectionNav.className='suite-section-nav';
+    const sectionsHost=document.createElement('div');
+    sectionsHost.className='suite-sections-host';
+    const sectionEntries=[];
+    body.append(sectionNav,sectionsHost);
+    const splitSectionTitle=(title)=>{
+      const raw=String(title||'').trim();
+      const parts=raw.split(/\s+/);
+      const icon=parts.length>1?parts.shift():'';
+      return { icon: icon || '•', text: parts.join(' ') || raw };
+    };
+    const setActiveSection=(key)=>{
+      sectionEntries.forEach(entry=>{
+        const active=entry.key===key;
+        entry.content.classList.toggle('is-active',active);
+        entry.tab.classList.toggle('is-active',active);
+        entry.tab.setAttribute('aria-selected',active?'true':'false');
+        cfg.settingsSections[entry.key]=active;
+      });
+      saveCfg();
+      requestAnimationFrame(keepSettingsPanelInViewport);
+    };
     const makeSection=(key,title)=>{
-      const wrap=document.createElement('div');
-      wrap.style.cssText='margin-top:10px';
-      const head=document.createElement('button');
-      head.type='button';
-      head.style.cssText=[
-        'width:100%',
-        'display:flex',
-        'align-items:center',
-        'justify-content:space-between',
-        'gap:10px',
-        'background:#0f172a',
-        'border:1px solid #1e293b',
-        'border-radius:9px',
-        'color:#cbd5e1',
-        'cursor:pointer',
-        'padding:8px 9px',
-        'font-family:inherit',
-        'text-align:left',
-        'transition:background .15s,border-color .15s'
-      ].join(';');
-      head.onmouseenter=()=>{ head.style.background='#111c2f'; head.style.borderColor='#334155'; };
-      head.onmouseleave=()=>{ head.style.background='#0f172a'; head.style.borderColor='#1e293b'; };
+      const meta=splitSectionTitle(title);
+      const tab=document.createElement('button');
+      tab.type='button';
+      tab.className='suite-section-tab';
+      tab.setAttribute('role','tab');
+      tab.title=meta.text;
+      const icon=document.createElement('span');
+      icon.className='suite-section-tab-icon';
+      icon.textContent=meta.icon;
       const label=document.createElement('span');
-      label.textContent=title;
-      label.style.cssText=[
-        'font-size:12px',
-        'font-weight:800',
-        'letter-spacing:.5px',
-        'text-transform:uppercase',
-        'min-width:0',
-        'overflow:hidden',
-        'text-overflow:ellipsis',
-        'white-space:nowrap'
-      ].join(';');
-      if(key==='cardValue')appendCrown(label,14);
-      const state=document.createElement('span');
-      state.style.cssText=[
-        'display:inline-flex',
-        'align-items:center',
-        'justify-content:center',
-        'gap:5px',
-        'min-width:86px',
-        'border-radius:7px',
-        'background:#1e293b',
-        'color:#93c5fd',
-        'padding:4px 7px',
-        'font-size:11px',
-        'font-weight:700',
-        'line-height:1',
-        'flex-shrink:0'
-      ].join(';');
+      label.className='suite-section-tab-label';
+      label.textContent=meta.text;
+      tab.append(icon,label);
       const content=document.createElement('div');
-      content.style.cssText='padding-top:4px';
-      const setOpen=(open)=>{
-        cfg.settingsSections[key]=!!open; saveCfg();
-        content.style.display=open?'block':'none';
-        state.textContent=open?'▾ Свернуть':'▸ Развернуть';
-        state.style.color=open?'#93c5fd':'#fbbf24';
-        requestAnimationFrame(keepSettingsPanelInViewport);
-      };
-      head.addEventListener('click',()=>setOpen(!cfg.settingsSections[key]));
-      head.append(label,state);
-      wrap.append(head,content);
-      setOpen(cfg.settingsSections[key]!==false);
-      body.appendChild(wrap);
+      content.className='suite-section-panel';
+      tab.addEventListener('click',()=>setActiveSection(key));
+      sectionEntries.push({key,tab,content});
+      sectionNav.appendChild(tab);
+      sectionsHost.appendChild(content);
       return content;
     };
-
     // ── ЦЕННОСТЬ КАРТ ──────────────────────────────────────────
     const cardValueSection = makeSection('cardValue','⭐ Ценность карт');
 
@@ -5462,6 +5637,9 @@
       else cleanupClubWarRelations();
     });
     labyrinthSection.appendChild(clubWarRow);
+
+    const initialSection = sectionEntries.find(entry => cfg.settingsSections[entry.key] !== false) || sectionEntries[0];
+    if(initialSection) setActiveSection(initialSection.key);
 
     panel.append(hdr,body); document.body.appendChild(panel);
     // Восстанавливаем сохранённую позицию панели настроек
@@ -5827,9 +6005,9 @@
   const NN_DELAY_MAX  = 10000;
   const NN_SCAN_DELAY = 1000;
 
-  const nnMissingIds  = new Set(JSON.parse(localStorage.getItem(NN_PANEL_KEY)||'[]'));
+  const nnMissingIds  = new Set(gmStoreGet(NN_PANEL_KEY, []));
   const nnDomain      = location.hostname;
-  let nnEnabled       = JSON.parse(localStorage.getItem(NN_ENABLE_KEY)||'true');
+  let nnEnabled       = gmStoreGet(NN_ENABLE_KEY, true);
   let nnQueue         = [], nnQueueRunning = false, nnRetryCount = 0;
   let nnAutoRunning   = false;
   let nnIsScanning    = false, nnCancelScan = false;
@@ -6221,16 +6399,16 @@
     const HASH_KEY              = `noNeedUserHash:${currentDomain}:${userName.toLowerCase()}`;
     const PANEL_POS_KEY         = `noNeedPanelPos:${currentDomain}:${userName.toLowerCase()}`;
 
-    const missingIds = new Set(JSON.parse(localStorage.getItem(PANEL_KEY)||'[]'));
-    let enabled      = JSON.parse(localStorage.getItem(ENABLE_KEY)||'true');
+    const missingIds = new Set(gmStoreGet(PANEL_KEY, []));
+    let enabled      = gmStoreGet(ENABLE_KEY, true);
     let buttonsHoverOnly = !cfg.noNeedButtonsAlways;
     let refreshButton, scanButton, stopScanButton;
     let isScanning = false, cancelScan = false;
     let noNeedQueue = [], noNeedQueueRunning = false, autoNoNeedRunning = false, noNeedRetryCount = 0;
     let scanBuffer = [], scanSent = 0, scanFound = 0, scanTotalPages = 0, scanCurPage = 0;
     let panelCollapsed = false;
-    let cachedUserHash = localStorage.getItem(HASH_KEY) || nnGetHash();
-    if(cachedUserHash) localStorage.setItem(HASH_KEY,cachedUserHash);
+    let cachedUserHash = gmStoreGet(HASH_KEY, '') || nnGetHash();
+    if(cachedUserHash) gmStoreSet(HASH_KEY,cachedUserHash);
     document.addEventListener('suite-setting-change',e=>{
       if(e.detail?.key!=='noNeedButtonsAlways')return;
       buttonsHoverOnly=!cfg.noNeedButtonsAlways;
@@ -6346,9 +6524,9 @@
     }
 
     function nnDelay(ms) { return new Promise(r=>setTimeout(r,ms)); }
-    function saveMissing() { localStorage.setItem(PANEL_KEY,JSON.stringify([...missingIds])); }
-    function loadPanelPos(){try{return JSON.parse(localStorage.getItem(PANEL_POS_KEY)||'null');}catch(e){return null;}}
-    function savePanelPos(left,top){localStorage.setItem(PANEL_POS_KEY,JSON.stringify({left,top}));}
+    function saveMissing() { gmStoreSet(PANEL_KEY,[...missingIds]); }
+    function loadPanelPos(){return gmStoreGet(PANEL_POS_KEY, null);}
+    function savePanelPos(left,top){gmStoreSet(PANEL_POS_KEY,{left,top});}
 
     // ── Индикаторы ────────────────────────────────────────────
     function getNoNeedIndMeta(msg){
@@ -6397,7 +6575,7 @@
     function saveUserHash(hash) {
       if(!hash) return '';
       cachedUserHash=String(hash);
-      localStorage.setItem(HASH_KEY,cachedUserHash);
+      gmStoreSet(HASH_KEY,cachedUserHash);
       return cachedUserHash;
     }
     function extractHash(html) { return nnGetHash(parseHtmlDoc(html)); }
@@ -6489,7 +6667,7 @@
 
       let parsed=await postOnce(hash);
       if(!parsed.ok && /hash|хеш|сесс|session|token|токен/i.test(parsed.message||'')) {
-        localStorage.removeItem(HASH_KEY);
+        gmStoreDelete(HASH_KEY);
         cachedUserHash='';
         hash=await refreshUserHash();
         if(hash) parsed=await postOnce(hash);
@@ -6845,7 +7023,7 @@
       updateStopBtn();
     }
     function createUI() {
-      enabled=true; localStorage.setItem(ENABLE_KEY,JSON.stringify(enabled));
+      enabled=true; gmStoreSet(ENABLE_KEY,enabled);
       refreshButton=makeCircleBtn('📚','#9C27B0','50%',()=>{ if(!enabled) return; scanLocked(); },'ПОИСК ЗАБЛОКИРОВАННЫХ ДУБЛЕЙ КАРТ');
       scanButton   =makeCircleBtn('🔍','#FFA500','calc(50% + 60px)',()=>{ if(!enabled) return; scanAllPages(); },'ПРОЙТИ ПО ВСЕМ ОТКРЫТЫМ КАРТАМ И ОТПРАВИТЬ В НЕНУЖНОЕ');
       stopScanButton=makeCircleBtn('🛑','#d9534f','calc(50% + 120px)',()=>{ requestStop(); },'Остановить сканирование и отправить буфер');
@@ -6865,7 +7043,7 @@
     createUI();
     window.__suiteNoNeedCardsCleanup = () => {
       enabled = false;
-      try{ localStorage.setItem(ENABLE_KEY, JSON.stringify(false)); }catch(e){}
+      try{ gmStoreSet(ENABLE_KEY, false); }catch(e){}
       document.body.classList.remove('nn-hover-only');
       document.querySelectorAll('.nn-btn-container,.__nn-circle-btn,#missing-panel,#cv-nn-style').forEach(el=>el.remove());
       document.querySelectorAll('.anime-cards__item-wrapper.nn-row-hover').forEach(el=>el.classList.remove('nn-row-hover'));
@@ -6908,7 +7086,7 @@
         const PAUSE_DATE_KEY = 'aw_active_tab_pause_date_v2';
         const PAUSE_ON_LIMIT_ENABLED_KEY = 'aw_active_tab_pause_on_limit_enabled_v2';
         const MAX_FAILED_ATTEMPTS_KEY = 'aw_active_tab_max_failed_attempts_v2';
-        const KODIK_WARMUP_DONE_KEY = 'aw_active_tab_kodik_warmup_done_v1';
+        const KODIK_WARMUP_DONE_KEY = 'aw_active_tab_daily_watch_quest_sent_v2';
         const KODIK_WARMUP_NOTICE_KEY = 'aw_active_tab_kodik_warmup_notice_v1';
 
         const CARD_COUNT_CACHE_KEY = 'aw_active_tab_card_count_cache_v2';
@@ -6952,18 +7130,18 @@
         let scriptEnabledWatch = true;
         let pauseOnLimitEnabled = true;
         let checkNewCardTimeoutId = null;
-        let dbPromise = null;
         let isLoopRunning = false;
         let tabLockIntervalId = null;
         let panelTickerIntervalId = null;
         let storageHandler = null;
+        let storageListenerId = null;
         let nextRunAt = 0;
         let profileFetchInProgress = false;
         let kodikWarmupPromise = null;
 
         const currentUser = getCurrentUser();
-        const DB_NAME = `ASCM_AutoWatch_VisibleTab_${currentUser || 'guest'}`;
-        const DB_VERSION = 1;
+        const AW_GM_DB_PREFIX = `aw_active_tab_store_v1_${currentUser || 'guest'}_`;
+        const AW_GM_STORES = ['anime_history', 'card_receipts', 'skipped_episodes', 'request_log'];
 
         // =========================================================
         // UTIL
@@ -7151,8 +7329,7 @@
         // =========================================================
         function readTabLock() {
             try {
-                const raw = localStorage.getItem(TAB_LOCK_KEY);
-                return raw ? JSON.parse(raw) : null;
+                return gmStoreGet(TAB_LOCK_KEY, null);
             } catch (e) {
                 return null;
             }
@@ -7160,7 +7337,7 @@
 
         function writeTabLock(data) {
             try {
-                localStorage.setItem(TAB_LOCK_KEY, JSON.stringify(data));
+                gmStoreSet(TAB_LOCK_KEY, data);
             } catch (e) {}
         }
 
@@ -7168,7 +7345,7 @@
             try {
                 const lock = readTabLock();
                 if (lock && lock.tabId === TAB_ID) {
-                    localStorage.removeItem(TAB_LOCK_KEY);
+                    gmStoreDelete(TAB_LOCK_KEY);
                 }
             } catch (e) {}
         }
@@ -7233,50 +7410,28 @@
         // =========================================================
         // DB
         // =========================================================
-        function openDb() {
-            if (dbPromise) return dbPromise;
+        function getGmStoreKey(storeName) {
+            return `${AW_GM_DB_PREFIX}${storeName}`;
+        }
 
-            dbPromise = new Promise((resolve, reject) => {
-                const request = indexedDB.open(DB_NAME, DB_VERSION);
+        async function getGmStore(storeName) {
+            if (!AW_GM_STORES.includes(storeName)) return [];
+            const value = await GM_getValue(getGmStoreKey(storeName), []);
+            return Array.isArray(value) ? value : [];
+        }
 
-                request.onerror = (event) => {
-                    dbPromise = null; // сброс, чтобы следующий вызов мог попробовать снова
-                    reject(event.target.error || new Error('IndexedDB open error'));
-                };
-                request.onsuccess = () => resolve(request.result);
-
-                request.onupgradeneeded = (event) => {
-                    const db = event.target.result;
-                    if (!db.objectStoreNames.contains('anime_history')) {
-                        db.createObjectStore('anime_history', { keyPath: 'animeId' });
-                    }
-                    if (!db.objectStoreNames.contains('card_receipts')) {
-                        db.createObjectStore('card_receipts', { keyPath: 'receivedAt' });
-                    }
-                    if (!db.objectStoreNames.contains('skipped_episodes')) {
-                        db.createObjectStore('skipped_episodes', { keyPath: 'skipKey' });
-                    }
-                    if (!db.objectStoreNames.contains('request_log')) {
-                        db.createObjectStore('request_log', { keyPath: 'requestedAt' });
-                    }
-                };
-            });
-
-            return dbPromise;
+        async function setGmStore(storeName, records) {
+            if (!AW_GM_STORES.includes(storeName)) return;
+            await GM_setValue(getGmStoreKey(storeName), Array.isArray(records) ? records : []);
         }
 
         async function saveCardReceipt(receipt) {
-            const db = await openDb();
-            await new Promise((resolve, reject) => {
-                const tx = db.transaction('card_receipts', 'readwrite');
-                const req = tx.objectStore('card_receipts').add(receipt);
-                req.onsuccess = resolve;
-                req.onerror = reject;
-            });
+            const receipts = await getGmStore('card_receipts');
+            receipts.push(receipt);
+            await setGmStore('card_receipts', receipts);
         }
 
         async function saveRequestLog(entry) {
-            const db = await openDb();
             const record = {
                 requestedAt: Date.now(),
                 dateMsk: getMoscowTimeString(),
@@ -7291,51 +7446,32 @@
                 scriptNote: entry.scriptNote || ''
             };
 
-            await new Promise((resolve, reject) => {
-                const tx = db.transaction('request_log', 'readwrite');
-                const req = tx.objectStore('request_log').add(record);
-                req.onsuccess = resolve;
-                req.onerror = reject;
-            });
+            const log = await getGmStore('request_log');
+            log.push(record);
+            await setGmStore('request_log', log);
         }
 
         async function getAllReceipts() {
-            const db = await openDb();
-            return new Promise((resolve) => {
-                const req = db.transaction('card_receipts', 'readonly').objectStore('card_receipts').getAll();
-                req.onsuccess = () => resolve(req.result || []);
-                req.onerror = () => resolve([]);
-            });
+            return getGmStore('card_receipts');
         }
 
         async function getHistoryEntry(animeId) {
-            const db = await openDb();
-            return new Promise((resolve) => {
-                const req = db.transaction('anime_history', 'readonly').objectStore('anime_history').get(String(animeId));
-                req.onsuccess = () => resolve(req.result || null);
-                req.onerror = () => resolve(null);
-            });
+            const history = await getGmStore('anime_history');
+            return history.find(row => String(row?.animeId) === String(animeId)) || null;
         }
 
         async function isEpisodeSkipped(skipKey) {
-            const db = await openDb();
-            return new Promise((resolve) => {
-                const req = db.transaction('skipped_episodes', 'readonly').objectStore('skipped_episodes').get(skipKey);
-                req.onsuccess = () => resolve(!!req.result);
-                req.onerror = () => resolve(false);
-            });
+            const skipped = await getGmStore('skipped_episodes');
+            return skipped.some(row => String(row?.skipKey) === String(skipKey));
         }
 
         async function saveSkippedEpisode(data) {
-            const db = await openDb();
-            return new Promise((resolve, reject) => {
-                const tx = db.transaction('skipped_episodes', 'readwrite');
-                const req = tx.objectStore('skipped_episodes').put(data);
-                req.onsuccess = resolve;
-                req.onerror = reject;
-            });
+            const skipped = await getGmStore('skipped_episodes');
+            const index = skipped.findIndex(row => String(row?.skipKey) === String(data?.skipKey));
+            if (index >= 0) skipped[index] = data;
+            else skipped.push(data);
+            await setGmStore('skipped_episodes', skipped);
         }
-
         // =========================================================
         // RANK STATISTICS
         // =========================================================
@@ -7484,16 +7620,8 @@
                 if (!confirmed) return;
 
                 try {
-                    const db = await openDb();
-                    // Очищаем все связанные хранилища — иначе пропущенные серии
-                    // сделают аниме "выфармленным" и оно пропадёт из базы
                     for (const store of ['card_receipts', 'skipped_episodes', 'request_log']) {
-                        await new Promise((resolve, reject) => {
-                            const tx = db.transaction(store, 'readwrite');
-                            const req = tx.objectStore(store).clear();
-                            req.onsuccess = resolve;
-                            req.onerror = reject;
-                        });
+                        await setGmStore(store, []);
                     }
                     // Сбрасываем дневной прогресс
                     await setDailyProgress(0);
@@ -7501,7 +7629,7 @@
                     await GM_setValue(SMART_PROGRESSION_KEY, null);
                     modal.remove();
                     await openStatsModal();
-                    safePush('success', '[Auto-Watch] Статистика карт полностью очищена.');
+                    safePush('success', 'Статистика карт полностью очищена.');
                 } catch (e) {
                     error('Ошибка очистки статистики:', e);
                 }
@@ -7511,17 +7639,7 @@
         }
 
         async function getAllFromStore(storeName) {
-            try {
-                const db = await openDb();
-                if (!db.objectStoreNames.contains(storeName)) return [];
-                return await new Promise((resolve) => {
-                    const req = db.transaction(storeName, 'readonly').objectStore(storeName).getAll();
-                    req.onsuccess = () => resolve(req.result || []);
-                    req.onerror = () => resolve([]);
-                });
-            } catch (e) {
-                return [];
-            }
+            return getGmStore(storeName);
         }
 
         // =========================================================
@@ -7661,7 +7779,7 @@
                     if (wasPaused) {
                         await GM_setValue(COLLECTION_PAUSED_KEY, false);
                         await GM_deleteValue(PAUSE_DATE_KEY);
-                        safePush('success', '[Auto-Watch] Новый день подтверждён профилем. Пауза снята.');
+                        safePush('success', 'Новый день подтверждён профилем. Пауза снята.');
                     }
                 }
 
@@ -8120,17 +8238,20 @@
             }
         }
 
-        async function isKodikWarmupDoneToday() {
+        async function isKodikWarmupDoneForCurrentCardDay() {
+            const progress = await ensureDailyProgressState();
             const data = await GM_getValue(KODIK_WARMUP_DONE_KEY, null);
-            return !!(data && data.date === getMskDateKey());
+            return !!(data && data.date === progress.date && data.status === 'ok');
         }
 
-        async function markKodikWarmupDoneToday(entry, episode) {
+        async function markKodikWarmupDoneForCurrentCardDay(entry, episode, status = 'sent') {
+            const progress = await ensureDailyProgressState();
             await GM_setValue(KODIK_WARMUP_DONE_KEY, {
-                date: getMskDateKey(),
+                date: progress.date,
                 animeId: entry?.anime_id || '',
                 season: entry?.s || 1,
                 episode: episode || 1,
+                status,
                 at: Date.now()
             });
         }
@@ -8140,8 +8261,8 @@
             const lastNotice = await GM_getValue(KODIK_WARMUP_NOTICE_KEY, '');
             if (lastNotice === noticeKey) return;
             await GM_setValue(KODIK_WARMUP_NOTICE_KEY, noticeKey);
-            warn('[Auto-Watch] Daily watch quest skipped: this anime entry has no translation data. Re-add it from the anime page.');
-            safePush('info', '[Auto-Watch] Daily watch quest data is missing. Re-add this anime from its page.');
+            warn('Квест просмотра не выполнен: у записи аниме нет данных перевода. Добавьте аниме в базу заново со страницы аниме.');
+            safePush('info', 'Не хватает данных для квеста просмотра. Добавьте это аниме в базу заново со страницы аниме.');
         }
 
         function removeKodikWarmupPlayer() {
@@ -8207,7 +8328,7 @@
         }
 
         async function ensureDailyKodikWarmup(entry, episode) {
-            if (await isKodikWarmupDoneToday()) return true;
+            if (await isKodikWarmupDoneForCurrentCardDay()) return true;
             if (kodikWarmupPromise) return kodikWarmupPromise;
 
             kodikWarmupPromise = (async () => {
@@ -8226,28 +8347,32 @@
                     }
                 };
 
-                const result = await fetchData('/index.php?controller=ajax&mod=anime_grabber&module=kodik_watched', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                        'X-Requested-With': 'XMLHttpRequest'
-                    },
-                    body: new URLSearchParams({
-                        action: 'save_watched',
-                        news_id: entry.anime_id,
-                        kodik_data: JSON.stringify(watchData)
-                    }).toString()
-                }, 'json');
+                try {
+                    const result = await fetchData('/index.php?controller=ajax&mod=anime_grabber&module=kodik_watched', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+                            'X-Requested-With': 'XMLHttpRequest'
+                        },
+                        body: new URLSearchParams({
+                            action: 'save_watched',
+                            news_id: entry.anime_id,
+                            kodik_data: JSON.stringify(watchData)
+                        }).toString()
+                    }, 'json');
 
-                if (result?.status) {
-                    await markKodikWarmupDoneToday(entry, targetEpisode);
-                    log('[Auto-Watch] Daily watch quest saved via Kodik watched endpoint.');
-                    safePush('success', '[Auto-Watch] Daily watch quest saved.');
-                    return true;
+                    if (result?.status) {
+                        await markKodikWarmupDoneForCurrentCardDay(entry, targetEpisode, 'ok');
+                        log('Квест просмотра засчитан через watched endpoint.');
+                        safePush('success', 'Квест просмотра засчитан.');
+                        return true;
+                    }
+
+                    warn('Квест просмотра не был принят сайтом:', result);
+                    return false;
+                } catch (e) {
+                    throw e;
                 }
-
-                warn('[Auto-Watch] Daily watch quest was not accepted:', result);
-                return false;
             })();
 
             try {
@@ -8474,7 +8599,7 @@
             warn(`[${source}] ${msg}`);
 
             if (!isLimit) {
-                safePush('info', `[Auto-Watch] ${msg}`);
+                safePush('info', msg);
             }
         }
 
@@ -8550,7 +8675,7 @@
                 await incrementDailyProgress();
                 updateButtonState();
 
-                safePush('success', `[Auto-Watch] Получена карта: ${card.name} [${String(card.rank || '?').toUpperCase()}]`);
+                safePush('success', `Получена карта: ${card.name} [${String(card.rank || '?').toUpperCase()}]`);
             } catch (e) {
                 error('Ошибка в processCardReward:', e);
             }
@@ -8686,7 +8811,7 @@
                 const initialPool = await buildOrderedPool();
                 if (!initialPool.length) {
                     log('База аниме пуста. Автолут остановлен до добавления аниме.');
-                    safePush('info', `[Auto-Watch] Добавьте аниме в базу, чтобы автолут мог получать карты.`);
+                    safePush('info', 'Добавьте аниме в базу, чтобы автолут мог получать карты.');
                     stopMainCardCheckLogic();
                     return;
                 }
@@ -8696,7 +8821,7 @@
                     // База есть, но все доступные серии уже выфармлены — ждём до 00:00 МСК
                     const msToMidnight = getMsUntilMskMidnight();
                     log(`Всё выфармлено. Жду до 00:00 МСК (${Math.ceil(msToMidnight / 60000)} мин.).`);
-                    safePush('info', `[Auto-Watch] Всё выфармлено. Жду нового дня по МСК.`);
+                    safePush('info', 'Всё выфармлено. Жду нового дня по МСК.');
                     scheduleNext(msToMidnight);
                     return;
                 }
@@ -8720,10 +8845,6 @@
                     `&kodik_data[translation][title]=${encodeURIComponent(cur.t_title)}` +
                     `&user_hash=${userHash}`;
 
-                ensureDailyKodikWarmup(cur, targetEp).catch(e => {
-                    warn('[Auto-Watch] Daily watch quest save failed:', e);
-                });
-
                 const headers = {
                     'Accept': 'application/json, text/javascript, */*; q=0.01',
                     'X-Requested-With': 'XMLHttpRequest',
@@ -8741,6 +8862,10 @@
                     method: 'POST',
                     headers,
                     body: rawBody
+                });
+
+                ensureDailyKodikWarmup(cur, targetEp).catch(e => {
+                    warn('Не удалось отправить запрос квеста просмотра:', e);
                 });
 
                 const data = await fetchData('/ajax/card_for_watch/', {
@@ -9429,7 +9554,7 @@
                     safePush('success', 'Автолут включён');
                     scheduleNext(500);
                 } else {
-                    safePush('info', 'Автолут включён, но эта вкладка не держит lock');
+                    safePush('info', 'Автолут включён, но сбор сейчас выполняет другая вкладка');
                     stopMainCardCheckLogic();
                 }
             } else {
@@ -10061,25 +10186,38 @@
         }
 
         function installStorageListener() {
-            if (storageHandler) return;
-            storageHandler = (e) => {
-                if (e.key === TAB_LOCK_KEY) {
-                    updateButtonState();
+            if (storageHandler || storageListenerId) return;
 
-                    if (scriptEnabledWatch && isTabVisible() && isThisTabLeader()) {
-                        scheduleNext(RESUME_DELAY_MS);
-                    } else if (!isThisTabLeader()) {
-                        stopMainCardCheckLogic();
-                    }
+            const onTabLockChange = () => {
+                updateButtonState();
+
+                if (scriptEnabledWatch && isTabVisible() && isThisTabLeader()) {
+                    scheduleNext(RESUME_DELAY_MS);
+                } else if (!isThisTabLeader()) {
+                    stopMainCardCheckLogic();
                 }
+            };
+
+            if (typeof GM_addValueChangeListener === 'function') {
+                storageListenerId = GM_addValueChangeListener(TAB_LOCK_KEY, onTabLockChange);
+                return;
+            }
+
+            storageHandler = (e) => {
+                if (e.key === TAB_LOCK_KEY) onTabLockChange();
             };
             window.addEventListener('storage', storageHandler);
         }
 
         function removeStorageListener() {
-            if (!storageHandler) return;
-            window.removeEventListener('storage', storageHandler);
-            storageHandler = null;
+            if (storageListenerId && typeof GM_removeValueChangeListener === 'function') {
+                GM_removeValueChangeListener(storageListenerId);
+                storageListenerId = null;
+            }
+            if (storageHandler) {
+                window.removeEventListener('storage', storageHandler);
+                storageHandler = null;
+            }
         }
 
         // =========================================================
