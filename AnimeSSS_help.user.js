@@ -879,6 +879,15 @@
       opacity: 1;
       transform: translateY(-50%) translateX(0);
     }
+    #suite-menu-tooltip .suite-menu-tooltip-premium {
+      display:block;
+      margin-top:8px;
+      padding-top:7px;
+      border-top:1px solid rgba(245,158,11,.35);
+      color:#fde68a;
+      font-weight:800;
+      text-shadow:0 0 10px rgba(245,158,11,.28);
+    }
     .suite-toggle {
       position:relative;
       display:inline-block;
@@ -963,7 +972,7 @@
       margin:0 0 12px;
       padding:8px;
       border-radius:999px;
-      background:linear-gradient(135deg,rgba(8,145,178,.55),rgba(15,23,42,.96));
+      background:linear-gradient(135deg,#0b5063,#0f172a);
       border:1px solid rgba(103,232,249,.24);
       box-shadow:0 14px 34px rgba(0,0,0,.34),0 0 24px rgba(34,211,238,.14), inset 0 1px 0 rgba(255,255,255,.08);
       overflow:visible;
@@ -1027,7 +1036,7 @@
       display:none;
       padding:10px 12px 12px;
       border-radius:20px;
-      background:linear-gradient(135deg,rgba(8,145,178,.55),rgba(15,23,42,.96));
+      background:linear-gradient(135deg,#0b5063,#0f172a);
       border:1px solid rgba(103,232,249,.24);
       box-shadow:0 14px 34px rgba(0,0,0,.26),0 0 24px rgba(34,211,238,.14), inset 0 1px 0 rgba(255,255,255,.08);
     }
@@ -4969,9 +4978,10 @@
     modLabyrinthClubWar: 'Подсвечивает союзные и вражеские клубы.'
   };
 
+  const SUITE_PREMIUM_TOOLTIP_TEXT = 'Требуется Возвышение.';
   PREMIUM_REQUIRED_SETTINGS.forEach(key=>{
-    if(SUITE_MENU_TOOLTIPS[key] && !/Возвышение/.test(SUITE_MENU_TOOLTIPS[key])) {
-      SUITE_MENU_TOOLTIPS[key] += ' Требуется Возвышение.';
+    if(SUITE_MENU_TOOLTIPS[key] && !SUITE_MENU_TOOLTIPS[key].includes(SUITE_PREMIUM_TOOLTIP_TEXT)) {
+      SUITE_MENU_TOOLTIPS[key] += `\n${SUITE_PREMIUM_TOOLTIP_TEXT}`;
     }
   });
 
@@ -5003,12 +5013,27 @@
     tip.style.top = `${top}px`;
   }
 
+  function renderSuiteMenuTooltip(tip, text){
+    tip.textContent = '';
+    const premiumIndex = text.indexOf(SUITE_PREMIUM_TOOLTIP_TEXT);
+    if(premiumIndex < 0) {
+      tip.textContent = text;
+      return;
+    }
+    const mainText = text.slice(0, premiumIndex).trim();
+    if(mainText) tip.appendChild(document.createTextNode(mainText));
+    const premiumText = document.createElement('span');
+    premiumText.className = 'suite-menu-tooltip-premium';
+    premiumText.textContent = SUITE_PREMIUM_TOOLTIP_TEXT;
+    tip.appendChild(premiumText);
+  }
+
   function bindSuiteMenuTooltip(row, text){
     if(!row || !text || row.dataset.suiteTooltipBound === '1') return;
     row.dataset.suiteTooltipBound = '1';
     row.addEventListener('mouseenter',()=>{
       const tip = getSuiteMenuTooltip();
-      tip.textContent = text;
+      renderSuiteMenuTooltip(tip, text);
       tip.style.setProperty('--suite-tip-accent', SUITE_TOOLTIP_ACCENTS[Math.floor(Math.random() * SUITE_TOOLTIP_ACCENTS.length)]);
       placeSuiteMenuTooltip(row, tip);
       tip.classList.add('show');
@@ -5292,7 +5317,7 @@
 
     const hdr=document.createElement('div');
     hdr.style.cssText=[
-      'background:linear-gradient(135deg,rgba(8,145,178,.55),rgba(15,23,42,.96))',
+      'background:linear-gradient(135deg,#0b5063,#0f172a)',
       'padding:14px 18px',
       'display:flex',
       'align-items:center',
