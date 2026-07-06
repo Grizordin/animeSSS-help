@@ -965,7 +965,7 @@
       border-radius:999px;
       background:linear-gradient(135deg,rgba(8,145,178,.55),rgba(15,23,42,.96));
       border:1px solid rgba(103,232,249,.24);
-      box-shadow:0 14px 34px rgba(0,0,0,.34),0 0 24px rgba(34,211,238,.14), inset 0 1px 0 rgba(255,255,255,.08);
+      box-shadow:0 0 0 1px rgba(34,211,238,.10), inset 0 1px 0 rgba(255,255,255,.08);
       overflow:visible;
     }
     #suite-settings-panel {
@@ -984,6 +984,7 @@
       filter:none !important;
       backdrop-filter:none !important;
       isolation:isolate;
+      background-clip:padding-box;
     }
     .suite-section-tab {
       position:relative;
@@ -1043,7 +1044,7 @@
       border-radius:20px;
       background:linear-gradient(135deg,rgba(8,145,178,.55),rgba(15,23,42,.96));
       border:1px solid rgba(103,232,249,.24);
-      box-shadow:0 14px 34px rgba(0,0,0,.26),0 0 24px rgba(34,211,238,.14), inset 0 1px 0 rgba(255,255,255,.08);
+      box-shadow:0 0 0 1px rgba(34,211,238,.10), inset 0 1px 0 rgba(255,255,255,.08);
     }
     .suite-section-panel.is-active {
       display:block;
@@ -5265,11 +5266,12 @@
       'width:560px',
       'max-width:calc(100vw - 24px)',
       'max-height:90vh',
-      'overflow-y:auto',
+      'overflow:visible',
       'background:transparent',
       'border:0',
       'border-radius:0',
       'box-shadow:none',
+      'contain:layout',
       'z-index:999',
       "font-family:'Segoe UI',sans-serif",
       'color:#e2e8f0'
@@ -5314,7 +5316,7 @@
       'justify-content:space-between',
       'border:1px solid rgba(103,232,249,.24)',
       'border-radius:20px',
-      'box-shadow:0 14px 34px rgba(0,0,0,.34),0 0 24px rgba(34,211,238,.14),inset 0 1px 0 rgba(255,255,255,.08)',
+      'box-shadow:0 0 0 1px rgba(34,211,238,.10),inset 0 1px 0 rgba(255,255,255,.08)',
       'margin-bottom:12px',
       'z-index:1'
     ].join(';');
