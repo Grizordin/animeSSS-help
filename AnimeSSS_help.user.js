@@ -1088,6 +1088,10 @@
         max-width:none;
         transform:none;
       }
+      .suite-section-panel.is-active {
+        max-height:calc(100vh - 180px);
+        overflow-y:auto;
+      }
     }
     /* Ценность карт — перенос на новую строку на узких экранах */
     @media (max-width: 600px) {
@@ -1733,7 +1737,7 @@
 
   function createStatsPanel(){
     const panel=document.createElement('div'); panel.id='cv-stats-panel';
-    panel.style.cssText='display:none;position:fixed;bottom:70px;right:20px;width:440px;background:#0a0f1a;border:1px solid #1e293b;border-radius:14px;box-shadow:0 16px 48px rgba(0,0,0,.8);z-index:999;font-family:\'Segoe UI\',sans-serif;color:#e2e8f0;overflow:hidden;';
+    panel.style.cssText='display:none;position:fixed;bottom:70px;right:10px;width:440px;max-width:calc(100vw - 20px);box-sizing:border-box;background:#0a0f1a;border:1px solid #1e293b;border-radius:14px;box-shadow:0 16px 48px rgba(0,0,0,.8);z-index:999;font-family:\'Segoe UI\',sans-serif;color:#e2e8f0;overflow:hidden;';
     panel.innerHTML=`
       <div style="background:#0f172a;padding:11px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #1e293b">
         <span style="font-weight:700;font-size:14px">📊 Статистика карт</span>
@@ -3883,18 +3887,13 @@
     function loadBrickPanelPos(){return gmStoreGet(BRICK_POS_KEY, null);}
     function applyBrickPanelPos(panel){
       const pos=loadBrickPanelPos();if(!pos)return;
-      panel.style.right='auto';panel.style.bottom='auto';panel.style.left=Math.max(0,pos.left)+'px';panel.style.top=Math.max(0,pos.top)+'px';
+      const margin=8;
+      const left=Math.min(Math.max(margin,pos.left),Math.max(margin,window.innerWidth-panel.offsetWidth-margin));
+      const top=Math.min(Math.max(margin,pos.top),Math.max(margin,window.innerHeight-panel.offsetHeight-margin));
+      panel.style.right='auto';panel.style.bottom='auto';panel.style.left=left+'px';panel.style.top=top+'px';
     }
     function makeBrickPanelDraggable(panel,handle){
-      let sx,sy,sl,st;
-      handle.addEventListener('mousedown',e=>{
-        if(e.target.tagName==='BUTTON')return;
-        e.preventDefault();
-        const r=panel.getBoundingClientRect();sx=e.clientX;sy=e.clientY;sl=r.left;st=r.top;panel.style.right='auto';panel.style.left=sl+'px';panel.style.top=st+'px';
-        const move=ev=>{panel.style.left=Math.max(0,sl+ev.clientX-sx)+'px';panel.style.top=Math.max(0,st+ev.clientY-sy)+'px';};
-        const up=()=>{document.removeEventListener('mousemove',move);document.removeEventListener('mouseup',up);saveBrickPanelPos(parseInt(panel.style.left,10)||0,parseInt(panel.style.top,10)||0);};
-        document.addEventListener('mousemove',move);document.addEventListener('mouseup',up);
-      });
+      makeDraggable(panel,handle,saveBrickPanelPos);
     }
     function buildBrickPanel(){
       if(document.getElementById('stone-brick-panel'))return;
@@ -4329,15 +4328,7 @@
     function saveRemeltPanelPos(left,top){gmStoreSet(REMELT_POS_KEY,{left,top});}
     function loadRemeltPanelPos(){return gmStoreGet(REMELT_POS_KEY, null);}
     function makeRemeltPanelDraggable(panel,handle){
-      let sx,sy,sl,st;
-      handle.addEventListener('mousedown',e=>{
-        if(e.target.tagName==='BUTTON')return;
-        e.preventDefault();
-        const r=panel.getBoundingClientRect();sx=e.clientX;sy=e.clientY;sl=r.left;st=r.top;panel.style.right='auto';panel.style.left=sl+'px';panel.style.top=st+'px';
-        const move=ev=>{panel.style.left=Math.max(0,sl+ev.clientX-sx)+'px';panel.style.top=Math.max(0,st+ev.clientY-sy)+'px';};
-        const up=()=>{document.removeEventListener('mousemove',move);document.removeEventListener('mouseup',up);saveRemeltPanelPos(parseInt(panel.style.left,10)||0,parseInt(panel.style.top,10)||0);};
-        document.addEventListener('mousemove',move);document.addEventListener('mouseup',up);
-      });
+      makeDraggable(panel,handle,saveRemeltPanelPos);
     }
     function buildRemeltPanel(){
       if(document.getElementById('remelt-panel'))return;
@@ -4352,7 +4343,7 @@
       panel.append(header,body);document.body.appendChild(panel);
       let collapsed=false;toggle.addEventListener('click',()=>{collapsed=!collapsed;body.style.display=collapsed?'none':'flex';toggle.textContent=collapsed?'+':'−';});
       makeRemeltPanelDraggable(panel,header);
-      const pos=loadRemeltPanelPos();if(pos){panel.style.right='auto';panel.style.left=Math.max(0,pos.left)+'px';panel.style.top=Math.max(0,pos.top)+'px';}
+      const pos=loadRemeltPanelPos();if(pos){const margin=8;const left=Math.min(Math.max(margin,pos.left),Math.max(margin,window.innerWidth-panel.offsetWidth-margin));const top=Math.min(Math.max(margin,pos.top),Math.max(margin,window.innerHeight-panel.offsetHeight-margin));panel.style.right='auto';panel.style.left=left+'px';panel.style.top=top+'px';}
       renderRemeltBody(body);
     }
     buildRemeltPanel();
@@ -6175,11 +6166,13 @@
     hideWantRow();
   }
   function applyWantButtonMode(){
-    document.body.classList.toggle('want-hover-only',!cfg.wantButtonsAlways);
+    const touchDevice = window.matchMedia?.('(hover: none)').matches;
+    const hoverOnly = !cfg.wantButtonsAlways && !touchDevice;
+    document.body.classList.toggle('want-hover-only',hoverOnly);
     const wrappers=getWantWrappers();
     const rows=[];
     wrappers.forEach(w=>{
-      if(cfg.wantButtonsAlways)w.classList.remove('want-row-hover');
+      if(!hoverOnly)w.classList.remove('want-row-hover');
       const top=Math.round(w.getBoundingClientRect().top);
       let row=rows.find(r=>Math.abs(r.top-top)<=12);
       if(!row){row={top,items:[]};rows.push(row);}
@@ -6189,13 +6182,13 @@
       w.dataset.wantRow=String(idx);
       if(w.dataset.wantHoverBound==='1')return;
       w.dataset.wantHoverBound='1';
-      w.addEventListener('mouseenter',()=>{if(!cfg.wantButtonsAlways)showWantRow(w.dataset.wantRow);});
+      w.addEventListener('mouseenter',()=>{if(document.body.classList.contains('want-hover-only'))showWantRow(w.dataset.wantRow);});
     }));
     if(!document.body.dataset.wantMouseTracker){
       document.body.dataset.wantMouseTracker='1';
       document.addEventListener('mousemove',trackWantRowMouse,true);
     }
-    if(cfg.wantButtonsAlways)hideWantRow();
+    if(!hoverOnly)hideWantRow();
   }
   document.addEventListener('suite-setting-change',e=>{
     if(e.detail?.key==='wantButtonsAlways')applyWantButtonMode();
@@ -7057,11 +7050,13 @@
 
     // ── Кнопки управления ────────────────────────────────────
     function applyNoNeedButtonMode() {
-      document.body.classList.toggle('nn-hover-only',buttonsHoverOnly);
+      const touchDevice = window.matchMedia?.('(hover: none)').matches;
+      const hoverOnly = buttonsHoverOnly && !touchDevice;
+      document.body.classList.toggle('nn-hover-only',hoverOnly);
       const wrappers=[...document.querySelectorAll('.anime-cards__item-wrapper')].filter(w=>w.querySelector('.nn-btn-container'));
       const rows=[];
       wrappers.forEach(w=>{
-        if(!buttonsHoverOnly)w.classList.remove('nn-row-hover');
+        if(!hoverOnly)w.classList.remove('nn-row-hover');
         const top=Math.round(w.getBoundingClientRect().top);
         let row=rows.find(r=>Math.abs(r.top-top)<=12);
         if(!row){row={top,items:[]};rows.push(row);}
@@ -7072,7 +7067,7 @@
         if(w.dataset.nnHoverBound==='1')return;
         w.dataset.nnHoverBound='1';
         w.addEventListener('mouseenter',()=>{
-          if(!buttonsHoverOnly)return;
+          if(!document.body.classList.contains('nn-hover-only'))return;
           const id=w.dataset.nnRow;
           showNoNeedRow(id);
         });
@@ -7081,7 +7076,7 @@
         document.body.dataset.nnMouseTracker='1';
         document.addEventListener('mousemove',trackNoNeedRowMouse,true);
       }
-      if(!buttonsHoverOnly)hideNoNeedRow();
+      if(!hoverOnly)hideNoNeedRow();
     }
     let nnActiveRowId='';
     function getNoNeedRowItems(id){
