@@ -979,7 +979,7 @@
       margin:0 0 12px;
       padding:8px;
       border-radius:999px;
-      background:linear-gradient(135deg,#0b5063,#0f172a);
+      background:linear-gradient(135deg,rgba(8,145,178,.55),rgba(15,23,42,.96));
       border:1px solid rgba(103,232,249,.24);
       box-shadow:0 0 0 1px rgba(34,211,238,.10), inset 0 1px 0 rgba(255,255,255,.08);
       overflow:visible;
@@ -1058,7 +1058,7 @@
       display:none;
       padding:10px 12px 12px;
       border-radius:20px;
-      background:linear-gradient(135deg,#0b5063,#0f172a);
+      background:linear-gradient(135deg,rgba(8,145,178,.55),rgba(15,23,42,.96));
       border:1px solid rgba(103,232,249,.24);
       box-shadow:0 0 0 1px rgba(34,211,238,.10), inset 0 1px 0 rgba(255,255,255,.08);
     }
@@ -5047,10 +5047,9 @@
     modLabyrinthClubWar: 'Подсвечивает союзные и вражеские клубы.'
   };
 
-  const SUITE_PREMIUM_TOOLTIP_TEXT = 'Требуется Возвышение.';
   PREMIUM_REQUIRED_SETTINGS.forEach(key=>{
-    if(SUITE_MENU_TOOLTIPS[key] && !SUITE_MENU_TOOLTIPS[key].includes(SUITE_PREMIUM_TOOLTIP_TEXT)) {
-      SUITE_MENU_TOOLTIPS[key] += `\n${SUITE_PREMIUM_TOOLTIP_TEXT}`;
+    if(SUITE_MENU_TOOLTIPS[key] && !/Возвышение/.test(SUITE_MENU_TOOLTIPS[key])) {
+      SUITE_MENU_TOOLTIPS[key] += ' Требуется Возвышение.';
     }
   });
 
@@ -5418,7 +5417,7 @@
     const hdr=document.createElement('div');
     hdr.className='suite-settings-header';
     hdr.style.cssText=[
-      'background:linear-gradient(135deg,#0b5063,#0f172a)',
+      'background:linear-gradient(135deg,rgba(8,145,178,.55),rgba(15,23,42,.96))',
       'padding:14px 18px',
       'display:flex',
       'align-items:center',
