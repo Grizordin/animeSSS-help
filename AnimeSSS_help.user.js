@@ -95,6 +95,7 @@
     modGuarantee:     true,   // расчёт гаранта
     modLabyrinthQuiz: true,   // викторина лабиринта
     modLabyrinthEmission: true, // таймер выброса в лабиринте
+    modLabyrinthFatigue: true, // статистика ходов после усталости, отката и мимика
     modLabyrinthClubWar:  true, // подсветка клубов в битве клубов
 
     // Хоткеи
@@ -657,6 +658,89 @@
     #suite-emission-timer.is-soon .suite-emission-icon {
       background:rgba(245,158,11,.18);color:#fde68a;box-shadow:0 0 0 1px rgba(245,158,11,.18);
     }
+    #suite-lab-fatigue-counter {
+      position:absolute;top:12px;right:202px;z-index:20;
+      min-width:210px;padding:10px 12px;border-radius:12px;
+      border:1px solid rgba(56,189,248,.34);
+      background:linear-gradient(180deg,rgba(8,20,38,.97),rgba(7,16,30,.93));
+      color:#e0f2fe;font-family:'Segoe UI',Arial,sans-serif;
+      box-shadow:0 10px 28px rgba(0,0,0,.38),0 0 0 1px rgba(14,165,233,.18),0 0 24px rgba(14,165,233,.12);
+      user-select:none;pointer-events:auto;backdrop-filter:blur(6px);box-sizing:border-box;
+    }
+    #suite-lab-fatigue-counter .suite-lab-fatigue-head {
+      display:flex;align-items:center;gap:8px;margin-bottom:5px;
+      font-size:11px;font-weight:900;letter-spacing:.45px;text-transform:uppercase;color:#7dd3fc;
+    }
+    #suite-lab-fatigue-counter .suite-lab-fatigue-icon {
+      display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:999px;
+      background:rgba(14,165,233,.18);color:#bae6fd;font-size:12px;box-shadow:0 0 0 1px rgba(14,165,233,.22);
+    }
+    #suite-lab-fatigue-counter .suite-lab-fatigue-value {
+      display:block;font-size:18px;font-weight:900;line-height:1.15;color:#f8fafc;text-shadow:0 0 14px rgba(14,165,233,.2);
+    }
+    #suite-lab-fatigue-counter .suite-lab-fatigue-sub {
+      display:block;margin-top:4px;font-size:11px;font-weight:700;color:#93c5fd;
+    }
+    #suite-lab-fatigue-counter .suite-lab-fatigue-btn {
+      position:absolute;right:8px;top:8px;width:28px;height:28px;border-radius:8px;
+      border:1px solid rgba(125,211,252,.26);background:rgba(15,23,42,.68);
+      color:#dbeafe;cursor:pointer;font-weight:900;line-height:1;
+    }
+    #suite-lab-fatigue-counter .suite-lab-fatigue-btn:hover{background:rgba(30,41,59,.95);color:#fff;}
+    #suite-lab-fatigue-modal {
+      position:fixed;inset:0;z-index:9999999;display:none;align-items:center;justify-content:center;
+      background:rgba(2,6,23,.66);color:#f8fafc;font-family:'Segoe UI',Arial,sans-serif;padding:14px;
+    }
+    #suite-lab-fatigue-modal.is-open{display:flex;}
+    #suite-lab-fatigue-modal .suite-lab-fatigue-modal-box{
+      width:min(520px,100%);max-height:min(680px,88vh);overflow:hidden;
+      border-radius:12px;background:#071629;border:1px solid rgba(56,189,248,.28);
+      box-shadow:0 22px 80px rgba(0,0,0,.55),0 0 26px rgba(14,165,233,.12);display:flex;flex-direction:column;
+    }
+    #suite-lab-fatigue-modal .suite-lab-fatigue-modal-head{
+      display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid rgba(56,189,248,.18);
+    }
+    #suite-lab-fatigue-modal .suite-lab-fatigue-modal-title{font-size:14px;font-weight:900;}
+    #suite-lab-fatigue-modal .suite-lab-fatigue-close{
+      width:34px;height:34px;border-radius:8px;border:0;background:#0f2b46;color:#bae6fd;font-size:20px;cursor:pointer;
+    }
+    #suite-lab-fatigue-modal .suite-lab-fatigue-body{padding:12px 14px;overflow:auto;}
+    #suite-lab-fatigue-modal .suite-lab-fatigue-empty{
+      min-height:260px;display:flex;align-items:center;justify-content:center;
+      border-radius:10px;background:rgba(14,165,233,.06);color:rgba(224,242,254,.65);font-size:13px;font-weight:750;
+    }
+    #suite-lab-fatigue-modal .suite-lab-fatigue-timeline{display:flex;flex-direction:column;align-items:center;gap:0;padding:8px 0 4px;}
+    #suite-lab-fatigue-modal .suite-lab-fatigue-event{
+      width:min(320px,100%);padding:12px 14px;border-radius:10px;text-align:center;
+      background:rgba(14,165,233,.08);border:1px solid rgba(56,189,248,.18);box-sizing:border-box;
+    }
+    #suite-lab-fatigue-modal .suite-lab-fatigue-event-name{font-size:20px;line-height:1.1;font-weight:950;text-transform:uppercase;}
+    #suite-lab-fatigue-modal .suite-lab-fatigue-event-time{margin-top:5px;font-size:11px;color:rgba(224,242,254,.58);}
+    #suite-lab-fatigue-modal .suite-lab-fatigue-gap{
+      min-height:58px;display:flex;align-items:center;justify-content:center;gap:12px;color:rgba(224,242,254,.9);font-size:15px;font-weight:850;
+    }
+    #suite-lab-fatigue-modal .suite-lab-fatigue-gap.is-live{min-height:52px;color:#f8fafc;}
+    #suite-lab-fatigue-modal .suite-lab-fatigue-arrow{font-size:34px;line-height:1;color:#38bdf8;}
+    #suite-lab-fatigue-modal .suite-lab-fatigue-pages{
+      display:flex;align-items:center;justify-content:center;gap:8px;padding-top:10px;margin-top:8px;border-top:1px solid rgba(56,189,248,.18);
+    }
+    #suite-lab-fatigue-modal .suite-lab-fatigue-page-btn,
+    #suite-lab-fatigue-modal .suite-lab-fatigue-reset-btn{
+      min-width:36px;height:32px;border-radius:8px;border:1px solid rgba(56,189,248,.28);
+      background:rgba(15,23,42,.82);color:#e0f2fe;cursor:pointer;font-weight:900;
+    }
+    #suite-lab-fatigue-modal .suite-lab-fatigue-page-btn:disabled{opacity:.35;cursor:not-allowed;}
+    #suite-lab-fatigue-modal .suite-lab-fatigue-page-state{
+      min-width:92px;display:flex;align-items:center;justify-content:center;gap:5px;font-size:12px;color:rgba(224,242,254,.7);font-weight:800;
+    }
+    #suite-lab-fatigue-modal .suite-lab-fatigue-page-input{
+      width:44px;height:32px;border-radius:8px;border:1px solid rgba(56,189,248,.28);
+      background:rgba(15,23,42,.82);color:#f8fafc;text-align:center;font-weight:900;box-sizing:border-box;
+    }
+    #suite-lab-fatigue-modal .suite-lab-fatigue-reset-btn{min-width:58px;border-color:rgba(248,113,113,.35);color:#fecaca;}
+    @media(max-width:760px){
+      #suite-lab-fatigue-counter{top:104px;right:12px;min-width:172px;width:calc(100% - 24px);max-width:220px;}
+    }
     /* Неоновые обводки */
     .neon-outline-wrapper {
       position:absolute;top:-3px;left:-3px;
@@ -898,9 +982,9 @@
     .suite-toggle {
       position:relative;
       display:inline-block;
-      width:58px;
-      height:32px;
-      flex:0 0 58px;
+      width:52px;
+      height:29px;
+      flex:0 0 52px;
     }
     .suite-toggle input { opacity:0;width:0;height:0; }
     .suite-slider {
@@ -919,10 +1003,11 @@
     .suite-slider:before {
       content:'';
       position:absolute;
-      width:24px;
-      height:24px;
-      left:3px;
-      top:3px;
+      width:21px;
+      height:21px;
+      left:4px;
+      top:50%;
+      transform:translateY(-50%);
       border-radius:50%;
       background:linear-gradient(145deg,#303743,#171c25);
       border:1px solid rgba(226,232,240,.34);
@@ -956,7 +1041,7 @@
         0 0 22px rgba(45,212,191,.42);
     }
     .suite-toggle input:checked + .suite-slider:before {
-      transform:translateX(26px);
+      transform:translate(23px,-50%);
       border-color:rgba(226,232,240,.58);
       box-shadow:
         0 4px 10px rgba(0,0,0,.8),
@@ -976,6 +1061,8 @@
       display:flex;
       align-items:center;
       gap:8px;
+      width:max-content;
+      max-width:100%;
       margin:0 0 12px;
       padding:8px;
       border-radius:999px;
@@ -993,8 +1080,9 @@
       backdrop-filter:none !important;
     }
     .suite-settings-header,
-    .suite-section-nav,
     .suite-section-panel {
+      width:var(--suite-menu-plate-width, max-content);
+      max-width:100%;
       background:linear-gradient(135deg,#0b5063,#0f172a) !important;
       opacity:1 !important;
       filter:none !important;
@@ -1008,7 +1096,9 @@
       align-items:center;
       justify-content:center;
       gap:8px;
-      width:44px;
+      width:auto;
+      min-width:44px;
+      max-width:44px;
       height:44px;
       padding:0 13px;
       border:0;
@@ -1018,11 +1108,11 @@
       cursor:pointer;
       overflow:hidden;
       font:700 13px/1 "Segoe UI",Arial,sans-serif;
-      transition:width .28s cubic-bezier(.22,1,.36,1),background .2s ease,box-shadow .2s ease,color .2s ease;
+      transition:max-width .28s cubic-bezier(.22,1,.36,1),background .2s ease,box-shadow .2s ease,color .2s ease;
     }
     .suite-section-tab:hover,
     .suite-section-tab.is-active {
-      width:188px;
+      max-width:190px;
       justify-content:flex-start;
       background:rgba(255,255,255,.12);
       color:#f8fafc;
@@ -1051,7 +1141,7 @@
     .suite-section-tab:hover .suite-section-tab-label,
     .suite-section-tab.is-active .suite-section-tab-label {
       opacity:1;
-      max-width:150px;
+      max-width:140px;
       transform:translateX(0);
     }
     .suite-section-panel {
@@ -1074,6 +1164,8 @@
       .suite-section-nav {
         align-items:stretch;
         flex-direction:column;
+        width:100%;
+        max-width:none;
         border-radius:16px;
         padding:7px;
       }
@@ -1081,6 +1173,7 @@
       .suite-section-tab:hover,
       .suite-section-tab.is-active {
         width:100%;
+        max-width:none;
         justify-content:flex-start;
       }
       .suite-section-tab-label {
@@ -2131,7 +2224,7 @@
     {r:/Вы отменили заявку на дружбу с .+!?/i,                    icon:'user',   title:'Друзья',      theme:'rose'},
     {s:'Комментарий удалён',                                      icon:'check',  title:'Готово',      theme:'emerald'   },
     {s:'Выберите сообщения для удаления',                         icon:'warn',   title:'Сообщения',   theme:'neon-amber'},
-    {s:'Сообщение содержит запрещённые слова.',                   icon:'warn',   title:'Сообщение',   theme:'rose'      },
+    {s:'Сообщение содержит запрещённые слова',                    icon:'warn',   title:'Сообщение',   theme:'rose'      },
     {s:'История очищена',                                         icon:'check',  title:'Сообщения',   theme:'emerald'   },
     {s:'Сообщение не найдено',                                    icon:'warn',   title:'Внимание',    theme:'neon-amber'},
     {s:'Ваш голос учтён',                                         icon:'check',  title:'Голос',       theme:'emerald'   },
@@ -2150,6 +2243,9 @@
     {s:'Все карты на странице разблокированы',                    icon:'lock',   title:'Готово',      theme:'emerald'   },
     {s:'Карта разблокирована',                                    icon:'lock',   title:'Готово',      theme:'emerald'   },
     {s:'Данную карту нельзя блокировать',                         icon:'lock',   title:'Блокировка',  theme:'rose'},
+    {s:'Вы не можете обменять данную карту, так как пользователь заблокировал её', icon:'lock', title:'Обмен', theme:'rose'},
+    {s:'У пользователя больше нет карты, которую вы хотите обменять', icon:'trade', title:'Обмен', theme:'neon-amber'},
+    {r:/Одна карта из предложенных вами вам больше не пр[еи]надлежит/i, icon:'trade', title:'Обмен', theme:'rose'},
     {s:'Все карты на странице добавлены в ненужные',              icon:'check',  title:'Готово',      theme:'emerald'   },
     {s:'На странице нет доступных карт для добавления в ненужные', icon:'warn',   title:'Внимание',    theme:'neon-amber'},
     {s:'На странице нет доступных карт для удаления с ненужных',  icon:'warn',   title:'Внимание',    theme:'neon-amber'},
@@ -2189,6 +2285,8 @@
     {s:'Нет карт для удаления',                                  icon:'warn',   title:'Внимание',    theme:'neon-amber'},
     {s:'минимум три буквы для поиска',                           icon:'warn',   title:'Внимание',    theme:'neon-amber'},
     {s:'Ставить лайк могут только',                              icon:'user',   title:'Внимание',    theme:'indigo'    },
+    {s:'Вы не авторизованы',                                      icon:'lock',   title:'Авторизация', theme:'rose'      },
+    {s:'Ваша пользовательская сессия истекла, перезагрузите страницу в браузере и при необходимости войдите на сайт повторно.', icon:'lock', title:'Сессия', theme:'rose'},
     {s:'Доступно только авторизованным',                         icon:'lock',   title:'Внимание',    theme:'indigo'    },
     {s:'Коллекция доступна только',                              icon:'user',   title:'Внимание',    theme:'indigo'    },
     {s:'Уведомления доступны только',                            icon:'bell',   title:'Внимание',    theme:'indigo'    },
@@ -2208,10 +2306,12 @@
     {s:'Недостаточный уровень',                                  icon:'lvl',    title:'Ошибка',      theme:'rose'      },
     {s:'Возникла ошибка',                                        icon:'refresh',title:'Ошибка',      theme:'neon-amber'},
     {s:'Ошибка сети',                                            icon:'err',    title:'Ошибка',      theme:'neon-amber'},
+    {s:'Ошибка доступа',                                         icon:'lock',   title:'Ошибка',      theme:'rose'      },
     {s:'Неизвестный ответ сервера',                              icon:'err',    title:'Ошибка',      theme:'neon-amber'},
     {s:'Ошибка при копировании',                                  icon:'err',    title:'Ошибка',      theme:'neon-amber'},
     {s:'Не корректный промо-код',                                 icon:'warn',   title:'Промокод',    theme:'rose'},
     {s:'Вы уже активировали этот промо-код',                      icon:'clock',  title:'Промокод',    theme:'rose'},
+    {s:'Данный промо-код предназначен для участников клуба, вы не состоите в нём', icon:'lock', title:'Промокод', theme:'rose'},
     {
       s:'Вы уже вводили этот промо-код или он был использован на вашем IP но на другом аккаунте',
       icon:'clock',
@@ -2261,6 +2361,7 @@
     {s:'успешно удалён из друзей',                                icon:'user',   title:'Друзья',      theme:'rose'      },
     {s:'Заявка в друзья успешно отправлена',                      icon:'user',   title:'Друзья',      theme:'neon-green'},
     {s:'Вы заблокировали пользователя',                           icon:'shield', title:'Блокировка',  theme:'rose'      },
+    {s:'Вы уже блокировали данного пользователя ранее',            icon:'shield', title:'Блокировка',  theme:'neon-amber'},
     {s:'сняли блокировку с пользователя',                         icon:'shield', title:'Разблокировка','theme':'emerald'},
     // ── Порция 3 ─────────────────────────────────────────
     {s:'Сначала победи сундук-мимик',                             icon:'warn',   title:'Внимание',    theme:'neon-amber'},
@@ -2311,17 +2412,25 @@
     // ── Порция 5 ─────────────────────────────────────────
     {s:'Риск не оправдался',                                       icon:'warn',   title:'Неудача',     theme:'rose'      },
     {s:'Ловушка активирована',                                     icon:'warn',   title:'Ловушка',     theme:'rose'      },
+    {s:'Ловушка установлена',                                      icon:'warn',   title:'Ловушка',     theme:'neon-blue' },
     {s:'Ты выбрался из ловушки',                                   icon:'check',  title:'Ловушка',     theme:'emerald'   },
     {s:'Сначала выберись из ловушки',                              icon:'warn',   title:'Ловушка',     theme:'neon-amber'},
+    {s:'Сбежать пока нельзя',                                      icon:'clock',  title:'Ловушка',     theme:'neon-amber'},
     {s:'Сначала выполни условие коллекции',                        icon:'warn',   title:'Внимание',    theme:'neon-amber'},
     {s:'Путь закрыт. Сначала собери нужное количество одинаковых карт.', icon:'lock', title:'Путь закрыт', theme:'neon-amber'},
     {s:'Вы уже выставили свою оценку для данной статьи',           icon:'warn',   title:'Внимание',    theme:'neon-amber'},
+    {s:'Вы не можете выставлять оценку для своего собственного комментария', icon:'warn', title:'Внимание', theme:'neon-amber'},
     {s:'зафиксирована в колоде и не может быть разблокирована',    icon:'lock',   title:'Внимание',    theme:'rose'      },
     {s:'Сначала сделай выбор в Комнате отголосков',                icon:'warn',   title:'Отголосок',   theme:'neon-amber'},
     {s:'Сначала выбери судьбу комнаты',                            icon:'warn',   title:'Комната',     theme:'neon-amber'},
+    {s:'Сначала сделай выбор у Алтаря удачи',                      icon:'warn',   title:'Алтарь',      theme:'neon-amber'},
     {r:/Лабиринт временно недоступен с \d{1,2}:\d{2} до \d{1,2}:\d{2}/i, icon:'clock', title:'Лабиринт', theme:'neon-amber'},
     {s:'Лабиринт откликнулся на твой путь',                        icon:'bolt',   title:'Лабиринт',    theme:'neon-blue' },
     {s:'Резонанс вызван',                                          icon:'bolt',   title:'Резонанс',    theme:'neon-blue' },
+    {s:'Комната с такими координатами ещё не открыта',              icon:'lock',   title:'Резонанс',    theme:'neon-amber'},
+    {s:'Эти координаты уже отзывались в резонансе. Выбери другую комнату.', icon:'warn', title:'Резонанс', theme:'neon-amber'},
+    {s:'Ты уже бывал в этой комнате. Резонанс требует незнакомые координаты.', icon:'warn', title:'Резонанс', theme:'neon-amber'},
+    {s:'Резонанс не смог зацепиться за эту комнату',                icon:'warn',   title:'Резонанс',    theme:'rose'      },
     {s:'Время вышло',                                              icon:'clock',  title:'Время',       theme:'rose'      },
     {s:'Следующий шаг ещё недоступен',                             icon:'clock',  title:'Лабиринт',    theme:'neon-amber'},
     {s:'Купить ход можно только когда доступных ходов не осталось', icon:'coin',   title:'Лабиринт',    theme:'neon-amber'},
@@ -2386,6 +2495,7 @@
     {s:'Судьба комнаты выбрана',                                   icon:'check',  title:'Готово',      theme:'emerald'   },
     {s:'За выбор судьбы комнаты ты получаешь',                     icon:'coin',   title:'Награда',     theme:'neon-green'},
     {s:'Дань уплачена',                                            icon:'coin',   title:'Оплата',      theme:'emerald'   },
+    {s:'Этого стража ещё нельзя перезахватить. Сначала он должен получить хотя бы одну дань.', icon:'shield', title:'Страж', theme:'neon-amber'},
     {s:'Шахта пока ничего не накопила',                            icon:'warn',   title:'Шахта',       theme:'neon-amber'},
     {s:'Шахта ограблена',                                          icon:'warn',   title:'Шахта',       theme:'rose'      },
     {r:/Шахта: собрано \d+ AСС(?: \+ \d+ карт)?/i,                 icon:'coin',   title:'Шахта',       theme:'neon-green'},
@@ -2396,6 +2506,7 @@
       theme:'neon-green'
     },
     {s:'Ты помог со сбором шахты',                                 icon:'coin',   title:'Шахта',       theme:'neon-green'},
+    {s:'Сначала заверши испытание Дао',                            icon:'warn',   title:'Дао',         theme:'neon-amber'},
     {s:'Отголосок повторён',                                       icon:'check',  title:'Готово',      theme:'emerald'   },
     {s:'Ты отказался от отголоска',                                icon:'warn',   title:'Отголосок',   theme:'rose'      },
     {s:'Всевидящее око показало соседние комнаты',                 icon:'bolt',   title:'Лабиринт',    theme:'neon-blue' },
@@ -3035,7 +3146,8 @@
       }
       .cv-stones-floating-btn:hover{background:#123044;border-color:#22d3ee;filter:brightness(1.08);}
       .cv-stones-progress{
-        position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:2147483600;
+        position:fixed;right:20px;bottom:24px;z-index:2147483600;
+        max-width:min(360px,calc(100vw - 40px));box-sizing:border-box;
         background:rgba(12,12,22,.98);color:#e2e8f0;padding:9px 14px;border-radius:12px;
         font-size:13px;font-family:'Segoe UI',Arial,sans-serif;display:none;
         border:1px solid rgba(34,211,238,.35);box-shadow:0 8px 32px rgba(0,0,0,.65);
@@ -5035,6 +5147,7 @@
     modRemelt: 'Помогает выбирать карты для переплавки.',
     modLabyrinthQuiz: 'Подсвечивает ответы в викторине лабиринта.',
     modLabyrinthEmission: 'Добавляет окончания выброса и таймер до начала нового выброса.',
+    modLabyrinthFatigue: 'показывает статистику ходов после усталости, отката, мимика для лучшего контроля',
     modLabyrinthClubWar: 'Подсвечивает союзные и вражеские клубы.'
   };
 
@@ -5334,6 +5447,11 @@
       else cleanupLabyrinthQuiz();
       return;
     }
+    if(key==='modLabyrinthFatigue'){
+      if(cfg.modLabyrinthFatigue) initLabyrinthFatigue();
+      else cleanupLabyrinthFatigue();
+      return;
+    }
     if(key==='modLabyrinthClubWar'){
       if(cfg.modLabyrinthClubWar) initClubWarRelations();
       else cleanupClubWarRelations();
@@ -5363,7 +5481,7 @@
       'top:50%',
       'right:20px',
       'transform:translateY(-50%)',
-      'width:560px',
+      'width:fit-content',
       'max-width:calc(100vw - 24px)',
       'max-height:90vh',
       'overflow:visible',
@@ -5495,6 +5613,16 @@
     sectionsHost.className='suite-sections-host';
     const sectionEntries=[];
     body.append(sectionNav,sectionsHost);
+    const syncMenuPlateWidth=()=>{
+      const width=Math.ceil(sectionNav.getBoundingClientRect().width || sectionNav.scrollWidth || 0);
+      if(width > 0) panel.style.setProperty('--suite-menu-plate-width', width + 'px');
+    };
+    const scheduleMenuPlateWidthSync=()=>{
+      requestAnimationFrame(()=>{
+        syncMenuPlateWidth();
+        requestAnimationFrame(syncMenuPlateWidth);
+      });
+    };
     const splitSectionTitle=(title)=>{
       const raw=String(title||'').trim();
       const parts=raw.split(/\s+/);
@@ -5512,6 +5640,7 @@
         cfg.settingsSections[entry.key]=active;
       });
       saveCfg();
+      scheduleMenuPlateWidthSync();
       requestAnimationFrame(keepSettingsPanelInViewport);
     };
     const makeSection=(key,title)=>{
@@ -5531,6 +5660,8 @@
       const content=document.createElement('div');
       content.className='suite-section-panel';
       tab.addEventListener('click',()=>setActiveSection(key));
+      tab.addEventListener('mouseenter',scheduleMenuPlateWidthSync);
+      tab.addEventListener('mouseleave',scheduleMenuPlateWidthSync);
       sectionEntries.push({key,tab,content});
       sectionNav.appendChild(tab);
       sectionsHost.appendChild(content);
@@ -5737,6 +5868,12 @@
       else cleanupLabyrinthEmission();
     });
     labyrinthSection.appendChild(emissionRow);
+    const fatigueRow = makeToggle('modLabyrinthFatigue', '🌊 Усталость');
+    fatigueRow.querySelector('input').addEventListener('change', () => {
+      if(cfg.modLabyrinthFatigue) initLabyrinthFatigue();
+      else cleanupLabyrinthFatigue();
+    });
+    labyrinthSection.appendChild(fatigueRow);
     const clubWarRow = makeToggle('modLabyrinthClubWar', '⚔️ Битва клубов');
     clubWarRow.querySelector('input').addEventListener('change', () => {
       if(cfg.modLabyrinthClubWar) initClubWarRelations();
@@ -5753,6 +5890,12 @@
     saveCfg();
 
     panel.append(hdr,body); document.body.appendChild(panel);
+    if(typeof ResizeObserver === 'function'){
+      const plateObserver = new ResizeObserver(scheduleMenuPlateWidthSync);
+      plateObserver.observe(sectionNav);
+      panel._suiteMenuPlateObserver = plateObserver;
+    }
+    scheduleMenuPlateWidthSync();
     // Восстанавливаем сохранённую позицию панели настроек
     if(cfg.settingsPanelLeft!==null && cfg.settingsPanelTop!==null){
       panel.style.transform='none';
@@ -6051,11 +6194,13 @@
     labyrinthRouteWatcherInstalled=true;
     let lastHref=location.href;
     const check=()=>{
-      if(location.href===lastHref && window.__suiteLabyrinthQuizInstalled && window.__suiteLabyrinthEmissionInstalled && window.__suiteClubWarRelationsInstalled) return;
+      if(location.href===lastHref && window.__suiteLabyrinthQuizInstalled && window.__suiteLabyrinthEmissionInstalled && window.__suiteLabyrinthFatigueInstalled && window.__suiteClubWarRelationsInstalled) return;
       lastHref=location.href;
       if(cfg.modLabyrinthQuiz) initLabyrinthQuiz();
       if(cfg.modLabyrinthEmission) initLabyrinthEmission();
       else cleanupLabyrinthEmission();
+      if(cfg.modLabyrinthFatigue) initLabyrinthFatigue();
+      else cleanupLabyrinthFatigue();
       if(cfg.modLabyrinthClubWar) initClubWarRelations();
       else cleanupClubWarRelations();
     };
@@ -6098,6 +6243,7 @@
     if(cfg.modAutoLootCards) initAutoLootCards();
     if(cfg.modLabyrinthQuiz) initLabyrinthQuiz();
     if(cfg.modLabyrinthEmission) initLabyrinthEmission();
+    if(cfg.modLabyrinthFatigue) initLabyrinthFatigue();
     if(cfg.modLabyrinthClubWar) initClubWarRelations();
     setupLabyrinthQuizRouteWatcher();
     watchLootboxMiddle();
@@ -7221,7 +7367,7 @@
         const TAB_ID = `aw_tab_${Date.now()}_${Math.random().toString(36).slice(2)}`;
         const TAB_LOCK_KEY = 'aw_active_visible_tab_lock_v2';
         const TAB_LOCK_HEARTBEAT_MS = 2000;
-        const TAB_LOCK_STALE_MS = 7000;
+        const TAB_LOCK_STALE_MS = 5000;
 
         const MANUAL_USERNAME = '';
 
@@ -7444,7 +7590,8 @@
         // =========================================================
         function readTabLock() {
             try {
-                return gmStoreGet(TAB_LOCK_KEY, null);
+                const raw = localStorage.getItem(TAB_LOCK_KEY);
+                return raw ? JSON.parse(raw) : null;
             } catch (e) {
                 return null;
             }
@@ -7452,7 +7599,13 @@
 
         function writeTabLock(data) {
             try {
-                gmStoreSet(TAB_LOCK_KEY, data);
+                localStorage.setItem(TAB_LOCK_KEY, JSON.stringify(data));
+            } catch (e) {}
+        }
+
+        function clearTabLock() {
+            try {
+                localStorage.removeItem(TAB_LOCK_KEY);
             } catch (e) {}
         }
 
@@ -7460,7 +7613,7 @@
             try {
                 const lock = readTabLock();
                 if (lock && lock.tabId === TAB_ID) {
-                    gmStoreDelete(TAB_LOCK_KEY);
+                    clearTabLock();
                 }
             } catch (e) {}
         }
@@ -7470,8 +7623,17 @@
             return (Date.now() - lock.ts) > TAB_LOCK_STALE_MS;
         }
 
-        function isThisTabLeader() {
+        function normalizeTabLock() {
             const lock = readTabLock();
+            if (!lock || typeof lock !== 'object' || !lock.tabId || !lock.ts || isLockStale(lock)) {
+                clearTabLock();
+                return null;
+            }
+            return lock;
+        }
+
+        function isThisTabLeader() {
+            const lock = normalizeTabLock();
             return !!(lock && lock.tabId === TAB_ID && !isLockStale(lock));
         }
 
@@ -7479,10 +7641,22 @@
             if (!isTabVisible()) return false;
 
             const now = Date.now();
-            const current = readTabLock();
+            const current = normalizeTabLock();
 
-            if (!current || isLockStale(current) || current.tabId === TAB_ID) {
+            if (!current || current.tabId === TAB_ID) {
                 writeTabLock({ tabId: TAB_ID, ts: now, url: location.href });
+                const verify = readTabLock();
+                return !!(verify && verify.tabId === TAB_ID);
+            }
+            return false;
+        }
+
+        function claimTabLock(force = false) {
+            if (!isTabVisible()) return false;
+
+            const current = normalizeTabLock();
+            if (force || !current || current.tabId === TAB_ID) {
+                writeTabLock({ tabId: TAB_ID, ts: Date.now(), url: location.href });
                 const verify = readTabLock();
                 return !!(verify && verify.tabId === TAB_ID);
             }
@@ -7495,8 +7669,8 @@
                 return false;
             }
 
-            const current = readTabLock();
-            if (!current || isLockStale(current) || current.tabId === TAB_ID) {
+            const current = normalizeTabLock();
+            if (!current || current.tabId === TAB_ID) {
                 writeTabLock({ tabId: TAB_ID, ts: Date.now(), url: location.href });
                 return true;
             }
@@ -10371,10 +10545,19 @@
                 return;
             }
 
-            tryAcquireTabLock();
+            claimTabLock(document.hasFocus?.() === true);
 
             if (scriptEnabledWatch && isThisTabLeader()) {
                 scheduleNext(RESUME_DELAY_MS);
+            }
+        }
+
+        function handleTabFocus() {
+            const becameLeader = claimTabLock(true);
+            updateButtonState();
+            if (becameLeader && scriptEnabledWatch) {
+                const hasFutureRun = checkNewCardTimeoutId && nextRunAt > Date.now() + RESUME_DELAY_MS;
+                if (!hasFutureRun) scheduleNext(RESUME_DELAY_MS);
             }
         }
 
@@ -10385,26 +10568,29 @@
         function installStorageListener() {
             if (storageHandler || storageListenerId) return;
 
-            const onTabLockChange = (name, oldValue, newValue) => {
+            const onTabLockChange = (event) => {
                 updateButtonState();
-                const lock = newValue || readTabLock();
+                const lock = event?.newValue ? (()=>{try{return JSON.parse(event.newValue);}catch(e){return null;}})() : readTabLock();
                 if (lock?.tabId === TAB_ID) return;
 
-                if (scriptEnabledWatch && isTabVisible() && isThisTabLeader()) {
-                    const hasFutureRun = checkNewCardTimeoutId && nextRunAt > Date.now() + RESUME_DELAY_MS;
-                    if (!hasFutureRun) scheduleNext(RESUME_DELAY_MS);
-                } else if (!isThisTabLeader()) {
+                if (scriptEnabledWatch && isTabVisible()) {
+                    if (!lock || isLockStale(lock)) {
+                        claimTabLock(document.hasFocus?.() === true || !lock);
+                    }
+                    if (isThisTabLeader()) {
+                        const hasFutureRun = checkNewCardTimeoutId && nextRunAt > Date.now() + RESUME_DELAY_MS;
+                        if (!hasFutureRun) scheduleNext(RESUME_DELAY_MS);
+                        return;
+                    }
+                }
+
+                if (!isThisTabLeader()) {
                     stopMainCardCheckLogic();
                 }
             };
 
-            if (typeof GM_addValueChangeListener === 'function') {
-                storageListenerId = GM_addValueChangeListener(TAB_LOCK_KEY, onTabLockChange);
-                return;
-            }
-
             storageHandler = (e) => {
-                if (e.key === TAB_LOCK_KEY) onTabLockChange();
+                if (e.key === TAB_LOCK_KEY) onTabLockChange(e);
             };
             window.addEventListener('storage', storageHandler);
         }
@@ -10451,9 +10637,12 @@
             startPanelTicker();
 
             document.addEventListener('visibilitychange', handleTabActivityChange);
+            window.addEventListener('focus', handleTabFocus);
+            document.addEventListener('pointerdown', handleTabFocus, true);
             window.addEventListener('beforeunload', handleBeforeUnload);
+            window.addEventListener('pagehide', handleBeforeUnload);
 
-            tryAcquireTabLock();
+            claimTabLock(document.hasFocus?.() === true);
             await updateCardCounter(false);
 
             if (isTabVisible() && scriptEnabledWatch && isThisTabLeader()) {
@@ -10481,7 +10670,10 @@
             try { stopPanelTicker(); } catch (e) {}
             try { removeStorageListener(); } catch (e) {}
             try { document.removeEventListener('visibilitychange', handleTabActivityChange); } catch (e) {}
+            try { window.removeEventListener('focus', handleTabFocus); } catch (e) {}
+            try { document.removeEventListener('pointerdown', handleTabFocus, true); } catch (e) {}
             try { window.removeEventListener('beforeunload', handleBeforeUnload); } catch (e) {}
+            try { window.removeEventListener('pagehide', handleBeforeUnload); } catch (e) {}
             try { document.getElementById('aw-active-tab-panel')?.remove(); } catch (e) {}
             try { document.getElementById(ANIME_DB_MODAL_ID)?.remove(); } catch (e) {}
             try { document.getElementById(MANUAL_MAX_EP_MODAL_ID)?.remove(); } catch (e) {}
@@ -11284,6 +11476,620 @@
       el.classList.remove('labyrinth__quiz-btn--correct','labyrinth__quiz-btn--fuzzy');
     });
     window.__suiteLabyrinthQuizInstalled = false;
+  }
+
+  function cleanupLabyrinthFatigue(){
+    const state = window.__suiteLabyrinthFatigueState;
+    if(state){
+      try{ clearInterval(state.tickInterval); }catch(e){}
+      try{ clearTimeout(state.startTimer); }catch(e){}
+      try{ state.box?.remove(); }catch(e){}
+    }
+    document.getElementById('suite-lab-fatigue-modal')?.remove();
+    window.__suiteLabyrinthFatigueState = null;
+    window.__suiteLabyrinthFatigueInstalled = false;
+  }
+
+  function initLabyrinthFatigue(){
+    if(!cfg.modLabyrinthFatigue){
+      cleanupLabyrinthFatigue();
+      return;
+    }
+    if(!/\/labyrinth(?:\/|$)/.test(location.pathname)){
+      cleanupLabyrinthFatigue();
+      return;
+    }
+    if(window.__suiteLabyrinthFatigueInstalled) return;
+    window.__suiteLabyrinthFatigueInstalled = true;
+
+    const STORAGE_KEY = 'suite_labyrinth_move_stats_v1';
+    const DEBUG_LOG_KEY = 'suite_labyrinth_move_stats_debug_log_v1';
+    const LOG_SENT_KEY = 'suite_labyrinth_move_stats_log_sent_v1';
+    const ROOT_ID = 'suite-lab-fatigue-counter';
+    const MODAL_ID = 'suite-lab-fatigue-modal';
+    const DEBUG_LOG_LIMIT = 800;
+    const EVENTS_PER_PAGE = 3;
+
+    const TRIGGER_DEFS = {
+      fatigue: {
+        historyText: 'Усталость',
+        label: 'усталость',
+        reason: 'последней усталости',
+      },
+      trap_back: {
+        historyText: 'Ловушка отката',
+        label: 'откат',
+        reason: 'последнего отката',
+        titles: ['Ловушка отката'],
+        backgrounds: ['trap_back.webp'],
+      },
+      mimic_chest_back: {
+        historyText: 'Мимик с откатом',
+        label: 'мимик',
+        reason: 'последнего мимика',
+        titles: ['Это был мимик!'],
+        titleNeedles: ['мимик'],
+        textNeedles: ['отбросил назад'],
+      },
+      shield_block: {
+        historyText: 'Щит сработал',
+        label: 'откат',
+        reason: 'последнего отката',
+        titleNeedles: ['щит сработал'],
+        textNeedles: ['ловушки отката'],
+      },
+    };
+
+    const EVENT_LABELS = {
+      fatigue: TRIGGER_DEFS.fatigue.historyText,
+      trap_back: TRIGGER_DEFS.trap_back.historyText,
+      mimic_chest: 'Мимик',
+      mimic_chest_back: TRIGGER_DEFS.mimic_chest_back.historyText,
+      shield_block: TRIGGER_DEFS.shield_block.historyText,
+    };
+
+    const runtime = {
+      box:null,
+      tickInterval:null,
+      startTimer:null,
+      ticking:false,
+      statsPage:0,
+      lastSnapshot:null,
+      state: loadState()
+    };
+    window.__suiteLabyrinthFatigueState = runtime;
+
+    function makeEmptyState(){
+      return {
+        startedAt:new Date().toISOString(),
+        sessionMoves:0,
+        lastTodaySteps:null,
+        movesSinceFatigue:0,
+        fatigueCount:0,
+        trapsBack:0,
+        mimics:0,
+        mimicBacks:0,
+        eventKeys:{},
+        events:[],
+        history:[]
+      };
+    }
+
+    function loadState(){
+      const data = gmGet(STORAGE_KEY, null);
+      return data && typeof data === 'object' ? data : makeEmptyState();
+    }
+
+    function saveState(){
+      gmSet(STORAGE_KEY, runtime.state);
+    }
+
+    function ensureState(){
+      if(!runtime.state || typeof runtime.state !== 'object') runtime.state = makeEmptyState();
+      runtime.state.eventKeys ||= {};
+      runtime.state.events ||= [];
+      runtime.state.history ||= [];
+      runtime.state.sessionMoves ??= 0;
+      runtime.state.lastTodaySteps ??= null;
+      runtime.state.movesSinceFatigue ??= 0;
+    }
+
+    function loadDebugLog(){
+      const log = gmGet(DEBUG_LOG_KEY, []);
+      return Array.isArray(log) ? log : [];
+    }
+
+    function saveDebugLog(log){
+      gmSet(DEBUG_LOG_KEY, log.slice(-DEBUG_LOG_LIMIT));
+    }
+
+    function appendDebugLog(kind, snapshot, extra = {}){
+      const log = loadDebugLog();
+      log.push({
+        at:Date.now(),
+        time:new Date().toISOString(),
+        kind,
+        today:snapshot?.today ?? null,
+        max:snapshot?.max ?? null,
+        left:snapshot?.left ?? null,
+        coord:snapshot?.coord ?? '',
+        cellEvent:snapshot?.cellEvent ?? '',
+        lastEvent:snapshot?.lastEvent ?? '',
+        title:snapshot?.title ?? '',
+        eventText:snapshot?.eventText ?? '',
+        fatigueTitle:snapshot?.fatigueTitle ?? '',
+        fatigueText:snapshot?.fatigueText ?? '',
+        viewportBg:snapshot?.viewportBg ?? '',
+        movesSinceFatigue:runtime.state.movesSinceFatigue ?? 0,
+        lastTriggerKey:runtime.state.lastTriggerKey || '',
+        trigger:snapshot?.trigger ? {
+          type:snapshot.trigger.type,
+          label:snapshot.trigger.label,
+          reason:snapshot.trigger.reason,
+          source:snapshot.trigger.source || '',
+        } : null,
+        ...extra,
+      });
+      saveDebugLog(log);
+      maybeSendDailyLog();
+    }
+
+    function getMskDateKey(){
+      return new Intl.DateTimeFormat('en-CA', {
+        timeZone:'Europe/Moscow',
+        year:'numeric',
+        month:'2-digit',
+        day:'2-digit'
+      }).format(new Date());
+    }
+
+    async function maybeSendDailyLog(){
+      if(runtime.sendingLog) return;
+      const today = getMskDateKey();
+      const sent = gmGet(LOG_SENT_KEY, null);
+      if(sent === today) return;
+
+      const debugLog = loadDebugLog();
+      if(!debugLog.length) return;
+
+      runtime.sendingLog = true;
+      try{
+        const payload = {
+          exportedAt:new Date().toISOString(),
+          script:'labyrinth-fatigue',
+          storageKey:STORAGE_KEY,
+          debugLogKey:DEBUG_LOG_KEY,
+          counters:{
+            startedAt:runtime.state.startedAt || '',
+            sessionMoves:runtime.state.sessionMoves || 0,
+            movesSinceFatigue:runtime.state.movesSinceFatigue || 0,
+            lastTodaySteps:runtime.state.lastTodaySteps ?? null,
+            lastTriggerKey:runtime.state.lastTriggerKey || '',
+            lastTriggerLabel:runtime.state.lastTriggerLabel || '',
+          },
+          events:runtime.state.events || [],
+          debugLog,
+        };
+        const fileName = `animesss-labyrinth-fatigue-${today}.json`;
+        const response = await fetch(SUITE_REPORT_ENDPOINT, {
+          method:'POST',
+          headers:{ 'Content-Type':'application/json' },
+          body:JSON.stringify({
+            type:'labyrinth_fatigue_log',
+            payload:{
+              fileName,
+              fileContent:JSON.stringify(payload, null, 2),
+              logCount:debugLog.length,
+              nick:suiteGetCurrentUserName() || '',
+              host:location.hostname,
+              path:location.pathname,
+              version:SUITE_ACCESS_VERSION
+            }
+          })
+        });
+        if(response.ok) gmSet(LOG_SENT_KEY, today);
+      } catch(e) {
+      } finally {
+        runtime.sendingLog = false;
+      }
+    }
+
+    function readNumber(selector){
+      const el = document.querySelector(selector);
+      if(!el) return null;
+      const value = parseInt(el.textContent.replace(/[^\d-]/g, ''), 10);
+      return Number.isFinite(value) ? value : null;
+    }
+
+    function getCurrentCell(){
+      return document.querySelector('.labyrinth-cell--current') ||
+        document.querySelector('.labyrinth-cell.labyrinth-cell--visited[data-event]:last-of-type');
+    }
+
+    function getCoord(){
+      const data = (unsafeWindow?.labyrinthData || window.labyrinthData)?.mapData?.current;
+      if(data && Number.isFinite(data.x) && Number.isFinite(data.y)) return `${data.x},${data.y}`;
+
+      const cell = getCurrentCell();
+      if(cell?.dataset?.x && cell?.dataset?.y) return `${cell.dataset.x},${cell.dataset.y}`;
+      return '';
+    }
+
+    function getCurrentEvent(){
+      const source = unsafeWindow?.labyrinthData || window.labyrinthData;
+      return getCurrentCell()?.dataset?.event || source?.lastEvent || '';
+    }
+
+    function getCellEvent(){
+      return getCurrentCell()?.dataset?.event || '';
+    }
+
+    function isRendered(el){
+      if(!el) return false;
+      const style = window.getComputedStyle(el);
+      return style.display !== 'none' &&
+        style.visibility !== 'hidden' &&
+        style.opacity !== '0' &&
+        el.getClientRects().length > 0;
+    }
+
+    function getVisibleText(selector){
+      const el = document.querySelector(selector);
+      if(!isRendered(el)) return '';
+      return el.textContent.trim();
+    }
+
+    function getTriggerDiagnostics(){
+      const source = unsafeWindow?.labyrinthData || window.labyrinthData;
+      return {
+        title:getVisibleText('#labyrinthEventTitle'),
+        eventText:getVisibleText('#labyrinthEventText'),
+        fatigueTitle:getVisibleText('#labyrinthFatigueTitle'),
+        fatigueText:getVisibleText('#labyrinthFatigueText'),
+        lastEvent:String(source?.lastEvent || ''),
+        cellEvent:String(getCellEvent() || ''),
+        viewportBg:document.querySelector('#labyrinthMapViewport')?.getAttribute('style') || '',
+      };
+    }
+
+    function hasVisibleEvent(raw){
+      return Boolean(raw.title || raw.eventText || raw.fatigueTitle || raw.fatigueText);
+    }
+
+    function buildTrigger(type, source){
+      const def = TRIGGER_DEFS[type];
+      return { type, label:def.label, reason:def.reason, source };
+    }
+
+    function matchesVisibleTrigger(def, title, eventText){
+      if(!def.titles && !def.titleNeedles && !def.textNeedles) return false;
+      if(def.titles?.includes(title)) return true;
+
+      const lowerTitle = title.toLowerCase();
+      const lowerText = eventText.toLowerCase();
+      const hasTitle = !def.titleNeedles || def.titleNeedles.some(part => lowerTitle.includes(part));
+      const hasText = !def.textNeedles || def.textNeedles.some(part => lowerText.includes(part));
+      return Boolean(def.titleNeedles || def.textNeedles) && hasTitle && hasText;
+    }
+
+    function matchesTrigger(def, title, eventText, viewportStyle){
+      if(matchesVisibleTrigger(def, title, eventText)) return true;
+      return Boolean(def.backgrounds?.some(part => viewportStyle.includes(part)));
+    }
+
+    function isFatigueTrigger(raw){
+      const title = raw.fatigueTitle.toLowerCase();
+      const text = raw.fatigueText.toLowerCase();
+      return title.includes('усталость') && text.includes('общий путь откатывается');
+    }
+
+    function getActiveTrigger(raw = getTriggerDiagnostics()){
+      if(isFatigueTrigger(raw)) return buildTrigger('fatigue', 'fatigueBlock');
+
+      for(const [type, def] of Object.entries(TRIGGER_DEFS)){
+        if(matchesVisibleTrigger(def, raw.title, raw.eventText)) return buildTrigger(type, 'visibleEvent');
+      }
+
+      if(!hasVisibleEvent(raw)){
+        if(TRIGGER_DEFS[raw.lastEvent]) return buildTrigger(raw.lastEvent, 'lastEvent');
+        if(TRIGGER_DEFS[raw.cellEvent]) return buildTrigger(raw.cellEvent, 'cellEvent');
+      }
+
+      for(const [type, def] of Object.entries(TRIGGER_DEFS)){
+        if(matchesTrigger(def, raw.title, raw.eventText, raw.viewportBg)) return buildTrigger(type, 'fallback');
+      }
+
+      return null;
+    }
+
+    function collectSnapshot(){
+      const raw = getTriggerDiagnostics();
+      return {
+        today:readNumber('#labyrinthTodaySteps'),
+        max:readNumber('#labyrinthMaxSteps'),
+        left:readNumber('#labyrinthRemainingSteps'),
+        coord:getCoord(),
+        event:getCurrentEvent(),
+        ...raw,
+        trigger:getActiveTrigger(raw),
+      };
+    }
+
+    function recordMove(delta, snapshot){
+      for(let i = 0; i < delta; i += 1){
+        runtime.state.sessionMoves += 1;
+        runtime.state.movesSinceFatigue += 1;
+      }
+      runtime.state.history.unshift({
+        type:'move',
+        at:Date.now(),
+        text:`Ход +${delta}`,
+        coord:snapshot.coord,
+        event:snapshot.event,
+        today:snapshot.today,
+      });
+      appendDebugLog('move', snapshot, { delta });
+    }
+
+    function recordTrigger(snapshot, trigger){
+      if(!trigger) return false;
+
+      const key = `${snapshot.today}:${trigger.type}`;
+      if(runtime.state.lastTriggerKey === key) return false;
+
+      const movesBeforeReset = runtime.state.movesSinceFatigue || 0;
+      runtime.state.lastTriggerKey = key;
+      runtime.state.lastTriggerLabel = trigger.reason;
+      runtime.state.movesSinceFatigue = 0;
+
+      if(trigger.type === 'trap_back') runtime.state.trapsBack = (runtime.state.trapsBack || 0) + 1;
+      if(trigger.type === 'mimic_chest') runtime.state.mimics = (runtime.state.mimics || 0) + 1;
+      if(trigger.type === 'mimic_chest_back') runtime.state.mimicBacks = (runtime.state.mimicBacks || 0) + 1;
+      if(trigger.type === 'fatigue') runtime.state.fatigueCount = (runtime.state.fatigueCount || 0) + 1;
+
+      runtime.state.events.unshift({
+        type:trigger.type,
+        label:trigger.label,
+        at:Date.now(),
+        movesSincePrevious:movesBeforeReset,
+        today:snapshot.today,
+      });
+      runtime.state.history.unshift({
+        type:'event',
+        at:Date.now(),
+        text:trigger.label,
+        movesBetween:movesBeforeReset,
+        today:snapshot.today,
+      });
+      appendDebugLog('trigger-recorded', snapshot, { key, movesBeforeReset });
+      return true;
+    }
+
+    function trimHistory(){
+      if(runtime.state.history.length > 150) runtime.state.history = runtime.state.history.slice(0, 150);
+      if(runtime.state.events.length > 100) runtime.state.events = runtime.state.events.slice(0, 100);
+    }
+
+    function attachBox(){
+      const arena = document.querySelector('.labyrinth__arena');
+      if(!arena) return false;
+      const arenaStyle = getComputedStyle(arena);
+      if(arenaStyle.position === 'static') arena.style.position = 'relative';
+
+      if(!runtime.box){
+        const box = document.createElement('div');
+        box.id = ROOT_ID;
+        box.innerHTML = `
+          <div class="suite-lab-fatigue-head">
+            <span class="suite-lab-fatigue-icon">≈</span>
+            <span>Усталость</span>
+          </div>
+          <span class="suite-lab-fatigue-value"><span data-lab-fatigue="moves">0</span> ходов</span>
+          <span class="suite-lab-fatigue-sub">с начала отсчёта</span>
+          <button class="suite-lab-fatigue-btn" type="button" title="Подробная статистика">≡</button>
+        `;
+        box.querySelector('.suite-lab-fatigue-btn')?.addEventListener('click', showModal);
+        runtime.box = box;
+      }
+
+      if(runtime.box.parentElement !== arena) arena.appendChild(runtime.box);
+      return true;
+    }
+
+    function renderBox(){
+      if(!runtime.box) return;
+      const movesEl = runtime.box.querySelector('[data-lab-fatigue="moves"]');
+      const subEl = runtime.box.querySelector('.suite-lab-fatigue-sub');
+      if(movesEl) movesEl.textContent = String(runtime.state.movesSinceFatigue ?? 0);
+      if(subEl) subEl.textContent = `с ${runtime.state.lastTriggerLabel || 'начала отсчёта'}`;
+    }
+
+    function mountModal(){
+      if(document.getElementById(MODAL_ID)) return;
+
+      const modal = document.createElement('div');
+      modal.id = MODAL_ID;
+      modal.innerHTML = `
+        <div class="suite-lab-fatigue-modal-box">
+          <div class="suite-lab-fatigue-modal-head">
+            <div class="suite-lab-fatigue-modal-title">Усталость и откаты</div>
+            <button class="suite-lab-fatigue-close" type="button">×</button>
+          </div>
+          <div class="suite-lab-fatigue-body">
+            <div data-lab-fatigue-modal="history"></div>
+            <div class="suite-lab-fatigue-pages">
+              <button class="suite-lab-fatigue-page-btn" type="button" data-lab-fatigue-page="prev">‹</button>
+              <span class="suite-lab-fatigue-page-state">
+                <input class="suite-lab-fatigue-page-input" type="number" min="1" step="1" value="1" data-lab-fatigue-page-input>
+                <span>/</span>
+                <span data-lab-fatigue-page-total>1</span>
+              </span>
+              <button class="suite-lab-fatigue-page-btn" type="button" data-lab-fatigue-page="next">›</button>
+              <button class="suite-lab-fatigue-reset-btn" type="button" data-lab-fatigue-reset>Сброс</button>
+            </div>
+          </div>
+        </div>
+      `;
+      modal.addEventListener('click', event => {
+        if(event.target === modal || event.target.classList.contains('suite-lab-fatigue-close')) modal.classList.remove('is-open');
+      });
+      modal.querySelector('[data-lab-fatigue-page="prev"]')?.addEventListener('click', () => {
+        if(runtime.statsPage > 0){
+          runtime.statsPage -= 1;
+          renderModal();
+        }
+      });
+      modal.querySelector('[data-lab-fatigue-page="next"]')?.addEventListener('click', () => {
+        const pageCount = Math.max(1, Math.ceil((runtime.state.events || []).length / EVENTS_PER_PAGE));
+        if(runtime.statsPage < pageCount - 1){
+          runtime.statsPage += 1;
+          renderModal();
+        }
+      });
+      const input = modal.querySelector('[data-lab-fatigue-page-input]');
+      input?.addEventListener('change', goToEnteredPage);
+      input?.addEventListener('keydown', event => {
+        if(event.key === 'Enter'){
+          event.preventDefault();
+          goToEnteredPage();
+        }
+      });
+      modal.querySelector('[data-lab-fatigue-reset]')?.addEventListener('click', resetStats);
+      document.body.appendChild(modal);
+    }
+
+    function showModal(){
+      mountModal();
+      renderModal();
+      document.getElementById(MODAL_ID)?.classList.add('is-open');
+    }
+
+    function goToEnteredPage(){
+      const input = document.querySelector(`#${MODAL_ID} [data-lab-fatigue-page-input]`);
+      if(!input) return;
+      const pageCount = Math.max(1, Math.ceil((runtime.state.events || []).length / EVENTS_PER_PAGE));
+      const requested = parseInt(input.value, 10);
+      runtime.statsPage = Math.max(0, Math.min(pageCount - 1, Number.isFinite(requested) ? requested - 1 : runtime.statsPage));
+      renderModal();
+    }
+
+    function renderModal(){
+      const modal = document.getElementById(MODAL_ID);
+      if(!modal) return;
+
+      const history = modal.querySelector('[data-lab-fatigue-modal="history"]');
+      const events = runtime.state.events || [];
+      const pageCount = Math.max(1, Math.ceil(events.length / EVENTS_PER_PAGE));
+      if(runtime.statsPage > pageCount - 1) runtime.statsPage = pageCount - 1;
+
+      const start = runtime.statsPage * EVENTS_PER_PAGE;
+      const pageEvents = events.slice(start, start + EVENTS_PER_PAGE);
+      if(history) history.innerHTML = renderEventTimeline(events, pageEvents, start, runtime.statsPage === 0);
+
+      const pageInput = modal.querySelector('[data-lab-fatigue-page-input]');
+      const pageTotal = modal.querySelector('[data-lab-fatigue-page-total]');
+      const prevBtn = modal.querySelector('[data-lab-fatigue-page="prev"]');
+      const nextBtn = modal.querySelector('[data-lab-fatigue-page="next"]');
+      if(pageInput){
+        pageInput.value = String(runtime.statsPage + 1);
+        pageInput.max = String(pageCount);
+      }
+      if(pageTotal) pageTotal.textContent = String(pageCount);
+      if(prevBtn) prevBtn.disabled = runtime.statsPage <= 0;
+      if(nextBtn) nextBtn.disabled = runtime.statsPage >= pageCount - 1;
+    }
+
+    function renderEventTimeline(allEvents, pageEvents, startIndex, showLiveGap){
+      if(!pageEvents.length) return '<div class="suite-lab-fatigue-empty">Событий пока нет</div>';
+
+      const liveGap = showLiveGap
+        ? `<div class="suite-lab-fatigue-gap is-live"><span class="suite-lab-fatigue-arrow">↑</span><span>${suiteLabEscapeHtml(runtime.state.movesSinceFatigue ?? 0)} ходов</span></div>`
+        : '';
+      const topPageGap = !showLiveGap && startIndex > 0 ? renderGap(allEvents[startIndex - 1]?.movesSincePrevious) : '';
+      const bottomEvent = pageEvents[pageEvents.length - 1];
+      const bottomPageGap = allEvents[startIndex + pageEvents.length] ? renderGap(bottomEvent?.movesSincePrevious) : '';
+
+      return `
+        <div class="suite-lab-fatigue-timeline">
+          ${liveGap}
+          ${topPageGap}
+          ${pageEvents.map((event, index) => {
+            const at = new Date(event.at);
+            const date = at.toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit', year:'numeric' });
+            const time = at.toLocaleTimeString('ru-RU', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+            const gap = index < pageEvents.length - 1 ? renderGap(event.movesSincePrevious) : '';
+            return `
+              <div class="suite-lab-fatigue-event">
+                <div class="suite-lab-fatigue-event-name">${suiteLabEscapeHtml(event.label)}</div>
+                <div class="suite-lab-fatigue-event-time">${date} ${time}</div>
+              </div>
+              ${gap}
+            `;
+          }).join('')}
+          ${bottomPageGap}
+        </div>
+      `;
+    }
+
+    function renderGap(moves){
+      return `<div class="suite-lab-fatigue-gap"><span class="suite-lab-fatigue-arrow">↑</span><span>${suiteLabEscapeHtml(moves ?? 0)} ходов</span></div>`;
+    }
+
+    function suiteLabEscapeHtml(value){
+      return String(value).replace(/[&<>"']/g, char => ({
+        '&':'&amp;',
+        '<':'&lt;',
+        '>':'&gt;',
+        '"':'&quot;',
+        "'":'&#039;',
+      }[char]));
+    }
+
+    function resetStats(){
+      if(!confirm('Сбросить статистику ходов и событий? Лог диагностики останется.')) return;
+      runtime.state = makeEmptyState();
+      runtime.statsPage = 0;
+      saveState();
+      appendDebugLog('manual-reset', null, { resetAt:runtime.state.startedAt });
+      renderBox();
+      renderModal();
+    }
+
+    function tick(){
+      if(runtime.ticking) return;
+      runtime.ticking = true;
+      try{
+        ensureState();
+        attachBox();
+
+        const snapshot = collectSnapshot();
+        if(snapshot.today !== null){
+          if(runtime.state.lastTodaySteps === null){
+            runtime.state.lastTodaySteps = snapshot.today;
+          } else if(snapshot.today > runtime.state.lastTodaySteps){
+            recordMove(snapshot.today - runtime.state.lastTodaySteps, snapshot);
+            runtime.state.lastTodaySteps = snapshot.today;
+          } else if(snapshot.today < runtime.state.lastTodaySteps){
+            appendDebugLog('today-steps-reset', snapshot, { from:runtime.state.lastTodaySteps, to:snapshot.today });
+            runtime.state.lastTodaySteps = snapshot.today;
+          }
+        }
+
+        if(snapshot.trigger) recordTrigger(snapshot, snapshot.trigger);
+
+        runtime.lastSnapshot = snapshot;
+        trimHistory();
+        saveState();
+        renderBox();
+        if(document.querySelector(`#${MODAL_ID}.is-open`)) renderModal();
+      } finally {
+        runtime.ticking = false;
+      }
+    }
+
+    runtime.startTimer = setTimeout(tick, 500);
+    runtime.tickInterval = setInterval(tick, 1000);
+    maybeSendDailyLog();
   }
 
   function cleanupLabyrinthEmission(){
