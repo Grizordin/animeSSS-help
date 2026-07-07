@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      2.41
+// @version      2.42
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -1006,7 +1006,7 @@
       width:21px;
       height:21px;
       left:4px;
-      top:50%;
+      top:calc(50% - 1px);
       transform:translateY(-50%);
       border-radius:50%;
       background:linear-gradient(145deg,#303743,#171c25);
@@ -5621,6 +5621,7 @@
       requestAnimationFrame(()=>{
         syncMenuPlateWidth();
         requestAnimationFrame(syncMenuPlateWidth);
+        setTimeout(syncMenuPlateWidth, 320);
       });
     };
     const splitSectionTitle=(title)=>{
@@ -5660,8 +5661,6 @@
       const content=document.createElement('div');
       content.className='suite-section-panel';
       tab.addEventListener('click',()=>setActiveSection(key));
-      tab.addEventListener('mouseenter',scheduleMenuPlateWidthSync);
-      tab.addEventListener('mouseleave',scheduleMenuPlateWidthSync);
       sectionEntries.push({key,tab,content});
       sectionNav.appendChild(tab);
       sectionsHost.appendChild(content);
@@ -5868,7 +5867,7 @@
       else cleanupLabyrinthEmission();
     });
     labyrinthSection.appendChild(emissionRow);
-    const fatigueRow = makeToggle('modLabyrinthFatigue', '🌊 Усталость');
+    const fatigueRow = makeToggle('modLabyrinthFatigue', '💤 Усталость');
     fatigueRow.querySelector('input').addEventListener('change', () => {
       if(cfg.modLabyrinthFatigue) initLabyrinthFatigue();
       else cleanupLabyrinthFatigue();
@@ -5890,11 +5889,6 @@
     saveCfg();
 
     panel.append(hdr,body); document.body.appendChild(panel);
-    if(typeof ResizeObserver === 'function'){
-      const plateObserver = new ResizeObserver(scheduleMenuPlateWidthSync);
-      plateObserver.observe(sectionNav);
-      panel._suiteMenuPlateObserver = plateObserver;
-    }
     scheduleMenuPlateWidthSync();
     // Восстанавливаем сохранённую позицию панели настроек
     if(cfg.settingsPanelLeft!==null && cfg.settingsPanelTop!==null){
@@ -11881,7 +11875,7 @@
         box.id = ROOT_ID;
         box.innerHTML = `
           <div class="suite-lab-fatigue-head">
-            <span class="suite-lab-fatigue-icon">≈</span>
+            <span class="suite-lab-fatigue-icon">💤</span>
             <span>Усталость</span>
           </div>
           <span class="suite-lab-fatigue-value"><span data-lab-fatigue="moves">0</span> ходов</span>
