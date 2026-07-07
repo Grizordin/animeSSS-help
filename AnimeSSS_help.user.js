@@ -5527,7 +5527,7 @@
     const hdr=document.createElement('div');
     hdr.className='suite-settings-header';
     hdr.style.cssText=[
-      'background:linear-gradient(135deg,#0b5063,#0f172a)',
+      'background:linear-gradient(135deg,rgba(8,145,178,.55),rgba(15,23,42,.96))',
       'padding:14px 18px',
       'display:flex',
       'align-items:center',
