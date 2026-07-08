@@ -997,10 +997,12 @@
     .suite-toggle input { opacity:0;width:0;height:0; }
     .suite-slider {
       position:relative;
-      display:block;
+      display:grid;
+      align-items:center;
       box-sizing:border-box;
       width:50px;
       height:26px;
+      padding:2px;
       cursor:pointer;
       border-radius:999px;
       background:linear-gradient(145deg,#121821,#05080d);
@@ -1013,12 +1015,15 @@
     }
     .suite-slider:before {
       content:'';
-      position:absolute;
+      position:relative;
       box-sizing:border-box;
+      grid-area:1 / 1;
+      align-self:center;
+      justify-self:start;
       width:20px;
       height:20px;
-      left:3px;
-      top:3px;
+      left:0;
+      top:0;
       transform:translateX(0);
       border-radius:50%;
       background:linear-gradient(145deg,#303743,#171c25);
