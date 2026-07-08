@@ -941,7 +941,11 @@
     /* Панель настроек */
     #suite-settings-panel * { box-sizing:border-box; }
     #suite-settings-panel .neon-outline-wrapper { display:none !important; }
-    #suite-settings-panel input[type=range] { width:100%;accent-color:#0ea5e9; }
+    #suite-settings-panel input[type=range] {
+      width:330px;
+      max-width:100%;
+      accent-color:#0ea5e9;
+    }
     #suite-menu-tooltip {
       position: fixed;
       z-index: 2147483647;
@@ -1083,6 +1087,7 @@
     .suite-section-panel {
       width:var(--suite-menu-plate-width, max-content);
       max-width:100%;
+      transition:width .28s cubic-bezier(.22,1,.36,1);
       background:linear-gradient(135deg,#0b5063,#0f172a) !important;
       opacity:1 !important;
       filter:none !important;
@@ -1180,6 +1185,9 @@
         opacity:1;
         max-width:none;
         transform:none;
+      }
+      #suite-settings-panel input[type=range] {
+        width:100%;
       }
       .suite-section-panel.is-active {
         max-height:calc(100vh - 180px);
@@ -5661,6 +5669,8 @@
       const content=document.createElement('div');
       content.className='suite-section-panel';
       tab.addEventListener('click',()=>setActiveSection(key));
+      tab.addEventListener('mouseenter',scheduleMenuPlateWidthSync);
+      tab.addEventListener('mouseleave',scheduleMenuPlateWidthSync);
       sectionEntries.push({key,tab,content});
       sectionNav.appendChild(tab);
       sectionsHost.appendChild(content);

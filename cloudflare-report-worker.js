@@ -148,7 +148,7 @@ function field(name, value, inline = true) {
 async function sendDiscordAccess(env, payload, meta) {
   if (!env.DISCORD_WEBHOOK_URL) return;
 
-  const allowed = /allowed|ok/i.test(payload.status || '');
+  const allowed = /разреш|allowed|ok/i.test(payload.status || '');
   const embed = {
     title: allowed ? 'Script access allowed' : 'Script access blocked',
     color: allowed ? 0x22c55e : 0xef4444,
