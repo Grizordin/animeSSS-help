@@ -5639,11 +5639,16 @@
       sectionEntries.forEach(entry=>entry.tab.classList.remove('is-hovered'));
     };
     const getEntryFromNavPointer=(event)=>{
-      const rect = sectionNav.getBoundingClientRect();
-      const x = event.clientX - rect.left - 8;
-      if(x < -8) return null;
-      const index = Math.max(0, Math.min(sectionEntries.length - 1, Math.round((x - 22) / 52)));
-      return sectionEntries[index] || null;
+      const navRect = sectionNav.getBoundingClientRect();
+      if(event.clientX < navRect.left || event.clientX > navRect.right ||
+         event.clientY < navRect.top || event.clientY > navRect.bottom) {
+        return null;
+      }
+      return sectionEntries.find(entry=>{
+        const rect = entry.tab.getBoundingClientRect();
+        return event.clientX >= rect.left && event.clientX <= rect.right &&
+          event.clientY >= rect.top && event.clientY <= rect.bottom;
+      }) || null;
     };
     const setSectionHoverFromPointer=(event)=>{
       const hovered = getEntryFromNavPointer(event);
@@ -5710,7 +5715,7 @@
       tab.type='button';
       tab.className='suite-section-tab';
       tab.setAttribute('role','tab');
-      tab.title=meta.text;
+      tab.setAttribute('aria-label',meta.text);
       const icon=document.createElement('span');
       icon.className='suite-section-tab-icon';
       icon.textContent=meta.icon;
