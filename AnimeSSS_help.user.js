@@ -5843,7 +5843,7 @@
     cardValueSection.appendChild(autoOpenRow);
 
     // ── ПАКИ ──────────────────────────────────────────────────
-    const packsSection = makeSection('packs','📦 Паки');
+    const packsSection = makeSection('packs','🎁 Паки');
     packsSection.appendChild(makeToggle('modStats',   '📊 Статистика паков'));
     packsSection.appendChild(makeToggle('modHotkeys', '⌨️ Горячие клавиши'));
     const guaranteeRow = makeToggle('modGuarantee', '🏅 Расчёт гаранта');
@@ -5855,7 +5855,7 @@
     packsSection.appendChild(onlyPack20Row);
 
     // ── UI ────────────────────────────────────────────────────
-    const uiSection = makeSection('ui','🧩 UI');
+    const uiSection = makeSection('ui','🖥️ UI');
     uiSection.appendChild(makeToggle('modProfileBtns',   '🔍 Кнопки в профиле'));
     uiSection.appendChild(makeToggle('modEnlightenment', '🧘 Просветление на странице клубов'));
     const voteCardsRow = makeToggle('modVoteCardsToggle', '🗳️ Скрытие голосования');
