@@ -1074,7 +1074,7 @@
       border:1px solid rgba(103,232,249,.24);
       box-shadow:0 0 0 1px rgba(34,211,238,.10), inset 0 1px 0 rgba(255,255,255,.08);
       overflow:visible;
-      transition:width .28s cubic-bezier(.22,1,.36,1);
+      transition:width .36s cubic-bezier(.22,1,.36,1);
     }
     #suite-settings-panel {
       scrollbar-color: rgba(103,232,249,.45) transparent;
@@ -1088,7 +1088,7 @@
     .suite-section-panel {
       width:var(--suite-menu-plate-width, max-content);
       max-width:100%;
-      transition:width .28s cubic-bezier(.22,1,.36,1);
+      transition:width .36s cubic-bezier(.22,1,.36,1);
       background:linear-gradient(135deg,#0b5063,#0f172a) !important;
       opacity:1 !important;
       filter:none !important;
@@ -1115,7 +1115,7 @@
       cursor:pointer;
       overflow:hidden;
       font:700 13px/1 "Segoe UI",Arial,sans-serif;
-      transition:width .28s cubic-bezier(.22,1,.36,1),background .2s ease,box-shadow .2s ease,color .2s ease;
+      transition:width .36s cubic-bezier(.22,1,.36,1),background .2s ease,box-shadow .2s ease,color .2s ease;
     }
     .suite-section-tab.is-hovered,
     .suite-section-tab.is-active {
@@ -1144,7 +1144,7 @@
       transform:translateX(-7px);
       white-space:nowrap;
       overflow:hidden;
-      transition:opacity .2s ease,max-width .28s ease,transform .28s ease;
+      transition:opacity .2s ease,max-width .36s ease,transform .36s ease;
     }
     .suite-section-tab.is-hovered .suite-section-tab-label,
     .suite-section-tab.is-active .suite-section-tab-label {
@@ -5644,11 +5644,26 @@
          event.clientY < navRect.top || event.clientY > navRect.bottom) {
         return null;
       }
-      return sectionEntries.find(entry=>{
-        const rect = entry.tab.getBoundingClientRect();
-        return event.clientX >= rect.left && event.clientX <= rect.right &&
-          event.clientY >= rect.top && event.clientY <= rect.bottom;
-      }) || null;
+      const x = event.clientX - navRect.left;
+      const rects = sectionEntries.map(entry=>({
+        entry,
+        rect:entry.tab.getBoundingClientRect()
+      }));
+      const direct = rects.find(({rect})=>
+        event.clientX >= rect.left && event.clientX <= rect.right &&
+        event.clientY >= rect.top && event.clientY <= rect.bottom
+      );
+      if(direct) return direct.entry;
+
+      for(let index = 0; index < rects.length - 1; index += 1){
+        const current = rects[index].rect;
+        const next = rects[index + 1].rect;
+        if(event.clientX > current.right && event.clientX < next.left) {
+          return rects[index + 1].entry;
+        }
+      }
+      if(x < 8) return sectionEntries[0] || null;
+      return null;
     };
     const setSectionHoverFromPointer=(event)=>{
       const hovered = getEntryFromNavPointer(event);
