@@ -1065,7 +1065,7 @@
       display:flex;
       align-items:center;
       gap:8px;
-      width:max-content;
+      width:var(--suite-menu-plate-width, max-content);
       max-width:100%;
       margin:0 0 12px;
       padding:8px;
@@ -1074,6 +1074,7 @@
       border:1px solid rgba(103,232,249,.24);
       box-shadow:0 0 0 1px rgba(34,211,238,.10), inset 0 1px 0 rgba(255,255,255,.08);
       overflow:visible;
+      transition:width .28s cubic-bezier(.22,1,.36,1);
     }
     #suite-settings-panel {
       scrollbar-color: rgba(103,232,249,.45) transparent;
@@ -1116,6 +1117,7 @@
       transition:max-width .28s cubic-bezier(.22,1,.36,1),background .2s ease,box-shadow .2s ease,color .2s ease;
     }
     .suite-section-tab:hover,
+    .suite-section-tab.is-hovered,
     .suite-section-tab.is-active {
       max-width:190px;
       justify-content:flex-start;
@@ -1144,6 +1146,7 @@
       transition:opacity .2s ease,max-width .28s ease,transform .28s ease;
     }
     .suite-section-tab:hover .suite-section-tab-label,
+    .suite-section-tab.is-hovered .suite-section-tab-label,
     .suite-section-tab.is-active .suite-section-tab-label {
       opacity:1;
       max-width:140px;
@@ -5621,15 +5624,15 @@
     sectionsHost.className='suite-sections-host';
     const sectionEntries=[];
     body.append(sectionNav,sectionsHost);
-    const syncMenuPlateWidth=()=>{
-      const width=Math.ceil(sectionNav.getBoundingClientRect().width || sectionNav.scrollWidth || 0);
+    const syncMenuPlateWidthToContent=()=>{
+      const width=Math.ceil(sectionNav.scrollWidth || sectionNav.getBoundingClientRect().width || 0);
       if(width > 0) panel.style.setProperty('--suite-menu-plate-width', width + 'px');
     };
     const scheduleMenuPlateWidthSync=()=>{
       requestAnimationFrame(()=>{
-        syncMenuPlateWidth();
-        requestAnimationFrame(syncMenuPlateWidth);
-        setTimeout(syncMenuPlateWidth, 320);
+        syncMenuPlateWidthToContent();
+        requestAnimationFrame(syncMenuPlateWidthToContent);
+        setTimeout(syncMenuPlateWidthToContent, 320);
       });
     };
     const splitSectionTitle=(title)=>{
@@ -5669,8 +5672,14 @@
       const content=document.createElement('div');
       content.className='suite-section-panel';
       tab.addEventListener('click',()=>setActiveSection(key));
-      tab.addEventListener('mouseenter',scheduleMenuPlateWidthSync);
-      tab.addEventListener('mouseleave',scheduleMenuPlateWidthSync);
+      tab.addEventListener('mouseenter',()=>{
+        tab.classList.add('is-hovered');
+        syncMenuPlateWidthToContent();
+      });
+      tab.addEventListener('mouseleave',()=>{
+        tab.classList.remove('is-hovered');
+        syncMenuPlateWidthToContent();
+      });
       sectionEntries.push({key,tab,content});
       sectionNav.appendChild(tab);
       sectionsHost.appendChild(content);
@@ -11888,7 +11897,7 @@
             <span class="suite-lab-fatigue-icon">💤</span>
             <span>Усталость</span>
           </div>
-          <span class="suite-lab-fatigue-value"><span data-lab-fatigue="moves">0</span> ходов</span>
+          <span class="suite-lab-fatigue-value"><span data-lab-fatigue="moves">0</span> <span data-lab-fatigue="moves-word">ходов</span></span>
           <span class="suite-lab-fatigue-sub">с начала отсчёта</span>
           <button class="suite-lab-fatigue-btn" type="button" title="Подробная статистика">≡</button>
         `;
@@ -11903,8 +11912,11 @@
     function renderBox(){
       if(!runtime.box) return;
       const movesEl = runtime.box.querySelector('[data-lab-fatigue="moves"]');
+      const movesWordEl = runtime.box.querySelector('[data-lab-fatigue="moves-word"]');
       const subEl = runtime.box.querySelector('.suite-lab-fatigue-sub');
-      if(movesEl) movesEl.textContent = String(runtime.state.movesSinceFatigue ?? 0);
+      const moves = runtime.state.movesSinceFatigue ?? 0;
+      if(movesEl) movesEl.textContent = String(moves);
+      if(movesWordEl) movesWordEl.textContent = suiteLabMoveWord(moves);
       if(subEl) subEl.textContent = `с ${runtime.state.lastTriggerLabel || 'начала отсчёта'}`;
     }
 
@@ -12007,7 +12019,7 @@
       if(!pageEvents.length) return '<div class="suite-lab-fatigue-empty">Событий пока нет</div>';
 
       const liveGap = showLiveGap
-        ? `<div class="suite-lab-fatigue-gap is-live"><span class="suite-lab-fatigue-arrow">↑</span><span>${suiteLabEscapeHtml(runtime.state.movesSinceFatigue ?? 0)} ходов</span></div>`
+        ? `<div class="suite-lab-fatigue-gap is-live"><span class="suite-lab-fatigue-arrow">↑</span><span>${suiteLabMovesText(runtime.state.movesSinceFatigue ?? 0)}</span></div>`
         : '';
       const topPageGap = !showLiveGap && startIndex > 0 ? renderGap(allEvents[startIndex - 1]?.movesSincePrevious) : '';
       const bottomEvent = pageEvents[pageEvents.length - 1];
@@ -12036,7 +12048,22 @@
     }
 
     function renderGap(moves){
-      return `<div class="suite-lab-fatigue-gap"><span class="suite-lab-fatigue-arrow">↑</span><span>${suiteLabEscapeHtml(moves ?? 0)} ходов</span></div>`;
+      return `<div class="suite-lab-fatigue-gap"><span class="suite-lab-fatigue-arrow">↑</span><span>${suiteLabMovesText(moves ?? 0)}</span></div>`;
+    }
+
+    function suiteLabMoveWord(value){
+      const num = Math.abs(Number(value) || 0);
+      const mod100 = num % 100;
+      const mod10 = num % 10;
+      if(mod100 >= 11 && mod100 <= 14) return 'ходов';
+      if(mod10 === 1) return 'ход';
+      if(mod10 >= 2 && mod10 <= 4) return 'хода';
+      return 'ходов';
+    }
+
+    function suiteLabMovesText(value){
+      const moves = Number(value) || 0;
+      return `${suiteLabEscapeHtml(moves)} ${suiteLabMoveWord(moves)}`;
     }
 
     function suiteLabEscapeHtml(value){
