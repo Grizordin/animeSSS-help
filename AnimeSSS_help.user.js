@@ -985,23 +985,30 @@
     }
     .suite-toggle {
       position:relative;
-      display:inline-block;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
       width:50px;
       height:26px;
       flex:0 0 50px;
+      vertical-align:middle;
+      line-height:0;
     }
     .suite-toggle input { opacity:0;width:0;height:0; }
     .suite-slider {
-      position:absolute;
-      inset:0;
+      position:relative;
+      display:block;
+      box-sizing:border-box;
+      width:50px;
+      height:26px;
       cursor:pointer;
       border-radius:999px;
       background:linear-gradient(145deg,#121821,#05080d);
       border:1px solid rgba(148,163,184,.18);
       box-shadow:
-        inset 6px 6px 10px rgba(0,0,0,.78),
-        inset -4px -4px 8px rgba(148,163,184,.08),
-        0 3px 8px rgba(0,0,0,.55);
+        inset 4px 4px 8px rgba(0,0,0,.70),
+        inset -3px -3px 7px rgba(148,163,184,.08),
+        0 0 8px rgba(0,0,0,.50);
       transition:border-color .22s ease, box-shadow .22s ease, background .22s ease;
     }
     .suite-slider:before {
@@ -1017,7 +1024,7 @@
       background:linear-gradient(145deg,#303743,#171c25);
       border:1px solid rgba(226,232,240,.34);
       box-shadow:
-        0 4px 9px rgba(0,0,0,.75),
+        0 0 8px rgba(0,0,0,.72),
         inset 2px 2px 4px rgba(255,255,255,.08),
         inset -3px -3px 5px rgba(0,0,0,.45);
       transition:transform .24s cubic-bezier(.2,.8,.2,1), border-color .22s ease, box-shadow .22s ease;
@@ -1041,8 +1048,8 @@
       border-color:rgba(94,234,212,.95);
       background:linear-gradient(145deg,#101720,#05080d);
       box-shadow:
-        inset 6px 6px 10px rgba(0,0,0,.78),
-        inset -4px -4px 8px rgba(94,234,212,.10),
+        inset 4px 4px 8px rgba(0,0,0,.70),
+        inset -3px -3px 7px rgba(94,234,212,.10),
         0 0 0 1px rgba(74,222,128,.72),
         0 0 16px rgba(74,222,128,.55),
         0 0 22px rgba(45,212,191,.42);
@@ -1051,7 +1058,7 @@
       transform:translateX(24px);
       border-color:rgba(226,232,240,.58);
       box-shadow:
-        0 4px 10px rgba(0,0,0,.8),
+        0 0 8px rgba(0,0,0,.76),
         0 0 10px rgba(45,212,191,.26),
         inset 2px 2px 4px rgba(255,255,255,.10),
         inset -3px -3px 5px rgba(0,0,0,.48);
