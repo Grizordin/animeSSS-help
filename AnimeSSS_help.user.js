@@ -1120,6 +1120,7 @@
     .suite-section-tab:hover,
     .suite-section-tab.is-hovered,
     .suite-section-tab.is-active {
+      flex-basis:var(--suite-section-tab-open-width, 190px);
       width:var(--suite-section-tab-open-width, 190px);
       justify-content:flex-start;
       background:rgba(255,255,255,.12);
