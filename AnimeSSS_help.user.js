@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      2.42
+// @version      2.43
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -119,7 +119,7 @@
     autoOpenEnabled:   false,
     autoOpenTarget:    0,
     autoOpenedCount:   0,
-    settingsSections:  { cardValue:true, packs:true, ui:true, cards:true, labyrinth:true },
+    settingsSections:  { cardValue:true, packs:true, ui:true, visual:true, cards:true, labyrinth:true },
 
     // Защита
     guardThreshold: 20,       // порог разницы ценности для защитного окна
@@ -5854,8 +5854,22 @@
     onlyPack20Row.querySelector('input').addEventListener('change', () => applyOnlyPack20());
     packsSection.appendChild(onlyPack20Row);
 
-    // ── UI И ВИЗУАЛ ───────────────────────────────────────────
-    const uiSection = makeSection('ui','🎨 UI и визуал');
+    // ── UI ────────────────────────────────────────────────────
+    const uiSection = makeSection('ui','🧩 UI');
+    uiSection.appendChild(makeToggle('modProfileBtns',   '🔍 Кнопки в профиле'));
+    uiSection.appendChild(makeToggle('modEnlightenment', '🧘 Просветление на странице клубов'));
+    const voteCardsRow = makeToggle('modVoteCardsToggle', '🗳️ Скрытие голосования');
+    voteCardsRow.querySelector('input').addEventListener('change', () => {
+      if(cfg.modVoteCardsToggle) initVoteCardsToggle();
+      else cleanupVoteCardsToggle();
+    });
+    uiSection.appendChild(voteCardsRow);
+    const stonesRow = makeToggle('modStones',        '💎 Учет камней');
+    stonesRow.querySelector('input').addEventListener('change', () => { if(cfg.modStones) initStones(); });
+    uiSection.appendChild(stonesRow);
+
+    // ── ВИЗУАЛ ────────────────────────────────────────────────
+    const visualSection = makeSection('visual','🎨 Визуал');
     const neonRow = makeToggle('modNeon', '✨ Неоновые обводки');
     const neonAnimationRow = makeToggle('modNeonAnimation', '↻ Анимация неоновой обводки');
     neonAnimationRow.style.paddingLeft = '14px';
@@ -5868,7 +5882,7 @@
     };
     neonRow.querySelector('input').addEventListener('change', syncNeonAnimationRow);
     syncNeonAnimationRow();
-    uiSection.append(neonRow, neonAnimationRow);
+    visualSection.append(neonRow, neonAnimationRow);
     const menuBgRow = makeToggle('modMenuBg', '🎬 Фон меню');
     const refreshMenuBgTuning = () => {
       const wrapper = document.querySelector('.lgn.is-active .lgn__inner, .lgn.done .lgn__inner, .lgn .lgn__inner');
@@ -5887,15 +5901,7 @@
     };
     menuBgRow.querySelector('input').addEventListener('change', syncMenuBgRows);
     syncMenuBgRows();
-    uiSection.append(menuBgRow, menuDimRow, menuTextRow);
-    uiSection.appendChild(makeToggle('modProfileBtns',   '🔍 Кнопки в профиле'));
-    uiSection.appendChild(makeToggle('modEnlightenment', '🧘 Просветление на странице клубов'));
-    const voteCardsRow = makeToggle('modVoteCardsToggle', '🗳️ Скрытие голосования');
-    voteCardsRow.querySelector('input').addEventListener('change', () => {
-      if(cfg.modVoteCardsToggle) initVoteCardsToggle();
-      else cleanupVoteCardsToggle();
-    });
-    uiSection.appendChild(voteCardsRow);
+    visualSection.append(menuBgRow, menuDimRow, menuTextRow);
     const customPushRow = makeToggle('modCustomPush',    '🔔 Кастомные уведомления');
     customPushRow.querySelector('input').addEventListener('change', () => {
       if(cfg.modCustomPush) installCustomPush();
@@ -5904,11 +5910,8 @@
         if(dlePushEl) dlePushEl.style.display='';
       }
     });
-    uiSection.appendChild(customPushRow);
-    uiSection.appendChild(makeCustomPushScaleRow());
-    const stonesRow = makeToggle('modStones',        '💎 Учет камней');
-    stonesRow.querySelector('input').addEventListener('change', () => { if(cfg.modStones) initStones(); });
-    uiSection.appendChild(stonesRow);
+    visualSection.appendChild(customPushRow);
+    visualSection.appendChild(makeCustomPushScaleRow());
 
     const cardsSection = makeSection('cards','🃏 Карты');
     const autoLootRow = makeToggle('modAutoLootCards', '🃏 Автолут карт');
