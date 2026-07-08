@@ -986,9 +986,9 @@
     .suite-toggle {
       position:relative;
       display:inline-block;
-      width:52px;
-      height:29px;
-      flex:0 0 52px;
+      width:50px;
+      height:26px;
+      flex:0 0 50px;
     }
     .suite-toggle input { opacity:0;width:0;height:0; }
     .suite-slider {
@@ -1007,11 +1007,11 @@
     .suite-slider:before {
       content:'';
       position:absolute;
-      width:21px;
-      height:21px;
-      left:4px;
-      top:50%;
-      transform:translateY(-50%);
+      width:20px;
+      height:20px;
+      left:3px;
+      top:3px;
+      transform:translateX(0);
       border-radius:50%;
       background:linear-gradient(145deg,#303743,#171c25);
       border:1px solid rgba(226,232,240,.34);
@@ -1046,7 +1046,7 @@
         0 0 22px rgba(45,212,191,.42);
     }
     .suite-toggle input:checked + .suite-slider:before {
-      transform:translate(23px,-50%);
+      transform:translateX(24px);
       border-color:rgba(226,232,240,.58);
       box-shadow:
         0 4px 10px rgba(0,0,0,.8),
