@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      2.43
+// @version      2.5
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -22,6 +22,7 @@
 // @connect      raw.githubusercontent.com
 // @connect      animesss-report-proxy.inaricyn69.workers.dev
 // @connect      kodikplayer.com
+// @connect      predlojka.onrender.com
 // ==/UserScript==
 
 (function () {
@@ -78,9 +79,12 @@
     modProfileBtns:   true,   // кнопки "Открытые S" и "Желаемые"
     modEnlightenment: true,   // просветление
     modVoteCardsToggle:true,  // скрытие голосования
+    modSuggestionAuthors:true,// предложка и авторы на голосовании
     modCustomPush:    true,   // кастомные уведомления
     customPushScale:  1,      // масштаб кастомных уведомлений
     modStones:        true,   // камни
+    modChatStoneAutoloot:true, // автолут небесного камня из чата
+    modGachaAutoloot: true,   // автолут гачи клуба
     modWantCards:     true,   // кнопка добавления в желаемое
     wantButtonsAlways:true,   // кнопки желаемого видны постоянно
     modNoNeedCards:   true,   // кнопка ненужных карт
@@ -2432,6 +2436,7 @@
     {s:'Сундук не открылся',                                      icon:'warn',   title:'Внимание',    theme:'neon-amber'},
     {s:'Ты забрал добычу из персональной шахты',                  icon:'coin',   title:'Добыча',      theme:'neon-green'},
     {s:'Комната захвачена',                                       icon:'shield', title:'Захват',      theme:'neon-green'},
+    {s:'Ты находишься в зале чужого клуба. Сначала заплати дань или перезахвати комнату для своего клуба.', icon:'shield', title:'Клуб', theme:'neon-amber'},
     {s:'Предложение отклонено',                                   icon:'warn',   title:'Отклонено',   theme:'rose'      },
     {s:'Ходы на сегодня закончились',                             icon:'clock',  title:'Лимит',       theme:'rose'      },
     {s:'Вы можете ставить реакцию на комментарии не более 5 раз в день', icon:'clock', title:'Лимит', theme:'rose'},
@@ -2440,6 +2445,7 @@
     {s:'Риск не оправдался',                                       icon:'warn',   title:'Неудача',     theme:'rose'      },
     {s:'Ловушка активирована',                                     icon:'warn',   title:'Ловушка',     theme:'rose'      },
     {s:'Ловушка установлена',                                      icon:'warn',   title:'Ловушка',     theme:'neon-blue' },
+    {s:'Ловушка снята',                                            icon:'check',  title:'Ловушка',     theme:'emerald'   },
     {s:'Ты выбрался из ловушки',                                   icon:'check',  title:'Ловушка',     theme:'emerald'   },
     {s:'Сначала выберись из ловушки',                              icon:'warn',   title:'Ловушка',     theme:'neon-amber'},
     {s:'Сбежать пока нельзя',                                      icon:'clock',  title:'Ловушка',     theme:'neon-amber'},
@@ -3112,6 +3118,1049 @@
   }
 
   // ============================================================
+  //  ПРЕДЛОЖКА И АВТОРЫ
+  // ============================================================
+
+  function cleanupSuggestionAuthors(){
+    const state = window.__suiteSuggestionAuthorsState;
+    if(state){
+      try{ clearTimeout(state.cardsAuthorPollTimer); }catch(e){}
+      try{ clearTimeout(state.cardsAuthorObserveTimer); }catch(e){}
+      (state.intervals || []).forEach(timer => { try{ clearInterval(timer); }catch(e){} });
+      try{ state.cardsAuthorObserver?.disconnect(); }catch(e){}
+      (state.listeners || []).forEach(item => {
+        try{ item.target.removeEventListener(item.type, item.handler, item.options); }catch(e){}
+      });
+    }
+    document.getElementById('suite-suggestion-authors-style')?.remove();
+    document.getElementById('suite-suggestion-authors-button')?.remove();
+    document.getElementById('suite-suggestion-authors-modal')?.remove();
+    document.querySelectorAll('.suite-author-badge.suite-server-author').forEach(el=>el.remove());
+    window.__suiteSuggestionAuthorsState = null;
+    window.__suiteSuggestionAuthorsInstalled = false;
+  }
+
+  function initSuggestionAuthors(){
+    if(!cfg.modSuggestionAuthors) return;
+    if(window.__suiteSuggestionAuthorsInstalled) return;
+    window.__suiteSuggestionAuthorsInstalled = true;
+
+    const API_BASE = 'https://predlojka.onrender.com';
+    const CACHE_KEY = 'suite_suggestion_authors_cache_v1';
+    const HOUR_MS = 60 * 60 * 1000;
+    const MANUAL_REFRESH_COOLDOWN_MS = 30 * 1000;
+    const CARDS_AUTHOR_POLL_MS = 5 * 1000;
+    const DEFAULT_RANK = '';
+    const RANKS = ['', 's', 'a', 'b', 'c', 'd', 'e'];
+    const state = {
+      cardsAuthorPollTimer:null,
+      cardsAuthorObserver:null,
+      cardsAuthorObserveTimer:null,
+      cardsAuthorRefreshRunning:false,
+      intervals:[],
+      listeners:[]
+    };
+    window.__suiteSuggestionAuthorsState = state;
+
+    const now = () => Date.now();
+    const on = (target, type, handler, options) => {
+      target.addEventListener(type, handler, options);
+      state.listeners.push({ target, type, handler, options });
+    };
+    function currentHourKey(){
+      const d = new Date();
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' +
+        String(d.getDate()).padStart(2, '0') + '-' + String(d.getHours()).padStart(2, '0');
+    }
+    function loadCache(){
+      const value = gmStoreGet(CACHE_KEY, {});
+      return value && typeof value === 'object' ? value : {};
+    }
+    function saveCache(cache){ gmStoreSet(CACHE_KEY, cache); }
+    function apiGet(path){
+      return new Promise((resolve, reject) => {
+        GM_xmlhttpRequest({
+          method:'GET',
+          url:API_BASE + path,
+          timeout:30000,
+          onload:response => {
+            try{ resolve(JSON.parse(response.responseText || '{}')); }
+            catch(error){ reject(error); }
+          },
+          onerror:() => reject(new Error('network error')),
+          ontimeout:() => reject(new Error('timeout'))
+        });
+      });
+    }
+    function escapeHtml(value){
+      return String(value ?? '').replace(/[&<>"]/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[ch]));
+    }
+    function abs(url){
+      try{ return new URL(url, location.origin).toString(); }
+      catch(e){ return String(url || ''); }
+    }
+    function cardImage(card){
+      const img = card.querySelector('img');
+      const value = card.dataset.image || img?.dataset?.src || img?.getAttribute('data-src') || img?.getAttribute('src') || '';
+      try{ return new URL(value, location.origin).pathname; }
+      catch(e){ return value.split('?')[0]; }
+    }
+    function replacementKey(item){
+      const cards = [...item.querySelectorAll('.anime-cards__item[data-id]')];
+      const oldCard = cards[0];
+      const newCard = cards[1] || oldCard;
+      if(!oldCard || !newCard) return '';
+      return oldCard.dataset.id + '|' + cardImage(newCard);
+    }
+    function isCardsPage(){ return /^\/cards\/?$/.test(location.pathname); }
+    function getCreatedCards(){
+      return [...document.querySelectorAll('.anime-cards__item-wrapper-gl,.anime-cards__item-wrapper')]
+        .filter(wrapper => {
+          if(wrapper.closest('.cards-replace-vote-list,.card-replace-vote')) return false;
+          if(!wrapper.querySelector('.card-votes')) return false;
+          if(wrapper.querySelector('.card-votes__btn[data-kind="1"],.card-votes button[data-kind="1"]')) return false;
+          if(!wrapper.querySelector('.card-votes__btn[data-kind="0"],.card-votes button[data-kind="0"]')) return false;
+          return true;
+        })
+        .map(wrapper => wrapper.querySelector('.anime-cards__item[data-id]'))
+        .filter(Boolean);
+    }
+    function collectCardsPageKeys(){
+      const keys = [];
+      getCreatedCards().forEach(card => keys.push(card.dataset.id));
+      document.querySelectorAll('.card-replace-vote').forEach(item => {
+        const key = replacementKey(item);
+        if(key) keys.push(key);
+      });
+      return [...new Set(keys)];
+    }
+    function getCachedAuthorResult(key){
+      const cache = loadCache();
+      const results = cache.authorResults || {};
+      const row = results[key];
+      return row && typeof row === 'object' ? row : null;
+    }
+    function saveAuthorResults(rows){
+      if(!rows?.length) return;
+      const cache = loadCache();
+      const results = cache.authorResults && typeof cache.authorResults === 'object' ? cache.authorResults : {};
+      for(const row of rows){
+        if(!row?.task_key) continue;
+        if(!row.author && row.status !== 'not_found') continue;
+        results[row.task_key] = {
+          task_key:row.task_key,
+          author:row.author || '',
+          status:row.status || '',
+          updated_at:row.updated_at || now()
+        };
+      }
+      cache.authorResults = results;
+      saveCache(cache);
+    }
+
+    function injectStyle(){
+      if(document.getElementById('suite-suggestion-authors-style')) return;
+      const style = document.createElement('style');
+      style.id = 'suite-suggestion-authors-style';
+      style.textContent = `
+        .suite-suggestion-button{
+          position:fixed;right:18px;bottom:18px;z-index:99999;
+          display:inline-flex;align-items:center;gap:8px;min-height:38px;padding:8px 12px;
+          border-radius:12px;border:1px solid rgba(56,189,248,.38);
+          background:linear-gradient(135deg,rgba(8,47,73,.96),rgba(15,23,42,.96));
+          color:#e0f2fe;font:900 13px/1 "Segoe UI",Arial,sans-serif;cursor:pointer;user-select:none;
+          box-shadow:0 10px 30px rgba(0,0,0,.48),0 0 0 1px rgba(14,165,233,.15),0 0 22px rgba(14,165,233,.18);
+        }
+        .suite-suggestion-button:hover{filter:brightness(1.08);border-color:rgba(125,211,252,.58);}
+        .suite-suggestion-button:active{cursor:grabbing;transform:translateY(1px);}
+        .suite-suggestion-modal{
+          position:fixed;inset:4vh 3vw;z-index:100000;display:none;flex-direction:column;
+          background:linear-gradient(180deg,rgba(8,20,38,.98),rgba(7,16,30,.97));
+          border:1px solid rgba(56,189,248,.34);border-radius:14px;
+          box-shadow:0 24px 90px rgba(0,0,0,.72),0 0 28px rgba(14,165,233,.14);
+          color:#e0f2fe;overflow:hidden;overscroll-behavior:contain;font-family:"Segoe UI",Arial,sans-serif;
+        }
+        .suite-suggestion-modal.is-open{display:flex}
+        .suite-suggestion-topbar{
+          display:grid;grid-template-columns:1fr auto;align-items:center;gap:12px;
+          padding:13px 15px;background:linear-gradient(135deg,rgba(14,116,144,.42),rgba(15,23,42,.92));
+          border-bottom:1px solid rgba(56,189,248,.24);
+        }
+        .suite-suggestion-title{font-size:16px;font-weight:950;color:#f8fafc;text-shadow:0 0 14px rgba(14,165,233,.18);}
+        .suite-suggestion-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px}
+        .suite-suggestion-tab,.suite-suggestion-refresh,.suite-suggestion-close{
+          border:1px solid rgba(56,189,248,.28);background:rgba(15,23,42,.82);color:#dbeafe;
+          border-radius:9px;min-height:31px;padding:6px 10px;font:850 12px/1 "Segoe UI",Arial,sans-serif;
+          cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.04);
+        }
+        .suite-suggestion-refresh:hover,.suite-suggestion-close:hover,.suite-suggestion-tab:hover{background:rgba(30,64,175,.38);border-color:rgba(125,211,252,.46);}
+        .suite-suggestion-rankbar{display:flex;align-items:center;justify-content:center;padding:9px 14px;background:rgba(8,20,38,.72);border-bottom:1px solid rgba(56,189,248,.18);}
+        .suite-suggestion-tabs{display:flex;justify-content:center;gap:7px;flex-wrap:wrap}
+        .suite-suggestion-tab{min-width:42px}
+        .suite-suggestion-tab.is-active{
+          background:linear-gradient(180deg,#0891b2,#0e7490);color:#ecfeff;border-color:#22d3ee;
+          box-shadow:0 0 0 1px rgba(34,211,238,.18),0 0 16px rgba(8,145,178,.34);
+        }
+        .suite-suggestion-meta{padding:8px 15px;border-bottom:1px solid rgba(56,189,248,.14);background:rgba(7,16,30,.9);font-size:12px;color:#93c5fd}
+        .suite-suggestion-grid{padding:15px;overflow:auto;display:grid;grid-template-columns:repeat(auto-fill,160px);justify-content:center;align-content:start;gap:15px 14px;overscroll-behavior:contain}
+        .suite-suggestion-card{min-width:0;width:160px}
+        .suite-suggestion-img{display:block;width:100%;border-radius:9px;border:1px solid rgba(56,189,248,.22);background:#071629;box-shadow:0 8px 22px rgba(0,0,0,.38)}
+        .suite-suggestion-author,
+        .suite-author-badge{
+          display:flex;align-items:center;justify-content:center;box-sizing:border-box;margin-top:7px;padding:4px 8px;
+          min-height:25px;border-radius:8px;border:1px solid rgba(56,189,248,.26);
+          background:linear-gradient(180deg,rgba(8,47,73,.92),rgba(15,23,42,.94));
+          color:#e0f2fe;font:850 12px/1.25 "Segoe UI",Arial,sans-serif;text-align:center;white-space:nowrap;overflow:hidden;
+          box-shadow:0 0 0 1px rgba(14,165,233,.14),0 0 14px rgba(14,165,233,.16);
+        }
+        .suite-suggestion-author a,.suite-author-badge a{color:#eff6ff;text-decoration:none;border-bottom:1px solid rgba(239,246,255,.58);overflow:hidden;text-overflow:ellipsis}
+        .suite-suggestion-empty{grid-column:1/-1;margin:auto;padding:36px 16px;color:#93c5fd;font:850 14px "Segoe UI",Arial,sans-serif;text-align:center}
+        .suite-author-badge.suite-pending{border-color:rgba(148,163,184,.26);background:linear-gradient(180deg,rgba(30,41,59,.92),rgba(15,23,42,.94));color:#e5e7eb}
+        .suite-author-badge.suite-not-found{border-color:rgba(248,113,113,.52);background:linear-gradient(180deg,rgba(127,29,29,.92),rgba(69,10,10,.94));color:#fee2e2}
+        .suite-author-badge.suite-created-badge{width:100%;max-width:190px;margin-left:auto;margin-right:auto}
+        .suite-author-badge.suite-replace-badge{width:100%;max-width:none;margin-left:0;margin-right:0;flex:0 0 100%;grid-column:1/-1}
+        .suite-author-badge__label{flex:0 0 auto;min-width:max-content;white-space:nowrap}
+        .suite-author-badge__name{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      `;
+      document.head.appendChild(style);
+    }
+
+    function setupDraggableSuggestionButton(button){
+      const cache = loadCache();
+      const saved = cache.suggestionButtonPosition;
+      if(saved && Number.isFinite(saved.x)){
+        const rect = button.getBoundingClientRect();
+        const left = Math.max(0, Math.min(saved.x, window.innerWidth - rect.width));
+        const bottom = Number.isFinite(saved.bottom)
+          ? Math.max(0, Math.min(saved.bottom, window.innerHeight - rect.height))
+          : 18;
+        button.style.left = left + 'px';
+        button.style.bottom = bottom + 'px';
+        button.style.right = 'auto';
+        button.style.top = 'auto';
+      }
+
+      let dragging = false;
+      let moved = false;
+      let startX = 0;
+      let startY = 0;
+      let startLeft = 0;
+      let startBottom = 0;
+      on(button, 'mousedown', event => {
+        if(event.button !== 0) return;
+        const rect = button.getBoundingClientRect();
+        dragging = true;
+        moved = false;
+        startX = event.clientX;
+        startY = event.clientY;
+        startLeft = rect.left;
+        startBottom = window.innerHeight - rect.bottom;
+        button.style.left = startLeft + 'px';
+        button.style.bottom = startBottom + 'px';
+        button.style.right = 'auto';
+        button.style.top = 'auto';
+        button.style.transition = 'none';
+        event.preventDefault();
+      });
+      on(document, 'mousemove', event => {
+        if(!dragging) return;
+        const dx = event.clientX - startX;
+        const dy = event.clientY - startY;
+        if(Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
+        const newLeft = Math.max(0, Math.min(window.innerWidth - button.offsetWidth, startLeft + dx));
+        const newBottom = Math.max(0, Math.min(window.innerHeight - button.offsetHeight, startBottom - dy));
+        button.style.left = newLeft + 'px';
+        button.style.bottom = newBottom + 'px';
+        button.style.right = 'auto';
+        button.style.top = 'auto';
+        event.preventDefault();
+      });
+      on(document, 'mouseup', () => {
+        if(!dragging) return;
+        dragging = false;
+        button.style.transition = '';
+        const nextCache = loadCache();
+        nextCache.suggestionButtonPosition = {
+          x:parseFloat(button.style.left) || 18,
+          bottom:parseFloat(button.style.bottom) || 18
+        };
+        saveCache(nextCache);
+      });
+      on(button, 'click', event => {
+        if(moved){
+          moved = false;
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+        openModal();
+      });
+    }
+
+    function lockModalScroll(modal){
+      on(modal, 'wheel', event => {
+        const grid = event.target.closest?.('.suite-suggestion-grid');
+        if(!grid || !modal.contains(grid)){
+          event.preventDefault();
+          return;
+        }
+        const maxScroll = grid.scrollHeight - grid.clientHeight;
+        if(maxScroll <= 0){
+          event.preventDefault();
+          return;
+        }
+        const atTop = grid.scrollTop <= 0;
+        const atBottom = grid.scrollTop >= maxScroll - 1;
+        if((event.deltaY < 0 && atTop) || (event.deltaY > 0 && atBottom)) event.preventDefault();
+      }, { passive:false });
+    }
+
+    function ensureUi(){
+      if(document.getElementById('suite-suggestion-authors-button')) return;
+      const button = document.createElement('button');
+      button.id = 'suite-suggestion-authors-button';
+      button.className = 'suite-suggestion-button';
+      button.textContent = '📬 Предложка';
+      document.body.appendChild(button);
+      setupDraggableSuggestionButton(button);
+
+      const modal = document.createElement('div');
+      modal.id = 'suite-suggestion-authors-modal';
+      modal.className = 'suite-suggestion-modal';
+      modal.innerHTML = `
+        <div class="suite-suggestion-topbar">
+          <div class="suite-suggestion-title">Предложка</div>
+          <div class="suite-suggestion-actions">
+            <button class="suite-suggestion-refresh" type="button">Обновить</button>
+            <button class="suite-suggestion-close" type="button">Закрыть</button>
+          </div>
+        </div>
+        <div class="suite-suggestion-rankbar">
+          <div class="suite-suggestion-tabs">${RANKS.map(rank => `<button class="suite-suggestion-tab" type="button" data-rank="${rank}">${rank ? rank.toUpperCase() : 'Все'}</button>`).join('')}</div>
+        </div>
+        <div class="suite-suggestion-meta"></div>
+        <div class="suite-suggestion-grid"></div>
+      `;
+      on(modal.querySelector('.suite-suggestion-close'), 'click', () => modal.classList.remove('is-open'));
+      on(modal.querySelector('.suite-suggestion-refresh'), 'click', () => refreshSuggestions(true));
+      modal.querySelectorAll('.suite-suggestion-tab').forEach(tab => {
+        on(tab, 'click', () => {
+          const cache = loadCache();
+          cache.rank = tab.dataset.rank || '';
+          saveCache(cache);
+          renderSuggestions();
+        });
+      });
+      lockModalScroll(modal);
+      document.body.appendChild(modal);
+    }
+
+    function openModal(){
+      document.getElementById('suite-suggestion-authors-modal')?.classList.add('is-open');
+      renderSuggestions();
+      maybeRefreshSuggestions();
+    }
+    async function maybeRefreshSuggestions(){
+      const cache = loadCache();
+      if(cache.lastHourKey !== currentHourKey()) await refreshSuggestions(false);
+    }
+    function setMeta(text){
+      const meta = document.querySelector('.suite-suggestion-meta');
+      if(meta) meta.textContent = text;
+    }
+    async function refreshSuggestions(manual){
+      const cache = loadCache();
+      if(manual && cache.lastManualRefreshAt && now() - cache.lastManualRefreshAt < MANUAL_REFRESH_COOLDOWN_MS){
+        const left = Math.ceil((MANUAL_REFRESH_COOLDOWN_MS - (now() - cache.lastManualRefreshAt)) / 1000);
+        setMeta('Ручное обновление будет доступно через ' + left + ' сек.');
+        return;
+      }
+      setMeta('Обновляю...');
+      try{
+        const json = await apiGet('/api/suggestions?limit=200');
+        const oldIds = new Set((cache.cards || []).map(card => String(card.card_id || card.cardId)));
+        const cards = (json.cards || []).sort((a, b) => Number(b.card_id) - Number(a.card_id));
+        const unread = cards.filter(card => !oldIds.has(String(card.card_id))).map(card => String(card.card_id));
+        cache.cards = cards;
+        cache.unreadIds = [...new Set([...(cache.unreadIds || []), ...unread])];
+        cache.lastFetchedAt = now();
+        cache.lastHourKey = currentHourKey();
+        if(manual) cache.lastManualRefreshAt = now();
+        saveCache(cache);
+        renderSuggestions();
+      }catch(error){
+        setMeta('Сервер недоступен, показан кэш: ' + error.message);
+      }
+    }
+
+    function renderSuggestions(){
+      const cache = loadCache();
+      const savedRank = String(cache.rank || '').toLowerCase();
+      const rank = RANKS.includes(savedRank) ? savedRank : DEFAULT_RANK;
+      const modal = document.getElementById('suite-suggestion-authors-modal');
+      if(!modal) return;
+      modal.querySelectorAll('.suite-suggestion-tab').forEach(tab => tab.classList.toggle('is-active', tab.dataset.rank === rank));
+      const cards = (cache.cards || [])
+        .filter(card => !rank || String(card.rank || '').toLowerCase() === rank)
+        .sort((a, b) => Number(b.card_id) - Number(a.card_id));
+      const grid = modal.querySelector('.suite-suggestion-grid');
+      grid.innerHTML = cards.length ? cards.map(card => {
+        const author = card.author || '';
+        return `
+          <div class="suite-suggestion-card" data-card-id="${escapeHtml(card.card_id)}">
+            <img class="suite-suggestion-img" decoding="async" src="${escapeHtml(abs(card.image || card.image_url))}" alt="${escapeHtml(card.name || '')}">
+            <div class="suite-suggestion-author">Автор:&nbsp;<a href="${escapeHtml(abs('/user/' + encodeURIComponent(author) + '/'))}" target="_blank" rel="noopener noreferrer">${escapeHtml(author)}</a></div>
+          </div>`;
+      }).join('') : '<div class="suite-suggestion-empty">' + (rank ? 'Карт этого ранга пока нет' : 'Карт пока нет') + '</div>';
+      const date = cache.lastFetchedAt ? new Date(cache.lastFetchedAt).toLocaleString() : 'нет данных';
+      setMeta(`Карт: ${cards.length}. Обновлено: ${date}`);
+      document.getElementById('suite-suggestion-authors-button')?.removeAttribute('data-new');
+    }
+
+    function renderBadge(badge, { label, author, status }){
+      badge.classList.toggle('suite-pending', !author && status !== 'not_found');
+      badge.classList.toggle('suite-not-found', status === 'not_found');
+      if(author){
+        badge.innerHTML = '<span class="suite-author-badge__label">' + escapeHtml(label) + ':&nbsp;</span><a class="suite-author-badge__name" href="' + escapeHtml(abs('/user/' + encodeURIComponent(author) + '/')) + '" title="' + escapeHtml(author) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(author) + '</a>';
+      }else if(status === 'not_found'){
+        badge.textContent = label + ': не найдено';
+      }else{
+        badge.textContent = label + ': ищу';
+      }
+    }
+    function ensureCreatedBadge(card, options = {}){
+      const host = card?.closest('.anime-cards__item-wrapper,.anime-cards__item-wrapper-gl') || card?.parentElement;
+      if(!host) return null;
+      const cached = getCachedAuthorResult(card.dataset.id);
+      const label = options.label || 'Автор';
+      const author = options.author ?? cached?.author ?? '';
+      const status = options.status ?? cached?.status ?? '';
+      let badge = host.querySelector(':scope > .suite-author-badge.suite-server-author.suite-created-badge');
+      if(!badge){
+        badge = document.createElement('div');
+        badge.className = 'suite-author-badge suite-server-author suite-created-badge';
+        if(card.parentElement === host) card.insertAdjacentElement('afterend', badge);
+        else host.insertBefore(badge, host.querySelector('.card-votes') || null);
+      }else if(badge.previousElementSibling !== card && card.parentElement === host){
+        card.insertAdjacentElement('afterend', badge);
+      }
+      renderBadge(badge, { label, author, status });
+      return badge;
+    }
+    function ensureBadgeAfter(parent, afterNode, options){
+      if(!parent) return null;
+      const label = options?.label || 'Автор';
+      const author = options?.author || '';
+      const status = options?.status || '';
+      const className = options?.className || 'suite-replace-badge';
+      let badge = parent.querySelector(':scope > .suite-author-badge.suite-server-author.' + className);
+      if(!badge){
+        badge = document.createElement('div');
+        badge.className = 'suite-author-badge suite-server-author ' + className;
+        if(afterNode && afterNode.parentElement === parent) afterNode.insertAdjacentElement('afterend', badge);
+        else parent.appendChild(badge);
+      }
+      renderBadge(badge, { label, author, status });
+      return badge;
+    }
+
+    async function refreshCardsAuthors(){
+      if(!isCardsPage()) return false;
+      const keys = collectCardsPageKeys();
+      if(!keys.length) return true;
+      getCreatedCards().forEach(card => ensureCreatedBadge(card));
+      document.querySelectorAll('.card-replace-vote').forEach(item => {
+        const compare = item.querySelector('.card-replace-vote__compare,.card-replace-vote__cards');
+        const cached = getCachedAuthorResult(replacementKey(item));
+        ensureBadgeAfter(item, compare, { label:'Замена', author:cached?.author, status:cached?.status, className:'suite-replace-badge' });
+      });
+      try{
+        const json = await apiGet('/api/results?keys=' + encodeURIComponent(keys.join(',')));
+        saveAuthorResults(json.results || []);
+        const byKey = new Map((json.results || []).map(row => [row.task_key, row]));
+        let hasPending = false;
+        getCreatedCards().forEach(card => {
+          const result = byKey.get(card.dataset.id) || getCachedAuthorResult(card.dataset.id);
+          if(!result || (!result.author && result.status !== 'not_found')) hasPending = true;
+          ensureCreatedBadge(card, { label:'Автор', author:result?.author, status:result?.status });
+        });
+        document.querySelectorAll('.card-replace-vote').forEach(item => {
+          const key = replacementKey(item);
+          const result = byKey.get(key) || getCachedAuthorResult(key);
+          if(!result || (!result.author && result.status !== 'not_found')) hasPending = true;
+          const compare = item.querySelector('.card-replace-vote__compare,.card-replace-vote__cards');
+          ensureBadgeAfter(item, compare, { label:'Замена', author:result?.author, status:result?.status, className:'suite-replace-badge' });
+        });
+        return hasPending;
+      }catch(e){
+        return true;
+      }
+    }
+
+    function startCardsAuthorsPolling(){
+      if(!isCardsPage() || state.cardsAuthorPollTimer || state.cardsAuthorRefreshRunning) return;
+      const run = async () => {
+        state.cardsAuthorRefreshRunning = true;
+        try{
+          const shouldContinue = await refreshCardsAuthors();
+          state.cardsAuthorPollTimer = null;
+          if(shouldContinue && isCardsPage()){
+            state.cardsAuthorPollTimer = setTimeout(run, CARDS_AUTHOR_POLL_MS);
+          }
+        }finally{
+          state.cardsAuthorRefreshRunning = false;
+        }
+      };
+      run();
+    }
+    function scheduleCardsAuthorsRefresh(delay = 250){
+      if(!isCardsPage()) return;
+      clearTimeout(state.cardsAuthorObserveTimer);
+      state.cardsAuthorObserveTimer = setTimeout(() => {
+        if(!state.cardsAuthorPollTimer) startCardsAuthorsPolling();
+      }, delay);
+    }
+    function startCardsAuthorsObserver(){
+      if(!isCardsPage() || state.cardsAuthorObserver || !document.body) return;
+      state.cardsAuthorObserver = new MutationObserver(() => scheduleCardsAuthorsRefresh(250));
+      state.cardsAuthorObserver.observe(document.body, { childList:true, subtree:true });
+    }
+
+    injectStyle();
+    ensureUi();
+    renderSuggestions();
+    maybeRefreshSuggestions();
+    startCardsAuthorsPolling();
+    startCardsAuthorsObserver();
+    state.intervals.push(setInterval(maybeRefreshSuggestions, HOUR_MS));
+  }
+
+  // ============================================================
+  //  АВТОЛУТ ГАЧИ КЛУБА
+  // ============================================================
+
+  function cleanupGachaAutoloot(){
+    const state = window.__suiteGachaAutolootState;
+    if(state){
+      try{ clearInterval(state.retryTimer); }catch(e){}
+      try{ clearTimeout(state.scheduleTimer); }catch(e){}
+      try{ clearInterval(state.lockRenewTimer); }catch(e){}
+      (state.intervals || []).forEach(timer => { try{ clearInterval(timer); }catch(e){} });
+      (state.listeners || []).forEach(item => {
+        try{ item.target.removeEventListener(item.type, item.handler, item.options); }catch(e){}
+      });
+      try{ state.releaseTabLock?.(); }catch(e){}
+      try{ state.gachaFrame?.remove(); }catch(e){}
+    }
+    document.getElementById('suite-gacha-autoloot-style')?.remove();
+    document.querySelectorAll('.suite-gacha-title-tools,.suite-gacha-modal').forEach(el=>el.remove());
+    window.__suiteGachaAutolootState = null;
+    window.__suiteGachaAutolootInstalled = false;
+  }
+
+  function initGachaAutoloot(){
+    if(!cfg.modGachaAutoloot) return;
+    if(window.__suiteGachaAutolootInstalled) return;
+    if(window.top && window.top !== window) return;
+    window.__suiteGachaAutolootInstalled = true;
+
+    const STORAGE_PREFIX = 'suite_gacha_autoloot_v1_';
+    const MOSCOW_TZ = 'Europe/Moscow';
+    const CHECK_HOUR = 21;
+    const CHECK_MINUTE = 6;
+    const RETRY_DELAY_MS = 5000;
+    const AFTER_POST_DELAY_MS = 2200;
+    const DEFAULT_CLUB_PATH = '/clubs/2/';
+    const LOCK_TTL_MS = 15000;
+    const LOCK_RENEW_MS = 5000;
+    const TAB_ID_KEY = 'suite_gacha_autoloot_tab_id';
+    const REWARDS = [
+      { id:'Card_a', label:'Карта A' },
+      { id:'Card_b', label:'Карта B' },
+      { id:'Card_c', label:'Карта C' },
+      { id:'Card_d', label:'Карта D' },
+      { id:'Card_e', label:'Карта E' },
+      { id:'Coins', label:'Монеты' },
+      { id:'Exp', label:'Опыт' },
+      { id:'Stars', label:'Звезды' },
+      { id:'Stone', label:'Камень' },
+    ];
+    const state = {
+      retryTimer:null,
+      scheduleTimer:null,
+      isRunning:false,
+      gachaFrame:null,
+      gachaFrameLoadPromise:null,
+      lockRenewTimer:null,
+      intervals:[],
+      listeners:[],
+      releaseTabLock:null
+    };
+    window.__suiteGachaAutolootState = state;
+
+    const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+    const storageKey = name => `${STORAGE_PREFIX}${name}`;
+    const on = (target, type, handler, options) => {
+      target.addEventListener(type, handler, options);
+      state.listeners.push({ target, type, handler, options });
+    };
+    const TAB_ID = (() => {
+      const saved = sessionStorage.getItem(TAB_ID_KEY);
+      if(saved) return saved;
+      const next = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      sessionStorage.setItem(TAB_ID_KEY, next);
+      return next;
+    })();
+
+    function getStoredJson(name, fallback){
+      try{
+        const raw = GM_getValue(storageKey(name), null);
+        return raw ? JSON.parse(raw) : fallback;
+      }catch(error){
+        console.warn('[Suite Gacha] Не удалось прочитать настройки:', error);
+        return fallback;
+      }
+    }
+    function setStoredJson(name, value){ GM_setValue(storageKey(name), JSON.stringify(value)); }
+    function getRewardSettings(){
+      const saved = getStoredJson('reward_settings', {});
+      const settings = {};
+      for(const reward of REWARDS) settings[reward.id] = saved[reward.id] !== false;
+      return settings;
+    }
+    function saveRewardSettings(settings){ setStoredJson('reward_settings', settings); }
+
+    function getMoscowParts(date = new Date()){
+      const parts = new Intl.DateTimeFormat('en-CA', {
+        timeZone:MOSCOW_TZ,
+        year:'numeric',
+        month:'2-digit',
+        day:'2-digit',
+        hour:'2-digit',
+        minute:'2-digit',
+        second:'2-digit',
+        hour12:false
+      }).formatToParts(date);
+      const data = Object.fromEntries(parts.map(part => [part.type, part.value]));
+      return {
+        dateKey:`${data.year}-${data.month}-${data.day}`,
+        hour:Number(data.hour),
+        minute:Number(data.minute),
+        second:Number(data.second)
+      };
+    }
+    function hasMoscowTimeReached(){
+      const now = getMoscowParts();
+      return now.hour > CHECK_HOUR || (now.hour === CHECK_HOUR && now.minute >= CHECK_MINUTE);
+    }
+    function getMsUntilNextMoscowCheck(){
+      const now = getMoscowParts();
+      const nowSeconds = now.hour * 3600 + now.minute * 60 + now.second;
+      const targetSeconds = CHECK_HOUR * 3600 + CHECK_MINUTE * 60;
+      const secondsUntil = targetSeconds > nowSeconds ? targetSeconds - nowSeconds : 24 * 3600 - nowSeconds + targetSeconds;
+      return secondsUntil * 1000;
+    }
+    function getTodayKey(){ return getMoscowParts().dateKey; }
+    function getDailyState(){ return getStoredJson('daily_state', {}); }
+    function setDailyState(value){ setStoredJson('daily_state', value); }
+    function getTabLock(){ return getStoredJson('tab_lock', null); }
+    function setTabLock(value){ setStoredJson('tab_lock', value); }
+    function setStatus(text){ console.log(`[Suite Gacha] ${text}`); }
+    function notify(type, message){
+      try{
+        const push = getPageWindow().DLEPush;
+        if(push && typeof push[type] === 'function') push[type](message);
+        else if(typeof push === 'function') push(type, message);
+      }catch(e){}
+    }
+
+    function startLockRenewal(){
+      if(state.lockRenewTimer) return;
+      state.lockRenewTimer = setInterval(() => {
+        if(document.hidden){
+          releaseTabLock();
+          return;
+        }
+        const lock = getTabLock();
+        if(lock?.owner === TAB_ID){
+          setTabLock({ ...lock, expiresAt:Date.now() + LOCK_TTL_MS, updatedAt:new Date().toISOString(), url:location.href });
+        }
+      }, LOCK_RENEW_MS);
+    }
+    function acquireTabLock(){
+      if(document.hidden){
+        setStatus('Эта вкладка не активна, автолут здесь не запускаю.');
+        return false;
+      }
+      const now = Date.now();
+      const lock = getTabLock();
+      if(lock && lock.owner !== TAB_ID && Number(lock.expiresAt) > now){
+        setStatus('Автолут уже активен в другой вкладке AnimeSSS.');
+        return false;
+      }
+      setTabLock({ owner:TAB_ID, expiresAt:now + LOCK_TTL_MS, updatedAt:new Date().toISOString(), url:location.href });
+      const acquired = getTabLock()?.owner === TAB_ID;
+      if(acquired) startLockRenewal();
+      return acquired;
+    }
+    function releaseTabLock(){
+      const lock = getTabLock();
+      if(lock?.owner === TAB_ID){
+        setTabLock({ owner:null, expiresAt:0, updatedAt:new Date().toISOString() });
+      }
+      if(state.lockRenewTimer){
+        clearInterval(state.lockRenewTimer);
+        state.lockRenewTimer = null;
+      }
+    }
+    state.releaseTabLock = releaseTabLock;
+
+    function isTodayFinished(){
+      const daily = getDailyState();
+      return daily.dateKey === getTodayKey() && ['looted', 'skipped'].includes(daily.status);
+    }
+    function markToday(status, details = {}){
+      setDailyState({ dateKey:getTodayKey(), status, savedAt:new Date().toISOString(), ...details });
+    }
+    function parseNumber(text){
+      const match = String(text || '').replace(/\s+/g, '').match(/\d+/);
+      return match ? Number(match[0]) : null;
+    }
+    function parseLastNumber(text){
+      const matches = String(text || '').replace(/\s+/g, '').match(/\d+/g);
+      return matches?.length ? Number(matches[matches.length - 1]) : null;
+    }
+    function getUserHash(){
+      const pageWindow = getPageWindow();
+      const fromWindow = pageWindow.dle_login_hash || window.dle_login_hash;
+      if(fromWindow) return String(fromWindow);
+      const input = document.querySelector('input[name="user_hash"], input[name="dle_login_hash"]');
+      if(input?.value) return String(input.value);
+      const html = document.documentElement?.innerHTML || '';
+      const match = html.match(/(?:dle_login_hash|user_hash)["'\s:=]+([a-zA-Z0-9_-]{8,})/);
+      return match ? match[1] : '';
+    }
+    function getGachaResultText(data){
+      if(!data) return 'empty_response';
+      return data.status || data.message || data.text || data.error || JSON.stringify(data);
+    }
+    function isSuccessfulGachaResponse(data){
+      if(!data || typeof data !== 'object' || data.error) return false;
+      const status = String(data.status || '').toLowerCase();
+      if(!status) return false;
+      if(['no_reward', 'no', 'error', 'fail', 'failed', 'parse_error'].includes(status)) return false;
+      return status === 'ok' || status === 'success' || Boolean(data.reward_type) || Boolean(data.step);
+    }
+    async function postGachaReward(){
+      const userHash = getUserHash();
+      if(!userHash) throw new Error('user_hash not found');
+      const response = await fetch(`${location.origin}/gacha_reward/`, {
+        method:'POST',
+        credentials:'include',
+        headers:{
+          'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8',
+          'X-Requested-With':'XMLHttpRequest',
+          'Accept':'application/json, text/javascript, */*; q=0.01'
+        },
+        body:new URLSearchParams({ user_hash:userHash }).toString()
+      });
+      if(!response.ok) throw new Error(`HTTP ${response.status}`);
+      const text = await response.text();
+      try{ return JSON.parse(text); }
+      catch(error){ return { status:'parse_error', text:text || error.message }; }
+    }
+
+    function getClubPath(){
+      return DEFAULT_CLUB_PATH;
+    }
+    function getCurrentExp(doc = document){
+      const levelInfoNodes = [...doc.querySelectorAll('.nclub-enter__lvl-info')];
+      for(const node of levelInfoNodes){
+        const text = node.textContent || '';
+        if(text.includes('/') && /опыта/i.test(text)){
+          const value = parseLastNumber(text.split('/')[0]);
+          if(Number.isFinite(value)) return value;
+        }
+      }
+      const rewards = doc.querySelector('.club__rewards');
+      const fromDataset = parseNumber(rewards?.dataset?.enlightenment);
+      return Number.isFinite(fromDataset) ? fromDataset : null;
+    }
+    function getGachaBlock(doc = document){
+      return [...doc.querySelectorAll('.club__block')].find(block => {
+        const title = block.querySelector('.club__title');
+        return /Бесконечная\s+гача\s+наград/i.test(title?.textContent || '');
+      });
+    }
+    function getRewardType(item){
+      const image = item?.querySelector('[class*="club__rewards-item-image--"]');
+      const match = String(image?.className || '').match(/club__rewards-item-image--([A-Za-z_]+)/);
+      return match ? match[1] : null;
+    }
+    function getFirstReward(doc = document){
+      const block = getGachaBlock(doc);
+      const first = block?.querySelector('.club__rewards-item');
+      if(!first) return null;
+      return {
+        item:first,
+        type:getRewardType(first),
+        step:parseNumber(first.dataset.step),
+        need:parseNumber(first.dataset.need),
+        isAvailable:first.classList.contains('is-available'),
+        button:first.querySelector('#get-gacha-reward, [onclick*="GetGachaReward"]')
+      };
+    }
+    function stopRetrying(){
+      if(state.retryTimer){
+        clearInterval(state.retryTimer);
+        state.retryTimer = null;
+      }
+    }
+    function startRetrying(){
+      if(state.retryTimer || isTodayFinished()) return;
+      setStatus('Опыта пока не хватает, проверяю каждые 5 секунд.');
+      state.retryTimer = setInterval(() => runDailyCheck('retry'), RETRY_DELAY_MS);
+    }
+    function getFrameDocument(){
+      try{ return state.gachaFrame?.contentDocument || null; }
+      catch(error){
+        console.warn('[Suite Gacha] Нет доступа к фоновой странице клуба:', error);
+        return null;
+      }
+    }
+    function createHiddenGachaFrame(){
+      if(state.gachaFrame) return;
+      state.gachaFrame = document.createElement('iframe');
+      state.gachaFrame.id = 'suite-gacha-hidden-club-frame';
+      state.gachaFrame.title = 'AnimeSSS gacha background frame';
+      state.gachaFrame.style.cssText = 'position:fixed;width:1px;height:1px;left:-9999px;top:-9999px;opacity:0;pointer-events:none;border:0;';
+      document.documentElement.append(state.gachaFrame);
+    }
+    function loadGachaFrame(){
+      createHiddenGachaFrame();
+      const targetUrl = `${location.origin}${getClubPath()}`;
+      if(state.gachaFrame.src === targetUrl && getGachaBlock(getFrameDocument() || document)) return Promise.resolve(getFrameDocument());
+      if(state.gachaFrameLoadPromise) return state.gachaFrameLoadPromise;
+      state.gachaFrameLoadPromise = new Promise(resolve => {
+        const finish = () => {
+          state.gachaFrameLoadPromise = null;
+          resolve(getFrameDocument());
+        };
+        state.gachaFrame.addEventListener('load', finish, { once:true });
+        state.gachaFrame.src = targetUrl;
+        setTimeout(finish, 12000);
+      });
+      return state.gachaFrameLoadPromise;
+    }
+    async function fetchClubDocument(){
+      const response = await fetch(`${location.origin}${getClubPath()}`, { credentials:'include', cache:'no-store' });
+      const html = await response.text();
+      return new DOMParser().parseFromString(html, 'text/html');
+    }
+    async function getSnapshotDocument(){
+      if(getGachaBlock(document)) return document;
+      try{ return await fetchClubDocument(); }
+      catch(error){
+        console.warn('[Suite Gacha] Не удалось тихо прочитать страницу клуба, пробую iframe:', error);
+        const frameDoc = await loadGachaFrame();
+        return frameDoc || document;
+      }
+    }
+
+    async function runDailyCheck(reason = 'schedule'){
+      if(state.isRunning || isTodayFinished() || !cfg.modGachaAutoloot) return;
+      if(reason === 'schedule' && !hasMoscowTimeReached()) return;
+      if(!acquireTabLock()) return;
+      state.isRunning = true;
+      try{
+        const settings = getRewardSettings();
+        const snapshotDoc = await getSnapshotDocument();
+        const currentExp = getCurrentExp(snapshotDoc);
+        const reward = getFirstReward(snapshotDoc);
+        if(!reward){
+          setStatus('Первая гача не найдена. Подожду обновления страницы.');
+          return;
+        }
+        if(!Number.isFinite(currentExp) || !Number.isFinite(reward.need)){
+          setStatus('Не смог прочитать опыт или требование первой награды.');
+          return;
+        }
+        const rewardLabel = REWARDS.find(item => item.id === reward.type)?.label || reward.type || 'неизвестная награда';
+        if(currentExp < reward.need){
+          markToday('waiting', { currentExp, need:reward.need, step:reward.step, rewardType:reward.type });
+          startRetrying();
+          return;
+        }
+        if(!reward.type || settings[reward.type] === false){
+          stopRetrying();
+          markToday('skipped', { currentExp, need:reward.need, step:reward.step, rewardType:reward.type });
+          setStatus(`Сегодня пропуск: ${rewardLabel} выключена в выборе наград.`);
+          return;
+        }
+        if(!reward.isAvailable){
+          setStatus('Опыт хватает, но первая награда еще не стала доступной.');
+          startRetrying();
+          return;
+        }
+        setStatus(`Лутаю первую награду: ${rewardLabel}, шаг ${reward.step}.`);
+        const response = await postGachaReward();
+        const responseText = getGachaResultText(response);
+        await sleep(AFTER_POST_DELAY_MS);
+        if(!isSuccessfulGachaResponse(response)){
+          markToday('waiting', { currentExp, need:reward.need, step:reward.step, rewardType:reward.type, serverResponse:responseText });
+          setStatus(`Сервер не выдал гачу: ${responseText}. Продолжаю проверять.`);
+          startRetrying();
+          return;
+        }
+        stopRetrying();
+        markToday('looted', {
+          lootedCount:1,
+          currentExp,
+          need:reward.need,
+          step:reward.step,
+          rewardType:reward.type,
+          serverRewardType:response.reward_type || null,
+          serverStep:response.step || null,
+          serverResponse:responseText
+        });
+        notify('success', responseText);
+      }catch(error){
+        const message = error?.message || String(error);
+        markToday('waiting', { error:message });
+        setStatus(`Ошибка автолута гачи: ${message}. Продолжаю проверять.`);
+        startRetrying();
+      }finally{
+        state.isRunning = false;
+        releaseTabLock();
+      }
+    }
+    function scheduleNextCheck(){
+      if(state.scheduleTimer) clearTimeout(state.scheduleTimer);
+      const delay = getMsUntilNextMoscowCheck();
+      state.scheduleTimer = setTimeout(() => {
+        runDailyCheck('schedule');
+        scheduleNextCheck();
+      }, Math.max(1000, delay));
+    }
+
+    function injectStyles(){
+      if(document.getElementById('suite-gacha-autoloot-style')) return;
+      const style = document.createElement('style');
+      style.id = 'suite-gacha-autoloot-style';
+      style.textContent = `
+        .club__title:has(.suite-gacha-title-tools){display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;box-sizing:border-box;}
+        .suite-gacha-title-tools{display:inline-flex;align-items:center;gap:10px;margin-left:auto;vertical-align:middle;}
+        .suite-gacha-settings-btn{
+          border:1px solid rgba(56,189,248,.36);border-radius:10px;padding:7px 11px;
+          color:#e0f2fe;background:linear-gradient(135deg,rgba(8,47,73,.92),rgba(15,23,42,.92));
+          cursor:pointer;font:850 12px/1 "Segoe UI",Arial,sans-serif;
+          box-shadow:0 0 0 1px rgba(14,165,233,.12),0 0 16px rgba(14,165,233,.14);
+        }
+        .suite-gacha-settings-btn:hover{filter:brightness(1.08);border-color:rgba(125,211,252,.55);}
+        .suite-gacha-modal{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(2,6,23,.66);font-family:"Segoe UI",Arial,sans-serif;}
+        .suite-gacha-dialog{
+          width:min(380px,100%);border:1px solid rgba(56,189,248,.34);border-radius:14px;padding:0;overflow:hidden;
+          color:#e0f2fe;background:linear-gradient(180deg,rgba(8,20,38,.98),rgba(7,16,30,.96));
+          box-shadow:0 24px 80px rgba(0,0,0,.58),0 0 28px rgba(14,165,233,.14);
+        }
+        .suite-gacha-dialog__head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 15px;background:linear-gradient(135deg,rgba(14,116,144,.42),rgba(15,23,42,.92));border-bottom:1px solid rgba(56,189,248,.22);}
+        .suite-gacha-dialog__title{font-size:16px;font-weight:950;color:#f8fafc;}
+        .suite-gacha-close{width:32px;height:32px;border-radius:9px;border:1px solid rgba(56,189,248,.24);color:#dbeafe;background:rgba(15,23,42,.72);cursor:pointer;font-size:20px;line-height:1;}
+        .suite-gacha-close:hover{background:rgba(30,64,175,.38);border-color:rgba(125,211,252,.46);}
+        .suite-gacha-reward-list{display:grid;gap:7px;padding:13px 15px 15px;}
+        .suite-gacha-reward-row{
+          display:flex;align-items:center;justify-content:space-between;gap:12px;border-radius:10px;padding:9px 10px;
+          border:1px solid rgba(56,189,248,.13);background:rgba(8,47,73,.28);cursor:pointer;color:#dbeafe;font-size:13px;font-weight:750;
+        }
+        .suite-gacha-reward-row:hover{background:rgba(14,116,144,.24);border-color:rgba(56,189,248,.26);}
+      `;
+      document.head.append(style);
+    }
+
+    function createRewardPanel(){
+      const existing = document.querySelector('.suite-gacha-modal');
+      if(existing){
+        existing.remove();
+        return;
+      }
+      const settings = getRewardSettings();
+      const backdrop = document.createElement('div');
+      backdrop.className = 'suite-gacha-modal';
+      backdrop.innerHTML = `
+        <div class="suite-gacha-dialog" role="dialog" aria-modal="true">
+          <div class="suite-gacha-dialog__head">
+            <div class="suite-gacha-dialog__title">Выбор награды</div>
+            <button type="button" class="suite-gacha-close" aria-label="Закрыть">×</button>
+          </div>
+          <div class="suite-gacha-reward-list"></div>
+        </div>
+      `;
+      const list = backdrop.querySelector('.suite-gacha-reward-list');
+      for(const reward of REWARDS){
+        const row = document.createElement('label');
+        row.className = 'suite-gacha-reward-row';
+        row.innerHTML = `
+          <span>${reward.label}</span>
+          <label class="suite-toggle">
+            <input type="checkbox" data-reward="${reward.id}" ${settings[reward.id] ? 'checked' : ''}>
+            <span class="suite-slider"></span>
+          </label>
+        `;
+        list.append(row);
+      }
+      on(backdrop, 'click', event => {
+        if(event.target === backdrop || event.target.closest('.suite-gacha-close')) backdrop.remove();
+      });
+      on(backdrop, 'change', event => {
+        const checkbox = event.target.closest('input[data-reward]');
+        if(!checkbox) return;
+        const nextSettings = getRewardSettings();
+        nextSettings[checkbox.dataset.reward] = checkbox.checked;
+        saveRewardSettings(nextSettings);
+        setStatus('Выбор наград сохранен.');
+      });
+      document.body.append(backdrop);
+    }
+
+    function injectControls(){
+      if(!/^\/clubs\/\d+\/?/.test(location.pathname)) return false;
+      const block = getGachaBlock(document);
+      const title = block?.querySelector('.club__title');
+      if(!title || title.querySelector('.suite-gacha-title-tools')) return false;
+      injectStyles();
+      title.style.display = 'flex';
+      title.style.alignItems = 'center';
+      title.style.justifyContent = 'space-between';
+      title.style.gap = '12px';
+      title.style.width = '100%';
+      title.style.boxSizing = 'border-box';
+      const tools = document.createElement('span');
+      tools.className = 'suite-gacha-title-tools';
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'suite-gacha-settings-btn';
+      button.textContent = 'Выбор награды';
+      on(button, 'click', createRewardPanel);
+      tools.append(button);
+      title.append(tools);
+      return true;
+    }
+
+    injectStyles();
+    injectControls();
+    scheduleNextCheck();
+    if(hasMoscowTimeReached() && !isTodayFinished()) runDailyCheck('schedule');
+    if(/^\/clubs\/\d+\/?/.test(location.pathname)) state.intervals.push(setInterval(injectControls, 2000));
+    on(document, 'visibilitychange', () => {
+      if(document.hidden){
+        releaseTabLock();
+        return;
+      }
+      if(hasMoscowTimeReached() && !isTodayFinished()) runDailyCheck('visible-tab');
+    });
+  }
+
+  // ============================================================
   //  НАПОЛНЕНИЕ КИРПИЧА
   // ============================================================
 
@@ -3597,6 +4646,566 @@
     document.getElementById('cv-stones-style')?.remove();
     document.querySelectorAll('.cv-stones-panel,.cv-stones-floating-btn,.cv-stones-progress').forEach(el=>el.remove());
     window.__suiteStonesInstalled = false;
+  }
+
+  // ============================================================
+  //  АВТОЛУТ КАМНЯ ИЗ ЧАТА
+  // ============================================================
+
+  function cleanupChatStoneAutoloot(){
+    const state = window.__suiteChatStoneAutolootState;
+    if(state){
+      (state.timers || []).forEach(timer => { try{ clearInterval(timer); }catch(e){} });
+      try{ state.verifyTimer && clearTimeout(state.verifyTimer); }catch(e){}
+      try{ state.observer?.disconnect(); }catch(e){}
+      (state.listeners || []).forEach(id => { try{ GM_removeValueChangeListener(id); }catch(e){} });
+      (state.windowEvents || []).forEach(item => {
+        try{ window.removeEventListener(item.type, item.handler); }catch(e){}
+      });
+      try{ state.releaseLeader?.(); }catch(e){}
+    }
+    window.__suiteChatStoneAutolootState = null;
+    window.__suiteChatStoneAutolootInstalled = false;
+  }
+
+  function initChatStoneAutoloot(){
+    if(!cfg.modChatStoneAutoloot) return;
+    if(window.__suiteChatStoneAutolootInstalled) return;
+    window.__suiteChatStoneAutolootInstalled = true;
+
+    const uw = getPageWindow();
+    const TAB_ID = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const KEYS = {
+      lock:'suite_chat_stone_leader_lock_v1',
+      seen:'suite_chat_stone_seen_message_ids_v1',
+      history:'suite_chat_stone_history_v1',
+      verified:'suite_chat_stone_verified_transactions_v1',
+      baselineReady:'suite_chat_stone_transactions_baseline_ready_v1',
+      lastChatActivity:'suite_chat_stone_last_chat_activity_v1',
+      lastOnlinePing:'suite_chat_stone_last_online_ping_v1'
+    };
+    const LIMIT = 10;
+    const DEFAULTS = {
+      chatIdleMs:15000,
+      watchdogMs:3000,
+      onlinePingMs:60000,
+      queueIntervalMs:15000,
+      lockTtlMs:25000,
+      lockRenewMs:5000,
+      verifyDelayMs:3000,
+      rateLimitPauseMs:60000
+    };
+    const EMPTY_RESULT_RE = /(К сожалению\s+вы\s+опоздали|данный\s+камень\s+больше\s+не\s+активн|Тут\s+уже\s+пусто|приятного\s+просмотра)/i;
+    const state = {
+      accountKey:'site',
+      isLeader:false,
+      pausedUntil:0,
+      lastChatActivity:0,
+      seen:new Set(),
+      inFlight:new Set(),
+      queued:new Set(),
+      collectChain:Promise.resolve(),
+      queueSize:0,
+      observer:null,
+      timers:[],
+      listeners:[],
+      windowEvents:[],
+      verifyTimer:null,
+      ready:false,
+      releaseLeader:null
+    };
+    window.__suiteChatStoneAutolootState = state;
+
+    const log = (...args) => console.log('[Suite Chat Stone]', ...args);
+    const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+    const normalizeText = text => String(text || '').replace(/\s+/g, ' ').trim();
+    const rawKey = key => `suite-chat-stone:${location.host}:${key}`;
+    const scopedKey = key => `suite-chat-stone:${location.host}:${state.accountKey}:${key}`;
+    const getRaw = (key, fallback) => gmStoreGet(rawKey(key), fallback);
+    const setRaw = (key, value) => gmStoreSet(rawKey(key), value);
+    const delRaw = key => gmStoreDelete(rawKey(key));
+    const getScoped = (key, fallback) => gmStoreGet(scopedKey(key), fallback);
+    const setScoped = (key, value) => gmStoreSet(scopedKey(key), value);
+
+    function isEnabled(){ return !!cfg.modChatStoneAutoloot; }
+    function parseJson(text){ try{ return JSON.parse(text); }catch(e){ return null; } }
+
+    function getUserHash(){
+      const fromWindow = uw.dle_login_hash || window.dle_login_hash;
+      if(fromWindow) return String(fromWindow);
+      const input = document.querySelector('input[name="user_hash"], input[name="dle_login_hash"]');
+      if(input?.value) return String(input.value);
+      const html = document.documentElement?.innerHTML || '';
+      const match = html.match(/(?:dle_login_hash|user_hash)["'\s:=]+([a-zA-Z0-9_-]{8,})/);
+      return match ? match[1] : '';
+    }
+
+    function getAccountKey(){
+      const hash = getUserHash();
+      if(hash) return `hash_${hash.slice(0, 12)}`;
+      const nick = suiteGetCurrentUserName();
+      if(nick) return String(nick).replace(/[^\w.-]+/g, '_').slice(0, 40);
+      return 'site';
+    }
+
+    function toUrl(value){
+      try{
+        if(!value) return '';
+        if(typeof value === 'string') return new URL(value, location.origin).href;
+        if(value.url) return new URL(value.url, location.origin).href;
+        return new URL(String(value), location.origin).href;
+      }catch(e){ return String(value || ''); }
+    }
+
+    function bodyToString(body){
+      if(!body) return '';
+      if(typeof body === 'string') return body;
+      if(body instanceof URLSearchParams) return body.toString();
+      if(typeof FormData !== 'undefined' && body instanceof FormData){
+        return [...body.entries()].map(([key, value]) => `${key}=${value}`).join('&');
+      }
+      try{ return String(body); }catch(e){ return ''; }
+    }
+
+    function isMainChatUrl(url){
+      const href = String(url || '');
+      if(href.includes('animesss_chat_init') || href.includes('animesss_chat_load_new')){
+        return !href.includes('room_id=') || href.includes('room_id=main');
+      }
+      return href.includes('mod=light_chat') || href.includes('actions_chat');
+    }
+
+    function shouldIgnoreChatPayload(payload){ return String(payload || '').includes('page_id=club'); }
+    function isOnlinePingUrl(url){ return String(url || '').includes('online_in_cinema'); }
+    function resultText(data){
+      if(!data) return 'Нет ответа';
+      return String(data.text || data.message || data.error || JSON.stringify(data));
+    }
+    function isTerminalEmptyResult(data){ return EMPTY_RESULT_RE.test(resultText(data)); }
+
+    function notify(type, message){
+      log(message);
+      try{
+        const push = uw.DLEPush;
+        if(push && typeof push[type] === 'function') push[type](message);
+        else if(typeof push === 'function') push(type, message);
+      }catch(e){}
+    }
+
+    async function acquireLeader(){
+      if(!isEnabled()) return false;
+      const now = Date.now();
+      const visible = !document.hidden;
+      const lock = getRaw(KEYS.lock, null);
+      const expired = !lock || Number(lock.expiresAt || 0) <= now;
+      const ownLock = lock && lock.owner === TAB_ID;
+      const canPreferVisible = visible && lock && lock.visible === false;
+      if(expired || ownLock || canPreferVisible){
+        setRaw(KEYS.lock, { owner:TAB_ID, visible, updatedAt:now, expiresAt:now + DEFAULTS.lockTtlMs });
+        state.isLeader = true;
+        return true;
+      }
+      state.isLeader = false;
+      return false;
+    }
+
+    function renewLeader(){
+      if(!state.isLeader) return;
+      const lock = getRaw(KEYS.lock, null);
+      if(!lock || lock.owner !== TAB_ID){
+        state.isLeader = false;
+        return;
+      }
+      const now = Date.now();
+      setRaw(KEYS.lock, { owner:TAB_ID, visible:!document.hidden, updatedAt:now, expiresAt:now + DEFAULTS.lockTtlMs });
+    }
+
+    function releaseLeader(){
+      const lock = getRaw(KEYS.lock, null);
+      if(lock && lock.owner === TAB_ID) delRaw(KEYS.lock);
+      state.isLeader = false;
+    }
+    state.releaseLeader = releaseLeader;
+
+    function saveSeen(){
+      const list = [...state.seen].slice(-LIMIT);
+      state.seen = new Set(list);
+      setScoped(KEYS.seen, list);
+    }
+
+    function saveHistory(entry){
+      const history = getScoped(KEYS.history, []);
+      history.unshift(entry);
+      if(history.length > LIMIT) history.length = LIMIT;
+      setScoped(KEYS.history, history);
+    }
+
+    function markSeen(diamond, statusText, ok){
+      state.seen.add(diamond.messageId);
+      saveSeen();
+      saveHistory({
+        id:diamond.messageId,
+        code:diamond.code,
+        status:statusText,
+        ok:!!ok,
+        source:diamond.source,
+        chatTime:diamond.chatTime,
+        at:Date.now()
+      });
+    }
+
+    function extractChatTime(li, fallback = ''){
+      const text = normalizeText(li?.querySelector('.animesss-chat__date')?.textContent);
+      return text || fallback || '';
+    }
+
+    function extractDiamondsFromHtml(htmlString, source){
+      if(!htmlString || !String(htmlString).trim()) return [];
+      const doc = new DOMParser().parseFromString(`<div>${htmlString}</div>`, 'text/html');
+      const result = [];
+      for(const node of [...doc.querySelectorAll('#diamonds-chat')]){
+        const code = node.getAttribute('data-code');
+        if(!code) continue;
+        const item = node.closest('.animesss-chat__item');
+        const itemId = item?.getAttribute('data-id');
+        result.push({
+          code,
+          messageId:itemId || node.getAttribute('data-id') || `code:${code}`,
+          chatTime:extractChatTime(item),
+          source
+        });
+      }
+      return result;
+    }
+
+    async function analyzeChatHtml(htmlString, source = 'chat'){
+      if(!state.ready || !isEnabled()) return;
+      if(!state.isLeader) await acquireLeader();
+      if(!state.isLeader) return;
+      const diamonds = extractDiamondsFromHtml(htmlString, source);
+      for(const diamond of diamonds){
+        if(state.seen.has(diamond.messageId)) continue;
+        if(state.inFlight.has(diamond.messageId) || state.queued.has(diamond.messageId)) continue;
+        state.queued.add(diamond.messageId);
+        queueCollect(diamond);
+      }
+    }
+
+    function queueCollect(diamond){
+      state.queueSize += 1;
+      state.collectChain = state.collectChain
+        .then(() => collectDiamond(diamond))
+        .catch(error => log('Queue error:', error?.message || error))
+        .finally(() => {
+          state.queueSize = Math.max(0, state.queueSize - 1);
+          state.queued.delete(diamond.messageId);
+        });
+    }
+
+    async function postDiamond(code){
+      const userHash = getUserHash();
+      if(!userHash) throw new Error('Не найден user_hash');
+      const response = await fetch(`${location.origin}/ajax/find_diamond/`, {
+        method:'POST',
+        credentials:'same-origin',
+        headers:{
+          'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8',
+          'X-Requested-With':'XMLHttpRequest',
+          'Accept':'application/json, text/javascript, */*; q=0.01'
+        },
+        body:new URLSearchParams({ code, user_hash:userHash })
+      });
+      if(!response.ok) throw new Error(`HTTP ${response.status}`);
+      const text = await response.text();
+      return parseJson(text) || { text };
+    }
+
+    async function collectDiamond(diamond){
+      if(!isEnabled()) return;
+      if(state.inFlight.has(diamond.messageId) || state.seen.has(diamond.messageId)) return;
+      state.inFlight.add(diamond.messageId);
+      let data = null;
+      let text = 'Ошибка сети';
+      try{
+        data = await postDiamond(diamond.code);
+        text = resultText(data);
+
+        if((!data.text && !data.status && !data.message && !data.error) && !isTerminalEmptyResult(data)){
+          await sleep(DEFAULTS.queueIntervalMs);
+          data = await postDiamond(diamond.code);
+          text = resultText(data);
+        }
+
+        const ok = data.status === 'ok';
+        if(ok || data.status === 'no' || data.status === 'error' || data.error || isTerminalEmptyResult(data)){
+          markSeen(diamond, text, ok);
+        }
+        if(ok){
+          notify('success', `Камень собран: ${text}`);
+          scheduleTransactionVerification();
+        }
+      }catch(error){
+        text = error?.message || 'Ошибка сети';
+        log(`Collect failed for ${diamond.code}:`, text);
+      }finally{
+        state.inFlight.delete(diamond.messageId);
+        await sleep(DEFAULTS.queueIntervalMs);
+      }
+    }
+
+    async function fetchText(path){
+      const response = await fetch(new URL(path, location.origin).href, {
+        method:'GET',
+        credentials:'same-origin',
+        cache:'no-cache',
+        headers:{ 'Accept':'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' }
+      });
+      if(!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.text();
+    }
+
+    function extractStoneTransactions(html){
+      const doc = new DOMParser().parseFromString(html, 'text/html');
+      const rows = [...doc.querySelectorAll('.ncard-transactions__table tbody tr.new-tr-item')];
+      const found = [];
+      for(const row of rows){
+        const date = normalizeText(row.querySelector('td:nth-child(3)')?.textContent);
+        const desc = normalizeText(row.querySelector('td:nth-child(4)')?.textContent);
+        if(date && desc.includes('Найден небесный камень')) found.push(date);
+      }
+      return found;
+    }
+
+    async function createTransactionBaseline(){
+      if(getScoped(KEYS.baselineReady, false)) return;
+      try{
+        const html = await fetchText('/transactions/');
+        const verified = {};
+        extractStoneTransactions(html).forEach(date => { verified[date] = true; });
+        setScoped(KEYS.verified, verified);
+        setScoped(KEYS.baselineReady, true);
+      }catch(error){
+        log('Transaction baseline failed:', error?.message || error);
+      }
+    }
+
+    function scheduleTransactionVerification(){
+      if(state.verifyTimer) clearTimeout(state.verifyTimer);
+      state.verifyTimer = setTimeout(() => {
+        state.verifyTimer = null;
+        verifyTransactions();
+      }, DEFAULTS.verifyDelayMs);
+    }
+
+    async function verifyTransactions(){
+      if(!isEnabled()) return;
+      try{
+        const html = await fetchText('/transactions/');
+        const verified = getScoped(KEYS.verified, {});
+        let newCount = 0;
+        for(const date of extractStoneTransactions(html)){
+          if(!verified[date]){
+            verified[date] = true;
+            newCount += 1;
+          }
+        }
+        if(newCount > 0){
+          setScoped(KEYS.verified, verified);
+          log(`Подтверждено начислений камня: ${newCount}`);
+        }
+      }catch(error){
+        log('Transaction verification failed:', error?.message || error);
+      }
+    }
+
+    function handleChatResponseText(text, url, payload){
+      if(!isEnabled()) return;
+      if(isOnlinePingUrl(url)){
+        setRaw(KEYS.lastOnlinePing, Date.now());
+        return;
+      }
+      if(!isMainChatUrl(url) || shouldIgnoreChatPayload(payload)) return;
+      state.lastChatActivity = Date.now();
+      setRaw(KEYS.lastChatActivity, state.lastChatActivity);
+      const data = parseJson(text);
+      if(data && Array.isArray(data.items)){
+        data.items.forEach(item => { if(item?.html) analyzeChatHtml(item.html, 'hook'); });
+        return;
+      }
+      if(data?.html){
+        analyzeChatHtml(data.html, 'hook');
+        return;
+      }
+      analyzeChatHtml(text, 'hook');
+    }
+
+    function installFetchHook(){
+      const originalFetch = uw.fetch;
+      if(typeof originalFetch !== 'function' || originalFetch.__suiteChatStoneHooked) return;
+      function hookedFetch(resource, init){
+        const url = toUrl(resource);
+        const payload = bodyToString(init?.body);
+        return originalFetch.apply(this, arguments).then(response => {
+          if(isMainChatUrl(url) || isOnlinePingUrl(url)){
+            response.clone().text()
+              .then(text => handleChatResponseText(text, url, payload))
+              .catch(()=>{});
+          }
+          return response;
+        });
+      }
+      hookedFetch.__suiteChatStoneHooked = true;
+      uw.fetch = hookedFetch;
+    }
+
+    function installXhrHook(){
+      const XHR = uw.XMLHttpRequest;
+      if(!XHR?.prototype || XHR.prototype.__suiteChatStoneHooked) return;
+      const originalOpen = XHR.prototype.open;
+      const originalSend = XHR.prototype.send;
+      XHR.prototype.open = function(method, url){
+        this.__suiteChatStoneUrl = toUrl(url);
+        return originalOpen.apply(this, arguments);
+      };
+      XHR.prototype.send = function(body){
+        this.__suiteChatStonePayload = bodyToString(body);
+        this.addEventListener('loadend', function(){
+          const url = this.__suiteChatStoneUrl || '';
+          if(!isMainChatUrl(url) && !isOnlinePingUrl(url)) return;
+          let text = '';
+          try{
+            if(!this.responseType || this.responseType === 'text') text = this.responseText || '';
+          }catch(e){ text = ''; }
+          if(text) handleChatResponseText(text, url, this.__suiteChatStonePayload);
+        });
+        return originalSend.apply(this, arguments);
+      };
+      XHR.prototype.__suiteChatStoneHooked = true;
+    }
+
+    function scanExistingDom(){
+      if(document.body) analyzeChatHtml(document.body.innerHTML, 'dom');
+    }
+
+    function installDomObserver(){
+      if(!document.body || state.observer) return;
+      state.observer = new MutationObserver(mutations => {
+        for(const mutation of mutations){
+          for(const node of mutation.addedNodes){
+            if(!node || node.nodeType !== 1) continue;
+            if(node.matches?.('#diamonds-chat')) analyzeChatHtml(node.outerHTML, 'dom');
+            else if(node.querySelector?.('#diamonds-chat')) analyzeChatHtml(node.outerHTML, 'dom');
+          }
+        }
+      });
+      state.observer.observe(document.body, { childList:true, subtree:true });
+    }
+
+    async function fetchChatSnapshot(source = 'watchdog'){
+      if(!state.ready || !isEnabled()) return;
+      if(Date.now() < state.pausedUntil) return;
+      if(!state.isLeader) await acquireLeader();
+      if(!state.isLeader) return;
+      try{
+        const response = await fetch(`${location.origin}/index.php?controller=ajax&mod=animesss_chat_init&room_id=main`, {
+          method:'GET',
+          credentials:'same-origin',
+          headers:{ 'Accept':'*/*', 'X-Requested-With':'XMLHttpRequest' }
+        });
+        if(response.status === 429){
+          state.pausedUntil = Date.now() + DEFAULTS.rateLimitPauseMs;
+          state.lastChatActivity = Date.now();
+          setRaw(KEYS.lastChatActivity, state.lastChatActivity);
+          return;
+        }
+        if(!response.ok){
+          state.lastChatActivity = Date.now();
+          setRaw(KEYS.lastChatActivity, state.lastChatActivity);
+          return;
+        }
+        const data = await response.json();
+        state.lastChatActivity = Date.now();
+        setRaw(KEYS.lastChatActivity, state.lastChatActivity);
+        (Array.isArray(data.items) ? data.items : []).forEach(item => {
+          if(item?.html) analyzeChatHtml(item.html, source);
+        });
+      }catch(error){
+        state.lastChatActivity = Date.now();
+        setRaw(KEYS.lastChatActivity, state.lastChatActivity);
+        log('Chat fetch failed:', error?.message || error);
+      }
+    }
+
+    async function pingOnline(){
+      if(!state.ready || !isEnabled()) return;
+      if(!state.isLeader) await acquireLeader();
+      if(!state.isLeader) return;
+      const lastPing = Number(getRaw(KEYS.lastOnlinePing, 0) || 0);
+      if(Date.now() - lastPing < DEFAULTS.onlinePingMs) return;
+      const userHash = getUserHash();
+      if(!userHash) return;
+      try{
+        await fetch(`${location.origin}/index.php?controller=ajax&mod=online_in_cinema&user_hash=${encodeURIComponent(userHash)}`, {
+          method:'GET',
+          credentials:'same-origin',
+          headers:{ 'X-Requested-With':'XMLHttpRequest', 'Accept':'application/json, text/javascript, */*; q=0.01' }
+        });
+        setRaw(KEYS.lastOnlinePing, Date.now());
+      }catch(error){
+        log('Online ping failed:', error?.message || error);
+      }
+    }
+
+    async function waitForBody(timeoutMs = 10000){
+      const started = Date.now();
+      while(!document.body && Date.now() - started < timeoutMs) await sleep(100);
+    }
+
+    async function waitForUserHash(timeoutMs = 10000){
+      const started = Date.now();
+      while(!getUserHash() && Date.now() - started < timeoutMs) await sleep(250);
+    }
+
+    async function start(){
+      installFetchHook();
+      installXhrHook();
+      state.lastChatActivity = Number(getRaw(KEYS.lastChatActivity, 0) || 0);
+      await waitForBody();
+      await waitForUserHash();
+      if(!isEnabled()) return;
+      state.accountKey = getAccountKey();
+      state.seen = new Set(getScoped(KEYS.seen, []));
+      await acquireLeader();
+      await createTransactionBaseline();
+      state.ready = true;
+      scanExistingDom();
+      installDomObserver();
+      state.timers.push(setInterval(acquireLeader, DEFAULTS.lockRenewMs));
+      state.timers.push(setInterval(renewLeader, DEFAULTS.lockRenewMs));
+      state.timers.push(setInterval(async () => {
+        if(!state.ready || !isEnabled()) return;
+        const storedActivity = Number(getRaw(KEYS.lastChatActivity, 0) || 0);
+        state.lastChatActivity = Math.max(state.lastChatActivity, storedActivity);
+        if(Date.now() - state.lastChatActivity >= DEFAULTS.chatIdleMs && state.queueSize === 0){
+          fetchChatSnapshot('watchdog');
+        }
+      }, DEFAULTS.watchdogMs));
+      state.timers.push(setInterval(pingOnline, 5000));
+      state.listeners.push(GM_addValueChangeListener(scopedKey(KEYS.seen), (_key, _oldValue, newValue, remote) => {
+        if(remote && Array.isArray(newValue)) newValue.forEach(id => state.seen.add(id));
+      }));
+      window.addEventListener('visibilitychange', acquireLeader);
+      state.windowEvents.push({ type:'visibilitychange', handler:acquireLeader });
+      window.addEventListener('beforeunload', releaseLeader);
+      state.windowEvents.push({ type:'beforeunload', handler:releaseLeader });
+      fetchChatSnapshot('startup');
+      log(`Started for ${state.accountKey}`);
+    }
+
+    start().catch(error => {
+      window.__suiteChatStoneAutolootInstalled = false;
+      log('Init failed:', error?.message || error);
+    });
   }
 
   function initBrickFill(){
@@ -5163,8 +6772,11 @@
     modProfileBtns: 'Добавляет быстрые кнопки на страницах в профиля по которым можно быстро перейти на нужную страницу пользователя.',
     modEnlightenment: 'подсчитывает полное просветление у клуба на странице всех клубов.',
     modVoteCardsToggle: 'Сворачивает блоки голосования за карты.',
+    modSuggestionAuthors: 'показывает предложку и авторов замен и S карт на голосовании',
     modCustomPush: 'Заменяет стандартные уведомления сайта на красивые всплывающие.',
     modStones: 'Отслеживает камни и прогресс их накопления.',
+    modChatStoneAutoloot: 'автолут камня в кинотеатре, ну я хз, если уж вы не это не поймете то другие слова бессильны будут',
+    modGachaAutoloot: 'Автолут гачи клуба, если это не понятно, то я не знаю как еще объяснить. ах да, можете на странице клуба выбрать что лутать, а что нет',
     modAutoLootCards: 'Автоматически получает карты за просмотр аниме.',
     modWantCards: 'Добавляет инструменты для добавления в желаемое в библиотеке карт и на странице аниме.',
     wantButtonsAlways: 'Показывает кнопки всегда, а не только при наведении, если выключить функцию кнопки будут появляться только при наведения на ряд карт.',
@@ -5464,6 +7076,9 @@
     if(key==='modEnlightenment'){ if(cfg.modEnlightenment) applyEnlightenment(); else cleanupEnlightenment(); return; }
     if(key==='modHotkeys'){ if(cfg.modHotkeys) createHotkeyPanel(); else cleanupHotkeyPanel(); return; }
     if(key==='modStones'){ if(cfg.modStones) initStones(); else cleanupStonesUi(); return; }
+    if(key==='modChatStoneAutoloot'){ if(cfg.modChatStoneAutoloot) initChatStoneAutoloot(); else cleanupChatStoneAutoloot(); return; }
+    if(key==='modGachaAutoloot'){ if(cfg.modGachaAutoloot) initGachaAutoloot(); else cleanupGachaAutoloot(); return; }
+    if(key==='modSuggestionAuthors'){ if(cfg.modSuggestionAuthors) initSuggestionAuthors(); else cleanupSuggestionAuthors(); return; }
     if(key==='modWantCards'){
       if(cfg.modWantCards) initWantCards();
       else if(typeof window.__suiteWantCardsCleanup==='function') window.__suiteWantCardsCleanup();
@@ -5864,9 +7479,27 @@
       else cleanupVoteCardsToggle();
     });
     uiSection.appendChild(voteCardsRow);
+    const suggestionAuthorsRow = makeToggle('modSuggestionAuthors', '📬 Предложка и авторы');
+    suggestionAuthorsRow.querySelector('input').addEventListener('change', () => {
+      if(cfg.modSuggestionAuthors) initSuggestionAuthors();
+      else cleanupSuggestionAuthors();
+    });
+    uiSection.appendChild(suggestionAuthorsRow);
     const stonesRow = makeToggle('modStones',        '💎 Учет камней');
     stonesRow.querySelector('input').addEventListener('change', () => { if(cfg.modStones) initStones(); });
     uiSection.appendChild(stonesRow);
+    const chatStoneRow = makeToggle('modChatStoneAutoloot', '💎 Автолут камня');
+    chatStoneRow.querySelector('input').addEventListener('change', () => {
+      if(cfg.modChatStoneAutoloot) initChatStoneAutoloot();
+      else cleanupChatStoneAutoloot();
+    });
+    uiSection.appendChild(chatStoneRow);
+    const gachaAutolootRow = makeToggle('modGachaAutoloot', '🎰 Автолут гачи');
+    gachaAutolootRow.querySelector('input').addEventListener('change', () => {
+      if(cfg.modGachaAutoloot) initGachaAutoloot();
+      else cleanupGachaAutoloot();
+    });
+    uiSection.appendChild(gachaAutolootRow);
 
     // ── ВИЗУАЛ ────────────────────────────────────────────────
     const visualSection = makeSection('visual','🎨 Визуал');
@@ -6330,7 +7963,10 @@
     if(cfg.modBrickFill)   initBrickFill();
     if(cfg.modRemelt)      initRemelt();
     if(cfg.modStones)      initStones();
+    if(cfg.modChatStoneAutoloot) initChatStoneAutoloot();
+    if(cfg.modGachaAutoloot) initGachaAutoloot();
     if(cfg.modVoteCardsToggle) initVoteCardsToggle();
+    if(cfg.modSuggestionAuthors) initSuggestionAuthors();
     if(cfg.modAutoLootCards) initAutoLootCards();
     if(cfg.modLabyrinthQuiz) initLabyrinthQuiz();
     if(cfg.modLabyrinthEmission) initLabyrinthEmission();
