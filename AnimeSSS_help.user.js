@@ -1102,9 +1102,10 @@
       align-items:center;
       justify-content:center;
       gap:8px;
-      width:auto;
+      flex:0 0 44px;
+      width:44px;
       min-width:44px;
-      max-width:44px;
+      max-width:none;
       height:44px;
       padding:0 13px;
       border:0;
@@ -1114,12 +1115,12 @@
       cursor:pointer;
       overflow:hidden;
       font:700 13px/1 "Segoe UI",Arial,sans-serif;
-      transition:max-width .28s cubic-bezier(.22,1,.36,1),background .2s ease,box-shadow .2s ease,color .2s ease;
+      transition:width .28s cubic-bezier(.22,1,.36,1),background .2s ease,box-shadow .2s ease,color .2s ease;
     }
     .suite-section-tab:hover,
     .suite-section-tab.is-hovered,
     .suite-section-tab.is-active {
-      max-width:190px;
+      width:var(--suite-section-tab-open-width, 190px);
       justify-content:flex-start;
       background:rgba(255,255,255,.12);
       color:#f8fafc;
@@ -1180,6 +1181,7 @@
       .suite-section-tab,
       .suite-section-tab:hover,
       .suite-section-tab.is-active {
+        flex:0 0 auto;
         width:100%;
         max-width:none;
         justify-content:flex-start;
@@ -5624,9 +5626,30 @@
     sectionsHost.className='suite-sections-host';
     const sectionEntries=[];
     body.append(sectionNav,sectionsHost);
+    const getSectionTabOpenWidth=(entry)=>{
+      const label = entry.tab.querySelector('.suite-section-tab-label');
+      const labelWidth = Math.ceil(label?.scrollWidth || 0);
+      return Math.max(44, Math.min(190, 26 + 18 + 8 + labelWidth));
+    };
+    const getCompactMenuPlateWidth=()=>{
+      const count = sectionEntries.length;
+      if(!count) return 0;
+      return 18 + count * 44 + Math.max(0, count - 1) * 8;
+    };
     const syncMenuPlateWidthToContent=()=>{
-      const width=Math.ceil(sectionNav.scrollWidth || sectionNav.getBoundingClientRect().width || 0);
-      if(width > 0) panel.style.setProperty('--suite-menu-plate-width', width + 'px');
+      const compactWidth = getCompactMenuPlateWidth();
+      let width = compactWidth;
+      let openWidth = 44;
+      sectionEntries.forEach(entry=>{
+        const entryOpenWidth = getSectionTabOpenWidth(entry);
+        entry.tab.style.setProperty('--suite-section-tab-open-width', entryOpenWidth + 'px');
+        if(entry.tab.classList.contains('is-active') || entry.tab.classList.contains('is-hovered')){
+          width += entryOpenWidth - 44;
+          openWidth = Math.max(openWidth, entryOpenWidth);
+        }
+      });
+      if(width > 0) panel.style.setProperty('--suite-menu-plate-width', Math.ceil(width) + 'px');
+      panel.style.setProperty('--suite-section-tab-open-width', Math.ceil(openWidth) + 'px');
     };
     const scheduleMenuPlateWidthSync=()=>{
       requestAnimationFrame(()=>{
