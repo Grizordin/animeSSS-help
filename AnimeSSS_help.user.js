@@ -1010,7 +1010,7 @@
       width:21px;
       height:21px;
       left:4px;
-      top:calc(50% - 1px);
+      top:50%;
       transform:translateY(-50%);
       border-radius:50%;
       background:linear-gradient(145deg,#303743,#171c25);
@@ -1020,6 +1020,7 @@
         inset 2px 2px 4px rgba(255,255,255,.08),
         inset -3px -3px 5px rgba(0,0,0,.45);
       transition:transform .24s cubic-bezier(.2,.8,.2,1), border-color .22s ease, box-shadow .22s ease;
+      will-change:transform;
       z-index:2;
     }
     .suite-slider:after {
