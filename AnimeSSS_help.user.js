@@ -5746,7 +5746,7 @@
       return content;
     };
     // ── ЦЕННОСТЬ КАРТ ──────────────────────────────────────────
-    const cardValueSection = makeSection('cardValue','⭐ Ценность карт');
+    const cardValueSection = makeSection('cardValue','⭐ Ценность');
 
     const cardValueRow = makeToggle('modCardValue', '⭐ Ценность карт');
     appendCrown(cardValueRow.querySelector('.suite-menu-label-text'));
