@@ -1007,6 +1007,7 @@
     .suite-slider:before {
       content:'';
       position:absolute;
+      box-sizing:border-box;
       width:20px;
       height:20px;
       left:3px;
@@ -1026,6 +1027,7 @@
     .suite-slider:after {
       content:'';
       position:absolute;
+      box-sizing:border-box;
       width:7px;
       height:7px;
       left:-9px;
