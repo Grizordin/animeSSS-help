@@ -659,7 +659,7 @@
       background:rgba(245,158,11,.18);color:#fde68a;box-shadow:0 0 0 1px rgba(245,158,11,.18);
     }
     #suite-lab-fatigue-counter {
-      position:absolute;top:12px;right:202px;z-index:20;
+      position:absolute;top:12px;right:12px;z-index:20;
       min-width:210px;padding:10px 12px;border-radius:12px;
       border:1px solid rgba(56,189,248,.34);
       background:linear-gradient(180deg,rgba(8,20,38,.97),rgba(7,16,30,.93));
@@ -11984,6 +11984,7 @@
       }
 
       if(runtime.box.parentElement !== arena) arena.appendChild(runtime.box);
+      suitePositionLabyrinthFatigueCounter();
       return true;
     }
 
@@ -11996,6 +11997,7 @@
       if(movesEl) movesEl.textContent = String(moves);
       if(movesWordEl) movesWordEl.textContent = suiteLabMoveWord(moves);
       if(subEl) subEl.textContent = `с ${runtime.state.lastTriggerLabel || 'начала отсчёта'}`;
+      suitePositionLabyrinthFatigueCounter();
     }
 
     function mountModal(){
@@ -12201,6 +12203,29 @@
     maybeSendDailyLog();
   }
 
+  function suitePositionLabyrinthFatigueCounter(){
+    const fatigue = document.getElementById('suite-lab-fatigue-counter');
+    if(!fatigue) return;
+
+    const isMobile = typeof window.matchMedia === 'function' && window.matchMedia('(max-width:760px)').matches;
+    if(isMobile){
+      fatigue.style.top = '104px';
+      fatigue.style.right = '12px';
+      return;
+    }
+
+    const emission = cfg.modLabyrinthEmission ? document.getElementById('suite-emission-timer') : null;
+    const hasEmission = !!(emission && emission.isConnected && getComputedStyle(emission).display !== 'none');
+    fatigue.style.top = '12px';
+    if(!hasEmission){
+      fatigue.style.right = '12px';
+      return;
+    }
+
+    const emissionWidth = Math.ceil(emission.getBoundingClientRect().width || emission.offsetWidth || 172);
+    fatigue.style.right = `${12 + emissionWidth + 12}px`;
+  }
+
   function cleanupLabyrinthEmission(){
     const state = window.__suiteLabyrinthEmissionState;
     if(state){
@@ -12212,6 +12237,7 @@
     }
     window.__suiteLabyrinthEmissionState = null;
     window.__suiteLabyrinthEmissionInstalled = false;
+    suitePositionLabyrinthFatigueCounter();
   }
 
   function initLabyrinthEmission(){
@@ -12259,6 +12285,7 @@
       const arenaStyle = getComputedStyle(arena);
       if(arenaStyle.position === 'static') arena.style.position = 'relative';
       if(box.parentElement !== arena) arena.appendChild(box);
+      suitePositionLabyrinthFatigueCounter();
       return true;
     }
 
@@ -12300,6 +12327,7 @@
         box.classList.remove('is-active','is-soon');
         valueEl.textContent = 'Ожидание...';
         subEl.textContent = 'Синхронизация с лабиринтом';
+        suitePositionLabyrinthFatigueCounter();
         return;
       }
 
@@ -12317,6 +12345,7 @@
           valueEl.textContent = 'Скоро выброс';
           subEl.textContent = 'Момент почти наступил';
         }
+        suitePositionLabyrinthFatigueCounter();
         return;
       }
 
@@ -12331,6 +12360,7 @@
         valueEl.textContent = formatTime(left);
         subEl.textContent = 'До следующего выброса';
       }
+      suitePositionLabyrinthFatigueCounter();
     }
 
     state.startTimer = setTimeout(() => {
