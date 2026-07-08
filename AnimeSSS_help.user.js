@@ -1117,11 +1117,10 @@
       font:700 13px/1 "Segoe UI",Arial,sans-serif;
       transition:width .28s cubic-bezier(.22,1,.36,1),background .2s ease,box-shadow .2s ease,color .2s ease;
     }
-    .suite-section-tab:hover,
     .suite-section-tab.is-hovered,
     .suite-section-tab.is-active {
-      flex-basis:var(--suite-section-tab-open-width, 190px);
-      width:var(--suite-section-tab-open-width, 190px);
+      flex-basis:var(--suite-section-tab-open-width, 240px);
+      width:var(--suite-section-tab-open-width, 240px);
       justify-content:flex-start;
       background:rgba(255,255,255,.12);
       color:#f8fafc;
@@ -1147,11 +1146,10 @@
       overflow:hidden;
       transition:opacity .2s ease,max-width .28s ease,transform .28s ease;
     }
-    .suite-section-tab:hover .suite-section-tab-label,
     .suite-section-tab.is-hovered .suite-section-tab-label,
     .suite-section-tab.is-active .suite-section-tab-label {
       opacity:1;
-      max-width:140px;
+      max-width:200px;
       transform:translateX(0);
     }
     .suite-section-panel {
@@ -1180,7 +1178,7 @@
         padding:7px;
       }
       .suite-section-tab,
-      .suite-section-tab:hover,
+      .suite-section-tab.is-hovered,
       .suite-section-tab.is-active {
         flex:0 0 auto;
         width:100%;
@@ -5630,12 +5628,27 @@
     const getSectionTabOpenWidth=(entry)=>{
       const label = entry.tab.querySelector('.suite-section-tab-label');
       const labelWidth = Math.ceil(label?.scrollWidth || 0);
-      return Math.max(44, Math.min(190, 26 + 18 + 8 + labelWidth));
+      return Math.max(44, Math.min(260, 26 + 18 + 8 + labelWidth + 10));
     };
     const getCompactMenuPlateWidth=()=>{
       const count = sectionEntries.length;
       if(!count) return 0;
       return 18 + count * 44 + Math.max(0, count - 1) * 8;
+    };
+    const clearSectionHover=()=>{
+      sectionEntries.forEach(entry=>entry.tab.classList.remove('is-hovered'));
+    };
+    const getEntryFromNavPointer=(event)=>{
+      const rect = sectionNav.getBoundingClientRect();
+      const x = event.clientX - rect.left - 8;
+      if(x < -8) return null;
+      const index = Math.max(0, Math.min(sectionEntries.length - 1, Math.round((x - 22) / 52)));
+      return sectionEntries[index] || null;
+    };
+    const setSectionHoverFromPointer=(event)=>{
+      const hovered = getEntryFromNavPointer(event);
+      sectionEntries.forEach(entry=>entry.tab.classList.toggle('is-hovered', entry === hovered));
+      syncMenuPlateWidthToContent();
     };
     const syncMenuPlateWidthToContent=()=>{
       const compactWidth = getCompactMenuPlateWidth();
@@ -5659,6 +5672,18 @@
         setTimeout(syncMenuPlateWidthToContent, 320);
       });
     };
+    sectionNav.addEventListener('mousemove', setSectionHoverFromPointer);
+    sectionNav.addEventListener('mouseleave', ()=>{
+      clearSectionHover();
+      syncMenuPlateWidthToContent();
+    });
+    sectionNav.addEventListener('click', event=>{
+      const entry = getEntryFromNavPointer(event);
+      if(!entry) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setActiveSection(entry.key);
+    }, true);
     const splitSectionTitle=(title)=>{
       const raw=String(title||'').trim();
       const parts=raw.split(/\s+/);
@@ -5695,15 +5720,6 @@
       tab.append(icon,label);
       const content=document.createElement('div');
       content.className='suite-section-panel';
-      tab.addEventListener('click',()=>setActiveSection(key));
-      tab.addEventListener('mouseenter',()=>{
-        tab.classList.add('is-hovered');
-        syncMenuPlateWidthToContent();
-      });
-      tab.addEventListener('mouseleave',()=>{
-        tab.classList.remove('is-hovered');
-        syncMenuPlateWidthToContent();
-      });
       sectionEntries.push({key,tab,content});
       sectionNav.appendChild(tab);
       sectionsHost.appendChild(content);
