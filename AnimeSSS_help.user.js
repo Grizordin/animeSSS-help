@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.0
+// @version      3.1
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -3873,6 +3873,9 @@
     function getClubPath(){
       return DEFAULT_CLUB_PATH;
     }
+    function isDefaultClubPage(){
+      return location.pathname === DEFAULT_CLUB_PATH || location.pathname === DEFAULT_CLUB_PATH.slice(0, -1);
+    }
     function getCurrentExp(doc = document){
       const levelInfoNodes = [...doc.querySelectorAll('.nclub-enter__lvl-info')];
       for(const node of levelInfoNodes){
@@ -4122,8 +4125,15 @@
       document.body.append(backdrop);
     }
 
+    function removeControls(){
+      document.querySelectorAll('.suite-gacha-title-tools,.suite-gacha-modal').forEach(el => el.remove());
+    }
+
     function injectControls(){
-      if(!/^\/clubs\/\d+\/?/.test(location.pathname)) return false;
+      if(!isDefaultClubPage()){
+        removeControls();
+        return false;
+      }
       const block = getGachaBlock(document);
       const title = block?.querySelector('.club__title');
       if(!title || title.querySelector('.suite-gacha-title-tools')) return false;
@@ -4150,7 +4160,7 @@
     injectControls();
     scheduleNextCheck();
     if(hasMoscowTimeReached() && !isTodayFinished()) runDailyCheck('schedule');
-    if(/^\/clubs\/\d+\/?/.test(location.pathname)) state.intervals.push(setInterval(injectControls, 2000));
+    if(isDefaultClubPage()) state.intervals.push(setInterval(injectControls, 2000));
     on(document, 'visibilitychange', () => {
       if(document.hidden){
         releaseTabLock();
@@ -13230,11 +13240,8 @@
     window.__suiteLabyrinthFatigueInstalled = true;
 
     const STORAGE_KEY = 'suite_labyrinth_move_stats_v1';
-    const DEBUG_LOG_KEY = 'suite_labyrinth_move_stats_debug_log_v1';
-    const LOG_SENT_KEY = 'suite_labyrinth_move_stats_log_sent_v1';
     const ROOT_ID = 'suite-lab-fatigue-counter';
     const MODAL_ID = 'suite-lab-fatigue-modal';
-    const DEBUG_LOG_LIMIT = 800;
     const EVENTS_PER_PAGE = 3;
 
     const TRIGGER_DEFS = {
@@ -13248,7 +13255,6 @@
         label: 'откат',
         reason: 'последнего отката',
         titles: ['Ловушка отката'],
-        backgrounds: ['trap_back.webp'],
       },
       mimic_chest_back: {
         historyText: 'Мимик с откатом',
@@ -13321,106 +13327,6 @@
       runtime.state.movesSinceFatigue ??= 0;
     }
 
-    function loadDebugLog(){
-      const log = gmGet(DEBUG_LOG_KEY, []);
-      return Array.isArray(log) ? log : [];
-    }
-
-    function saveDebugLog(log){
-      gmSet(DEBUG_LOG_KEY, log.slice(-DEBUG_LOG_LIMIT));
-    }
-
-    function appendDebugLog(kind, snapshot, extra = {}){
-      const log = loadDebugLog();
-      log.push({
-        at:Date.now(),
-        time:new Date().toISOString(),
-        kind,
-        today:snapshot?.today ?? null,
-        max:snapshot?.max ?? null,
-        left:snapshot?.left ?? null,
-        coord:snapshot?.coord ?? '',
-        cellEvent:snapshot?.cellEvent ?? '',
-        lastEvent:snapshot?.lastEvent ?? '',
-        title:snapshot?.title ?? '',
-        eventText:snapshot?.eventText ?? '',
-        fatigueTitle:snapshot?.fatigueTitle ?? '',
-        fatigueText:snapshot?.fatigueText ?? '',
-        viewportBg:snapshot?.viewportBg ?? '',
-        movesSinceFatigue:runtime.state.movesSinceFatigue ?? 0,
-        lastTriggerKey:runtime.state.lastTriggerKey || '',
-        trigger:snapshot?.trigger ? {
-          type:snapshot.trigger.type,
-          label:snapshot.trigger.label,
-          reason:snapshot.trigger.reason,
-          source:snapshot.trigger.source || '',
-        } : null,
-        ...extra,
-      });
-      saveDebugLog(log);
-      maybeSendDailyLog();
-    }
-
-    function getMskDateKey(){
-      return new Intl.DateTimeFormat('en-CA', {
-        timeZone:'Europe/Moscow',
-        year:'numeric',
-        month:'2-digit',
-        day:'2-digit'
-      }).format(new Date());
-    }
-
-    async function maybeSendDailyLog(){
-      if(runtime.sendingLog) return;
-      const today = getMskDateKey();
-      const sent = gmGet(LOG_SENT_KEY, null);
-      if(sent === today) return;
-
-      const debugLog = loadDebugLog();
-      if(!debugLog.length) return;
-
-      runtime.sendingLog = true;
-      try{
-        const payload = {
-          exportedAt:new Date().toISOString(),
-          script:'labyrinth-fatigue',
-          storageKey:STORAGE_KEY,
-          debugLogKey:DEBUG_LOG_KEY,
-          counters:{
-            startedAt:runtime.state.startedAt || '',
-            sessionMoves:runtime.state.sessionMoves || 0,
-            movesSinceFatigue:runtime.state.movesSinceFatigue || 0,
-            lastTodaySteps:runtime.state.lastTodaySteps ?? null,
-            lastTriggerKey:runtime.state.lastTriggerKey || '',
-            lastTriggerLabel:runtime.state.lastTriggerLabel || '',
-          },
-          events:runtime.state.events || [],
-          debugLog,
-        };
-        const fileName = `animesss-labyrinth-fatigue-${today}.json`;
-        const response = await fetch(SUITE_REPORT_ENDPOINT, {
-          method:'POST',
-          headers:{ 'Content-Type':'application/json' },
-          body:JSON.stringify({
-            type:'labyrinth_fatigue_log',
-            payload:{
-              fileName,
-              fileContent:JSON.stringify(payload, null, 2),
-              logCount:debugLog.length,
-              nick:suiteGetCurrentUserName() || '',
-              host:location.hostname,
-              path:location.pathname,
-              version:SUITE_ACCESS_VERSION
-            }
-          })
-        });
-        if(response.ok) gmSet(LOG_SENT_KEY, today);
-      } catch(e) {
-      } finally {
-        runtime.sendingLog = false;
-      }
-    }
-
     function readNumber(selector){
       const el = document.querySelector(selector);
       if(!el) return null;
@@ -13475,12 +13381,7 @@
         fatigueText:getVisibleText('#labyrinthFatigueText'),
         lastEvent:String(source?.lastEvent || ''),
         cellEvent:String(getCellEvent() || ''),
-        viewportBg:document.querySelector('#labyrinthMapViewport')?.getAttribute('style') || '',
       };
-    }
-
-    function hasVisibleEvent(raw){
-      return Boolean(raw.title || raw.eventText || raw.fatigueTitle || raw.fatigueText);
     }
 
     function buildTrigger(type, source){
@@ -13499,11 +13400,6 @@
       return Boolean(def.titleNeedles || def.textNeedles) && hasTitle && hasText;
     }
 
-    function matchesTrigger(def, title, eventText, viewportStyle){
-      if(matchesVisibleTrigger(def, title, eventText)) return true;
-      return Boolean(def.backgrounds?.some(part => viewportStyle.includes(part)));
-    }
-
     function isFatigueTrigger(raw){
       const title = raw.fatigueTitle.toLowerCase();
       const text = raw.fatigueText.toLowerCase();
@@ -13515,15 +13411,6 @@
 
       for(const [type, def] of Object.entries(TRIGGER_DEFS)){
         if(matchesVisibleTrigger(def, raw.title, raw.eventText)) return buildTrigger(type, 'visibleEvent');
-      }
-
-      if(!hasVisibleEvent(raw)){
-        if(TRIGGER_DEFS[raw.lastEvent]) return buildTrigger(raw.lastEvent, 'lastEvent');
-        if(TRIGGER_DEFS[raw.cellEvent]) return buildTrigger(raw.cellEvent, 'cellEvent');
-      }
-
-      for(const [type, def] of Object.entries(TRIGGER_DEFS)){
-        if(matchesTrigger(def, raw.title, raw.eventText, raw.viewportBg)) return buildTrigger(type, 'fallback');
       }
 
       return null;
@@ -13555,7 +13442,6 @@
         event:snapshot.event,
         today:snapshot.today,
       });
-      appendDebugLog('move', snapshot, { delta });
     }
 
     function recordTrigger(snapshot, trigger){
@@ -13588,7 +13474,6 @@
         movesBetween:movesBeforeReset,
         today:snapshot.today,
       });
-      appendDebugLog('trigger-recorded', snapshot, { key, movesBeforeReset });
       return true;
     }
 
@@ -13793,11 +13678,10 @@
     }
 
     function resetStats(){
-      if(!confirm('Сбросить статистику ходов и событий? Лог диагностики останется.')) return;
+      if(!confirm('Сбросить статистику ходов и событий?')) return;
       runtime.state = makeEmptyState();
       runtime.statsPage = 0;
       saveState();
-      appendDebugLog('manual-reset', null, { resetAt:runtime.state.startedAt });
       renderBox();
       renderModal();
     }
@@ -13817,7 +13701,6 @@
             recordMove(snapshot.today - runtime.state.lastTodaySteps, snapshot);
             runtime.state.lastTodaySteps = snapshot.today;
           } else if(snapshot.today < runtime.state.lastTodaySteps){
-            appendDebugLog('today-steps-reset', snapshot, { from:runtime.state.lastTodaySteps, to:snapshot.today });
             runtime.state.lastTodaySteps = snapshot.today;
           }
         }
@@ -13836,7 +13719,6 @@
 
     runtime.startTimer = setTimeout(tick, 500);
     runtime.tickInterval = setInterval(tick, 1000);
-    maybeSendDailyLog();
   }
 
   function suitePositionLabyrinthFatigueCounter(){
