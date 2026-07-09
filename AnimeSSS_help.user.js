@@ -4699,7 +4699,7 @@
       chatIdleMs:15000,
       watchdogMs:3000,
       onlinePingMs:60000,
-      queueIntervalMs:15000,
+      queueIntervalMs:10000,
       lockTtlMs:25000,
       lockRenewMs:5000,
       verifyDelayMs:3000,
@@ -4878,9 +4878,11 @@
         if(!code) continue;
         const item = node.closest('.animesss-chat__item');
         const itemId = item?.getAttribute('data-id');
+        const nodeId = node.getAttribute('data-id');
+        const baseId = itemId || nodeId || 'diamond';
         result.push({
           code,
-          messageId:itemId || node.getAttribute('data-id') || `code:${code}`,
+          messageId:`${baseId}:${code}`,
           chatTime:extractChatTime(item),
           source
         });
