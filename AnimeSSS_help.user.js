@@ -13,6 +13,7 @@
 // @grant        GM.getValue
 // @grant        GM.setValue
 // @grant        GM_deleteValue
+// @grant        GM_listValues
 // @grant        GM_addValueChangeListener
 // @grant        GM_removeValueChangeListener
 // @grant        GM_addStyle
@@ -9095,6 +9096,9 @@
         const KNOWN_DAILY_LIMIT_KEY = 'aw_active_tab_known_daily_limit_v2';
         const DAILY_PROGRESS_KEY = 'aw_active_tab_daily_progress_v2';
         const PANEL_COLLAPSED_KEY = 'aw_active_tab_panel_collapsed_v2';
+        const DIAGNOSTIC_LOG_MAX = 1500;
+        const DIAGNOSTIC_EXPORT_MAX = 6000;
+        const DIAGNOSTIC_TEXT_LIMIT = 30000;
 
         const ANIME_DB_KEY = 'aw_anime_database_v2';
         const FINISHED_ANIME_ARCHIVE_KEY = 'aw_finished_anime_archive_v2';
@@ -9138,9 +9142,13 @@
         let nextRunAt = 0;
         let profileFetchInProgress = false;
         let kodikWarmupPromise = null;
+        let diagnosticWriteQueue = Promise.resolve();
+        let diagnosticRequestSequence = 0;
 
         const currentUser = getCurrentUser();
         const AW_GM_DB_PREFIX = `aw_active_tab_store_v1_${currentUser || 'guest'}_`;
+        const DIAGNOSTIC_STORE_PREFIX = `${AW_GM_DB_PREFIX}diagnostic_log_`;
+        const DIAGNOSTIC_STORE_KEY = `${DIAGNOSTIC_STORE_PREFIX}${TAB_ID}`;
         const AW_GM_STORES = ['anime_history', 'card_receipts', 'skipped_episodes', 'request_log'];
 
         // =========================================================
@@ -9316,12 +9324,193 @@
             };
         }
 
-        async function fetchData(url, options = {}, type = 'json') {
-            const response = await fetch(url, options);
-            if (!response.ok) throw new Error(`HTTP ${response.status} for ${url}`);
-            if (type === 'json') return response.json();
-            if (type === 'text') return response.text();
-            return response;
+        function diagnosticSecretId(value) {
+            const text = String(value ?? '');
+            let hash = 2166136261;
+            for (let i = 0; i < text.length; i++) {
+                hash ^= text.charCodeAt(i);
+                hash = Math.imul(hash, 16777619);
+            }
+            return (hash >>> 0).toString(16).padStart(8, '0');
+        }
+
+        function diagnosticTruncate(value, limit = DIAGNOSTIC_TEXT_LIMIT) {
+            const text = String(value ?? '');
+            if (text.length <= limit) return text;
+            return `${text.slice(0, limit)}...[обрезано ${text.length - limit} символов]`;
+        }
+
+        function diagnosticSanitize(value, key = '', depth = 0, seen = new WeakSet()) {
+            if (/user_?hash|login_?hash|csrf|token|authorization|cookie|password|session|secret/i.test(String(key))) {
+                const text = String(value ?? '');
+                return `[скрыто, ${text.length} симв., id ${diagnosticSecretId(text)}]`;
+            }
+            if (value === null || typeof value === 'undefined') return value ?? null;
+            if (typeof value === 'string') return diagnosticTruncate(value);
+            if (typeof value === 'number' || typeof value === 'boolean') return value;
+            if (typeof value === 'bigint') return String(value);
+            if (value instanceof Error) {
+                return {
+                    name: value.name || 'Error',
+                    message: diagnosticTruncate(value.message || String(value), 5000),
+                    stack: diagnosticTruncate(value.stack || '', 15000)
+                };
+            }
+            if (depth >= 8) return '[максимальная глубина]';
+            if (typeof value === 'object') {
+                if (seen.has(value)) return '[циклическая ссылка]';
+                seen.add(value);
+            }
+            if (Array.isArray(value)) {
+                return value.slice(0, 250).map(item => diagnosticSanitize(item, '', depth + 1, seen));
+            }
+            const result = {};
+            for (const [childKey, childValue] of Object.entries(value || {})) {
+                result[childKey] = diagnosticSanitize(childValue, childKey, depth + 1, seen);
+            }
+            return result;
+        }
+
+        function diagnosticSanitizeBody(body) {
+            if (body === null || typeof body === 'undefined') return null;
+            if (body instanceof URLSearchParams) body = body.toString();
+            if (typeof body !== 'string') return diagnosticSanitize(body);
+            const text = body.trim();
+            if (!text) return '';
+            if ((text.startsWith('{') && text.endsWith('}')) || (text.startsWith('[') && text.endsWith(']'))) {
+                try { return diagnosticSanitize(JSON.parse(text)); } catch (e) {}
+            }
+            if (text.includes('=')) {
+                try {
+                    const result = {};
+                    for (const [paramKey, paramValue] of new URLSearchParams(text).entries()) {
+                        let value = paramValue;
+                        if ((value.startsWith('{') && value.endsWith('}')) || (value.startsWith('[') && value.endsWith(']'))) {
+                            try { value = JSON.parse(value); } catch (e) {}
+                        }
+                        const safeValue = diagnosticSanitize(value, paramKey);
+                        if (Object.prototype.hasOwnProperty.call(result, paramKey)) {
+                            result[paramKey] = Array.isArray(result[paramKey])
+                                ? [...result[paramKey], safeValue]
+                                : [result[paramKey], safeValue];
+                        } else {
+                            result[paramKey] = safeValue;
+                        }
+                    }
+                    return result;
+                } catch (e) {}
+            }
+            return diagnosticTruncate(text);
+        }
+
+        function diagnosticSanitizeHeaders(headers) {
+            const result = {};
+            try {
+                new Headers(headers || {}).forEach((value, key) => {
+                    result[key] = diagnosticSanitize(value, key);
+                });
+            } catch (e) {}
+            return result;
+        }
+
+        function diagnosticParseResponse(text) {
+            const value = String(text ?? '').trim();
+            if (!value) return '';
+            const candidates = [value];
+            if (value.startsWith('cards{') || value.startsWith('cards(')) {
+                const start = value.indexOf('{');
+                if (start >= 0) candidates.push(value.slice(start).replace(/\)\s*$/, ''));
+            }
+            for (const candidate of candidates) {
+                try { return diagnosticSanitize(JSON.parse(candidate)); } catch (e) {}
+            }
+            return diagnosticTruncate(value);
+        }
+
+        function saveDiagnosticLog(event, data = {}) {
+            const record = {
+                timestamp: Date.now(),
+                at: new Date().toISOString(),
+                dateMsk: getMoscowTimeString(),
+                event,
+                tabId: TAB_ID,
+                user: currentUser || 'guest',
+                page: location.href,
+                visibility: document.visibilityState,
+                tabLock: diagnosticSanitize(readTabLock()),
+                data: diagnosticSanitize(data)
+            };
+
+            diagnosticWriteQueue = diagnosticWriteQueue
+                .then(async () => {
+                    const stored = await GM_getValue(DIAGNOSTIC_STORE_KEY, []);
+                    const records = Array.isArray(stored) ? stored : [];
+                    records.push(record);
+                    if (records.length > DIAGNOSTIC_LOG_MAX) {
+                        records.splice(0, records.length - DIAGNOSTIC_LOG_MAX);
+                    }
+                    await GM_setValue(DIAGNOSTIC_STORE_KEY, records);
+                })
+                .catch(e => console.warn('[AutoWatch Logger] Не удалось сохранить запись:', e));
+            return diagnosticWriteQueue;
+        }
+
+        async function fetchData(url, options = {}, type = 'json', requireOk = true) {
+            const requestId = `aw_${Date.now()}_${++diagnosticRequestSequence}`;
+            const startedAt = Date.now();
+            const request = {
+                requestId,
+                method: String(options?.method || 'GET').toUpperCase(),
+                url: new URL(url, location.href).href,
+                headers: diagnosticSanitizeHeaders(options?.headers),
+                body: diagnosticSanitizeBody(options?.body)
+            };
+            saveDiagnosticLog('network_request_started', request);
+
+            try {
+                const response = await fetch(url, options);
+                try {
+                    const clone = response.clone();
+                    clone.text().then(responseText => {
+                        saveDiagnosticLog('network_request_finished', {
+                            ...request,
+                            status: response.status,
+                            statusText: response.statusText,
+                            ok: response.ok,
+                            responseUrl: response.url,
+                            responseHeaders: diagnosticSanitizeHeaders(response.headers),
+                            response: diagnosticParseResponse(responseText),
+                            durationMs: Date.now() - startedAt
+                        });
+                    }).catch(e => {
+                        saveDiagnosticLog('network_response_read_failed', {
+                            ...request,
+                            status: response.status,
+                            error: diagnosticSanitize(e),
+                            durationMs: Date.now() - startedAt
+                        });
+                    });
+                } catch (e) {
+                    saveDiagnosticLog('network_response_clone_failed', {
+                        ...request,
+                        status: response.status,
+                        error: diagnosticSanitize(e),
+                        durationMs: Date.now() - startedAt
+                    });
+                }
+
+                if (requireOk && !response.ok) throw new Error(`HTTP ${response.status} for ${url}`);
+                if (type === 'json') return response.json();
+                if (type === 'text') return response.text();
+                return response;
+            } catch (e) {
+                saveDiagnosticLog('network_request_failed', {
+                    ...request,
+                    durationMs: Date.now() - startedAt,
+                    error: diagnosticSanitize(e)
+                });
+                throw e;
+            }
         }
 
         // =========================================================
@@ -9499,6 +9688,167 @@
             if (index >= 0) skipped[index] = data;
             else skipped.push(data);
             await setGmStore('skipped_episodes', skipped);
+        }
+
+        function buildDiagnosticEventCounts(records) {
+            return records.reduce((counts, record) => {
+                const key = record?.event || 'unknown';
+                counts[key] = (counts[key] || 0) + 1;
+                return counts;
+            }, {});
+        }
+
+        function getDiagnosticStoreKeys() {
+            try {
+                const keys = GM_listValues();
+                return Array.isArray(keys)
+                    ? keys.filter(key => String(key).startsWith(DIAGNOSTIC_STORE_PREFIX))
+                    : [];
+            } catch (e) {
+                return [DIAGNOSTIC_STORE_KEY];
+            }
+        }
+
+        async function getAllDiagnosticLogs() {
+            await diagnosticWriteQueue;
+            const allRecords = [];
+            for (const key of getDiagnosticStoreKeys()) {
+                try {
+                    const records = await GM_getValue(key, []);
+                    if (Array.isArray(records)) allRecords.push(...records);
+                } catch (e) {}
+            }
+            allRecords.sort((a, b) => Number(a?.timestamp || 0) - Number(b?.timestamp || 0));
+            return allRecords.length > DIAGNOSTIC_EXPORT_MAX
+                ? allRecords.slice(-DIAGNOSTIC_EXPORT_MAX)
+                : allRecords;
+        }
+
+        async function buildAutoWatchDiagnosticExport() {
+            await diagnosticWriteQueue;
+            const [
+                diagnosticLog,
+                requestLog,
+                cardReceipts,
+                skippedEpisodes,
+                animeHistory,
+                animeDatabase,
+                finishedArchive,
+                smartProgression,
+                dailyProgress,
+                knownDailyLimit,
+                collectionPaused,
+                pauseDate,
+                lastSuccessfulRequest
+            ] = await Promise.all([
+                getAllDiagnosticLogs(),
+                getGmStore('request_log'),
+                getGmStore('card_receipts'),
+                getGmStore('skipped_episodes'),
+                getGmStore('anime_history'),
+                GM_getValue(ANIME_DB_KEY, []),
+                GM_getValue(FINISHED_ANIME_ARCHIVE_KEY, []),
+                GM_getValue(SMART_PROGRESSION_KEY, null),
+                GM_getValue(DAILY_PROGRESS_KEY, null),
+                GM_getValue(KNOWN_DAILY_LIMIT_KEY, null),
+                GM_getValue(COLLECTION_PAUSED_KEY, false),
+                GM_getValue(PAUSE_DATE_KEY, null),
+                GM_getValue(LAST_SUCCESSFUL_REQUEST_KEY, 0)
+            ]);
+
+            return {
+                schemaVersion: 1,
+                exportedAt: new Date().toISOString(),
+                logger: {
+                    name: 'AnimeSSS встроенный логгер Auto-Watch',
+                    version: 1,
+                    helperVersion: typeof GM_info !== 'undefined' ? GM_info?.script?.version || null : null
+                },
+                user: currentUser || 'guest',
+                page: location.href,
+                environment: {
+                    userAgent: navigator.userAgent,
+                    language: navigator.language,
+                    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+                    visibility: document.visibilityState,
+                    focused: document.hasFocus?.() ?? null
+                },
+                summary: {
+                    diagnosticEntries: diagnosticLog.length,
+                    requestEntries: requestLog.length,
+                    cardReceipts: cardReceipts.length,
+                    skippedEpisodes: skippedEpisodes.length,
+                    eventCounts: buildDiagnosticEventCounts(diagnosticLog)
+                },
+                currentState: {
+                    tabLock: diagnosticSanitize(readTabLock()),
+                    smartProgression: diagnosticSanitize(smartProgression),
+                    dailyProgress: diagnosticSanitize(dailyProgress),
+                    knownDailyLimit,
+                    collectionPaused,
+                    pauseDate,
+                    lastSuccessfulRequest,
+                    panel: {
+                        toggle: clean(document.getElementById('aw-active-tab-toggle')?.textContent),
+                        info: clean(document.getElementById('aw-active-tab-info')?.textContent),
+                        holder: clean(document.getElementById('aw-active-tab-holder')?.textContent),
+                        pause: clean(document.getElementById('aw-active-tab-pause')?.textContent),
+                        daily: clean(document.getElementById('aw-active-tab-daily')?.textContent),
+                        timer: clean(document.getElementById('aw-active-tab-timer')?.textContent),
+                        lastCard: clean(document.getElementById('aw-active-tab-last-card')?.textContent)
+                    }
+                },
+                diagnosticLog,
+                requestLog,
+                cardReceipts,
+                skippedEpisodes,
+                animeHistory,
+                animeDatabase: diagnosticSanitize(animeDatabase),
+                finishedArchive: diagnosticSanitize(finishedArchive)
+            };
+        }
+
+        async function downloadAutoWatchDiagnosticLog() {
+            saveDiagnosticLog('manual_export_requested', {
+                smartProgression: await GM_getValue(SMART_PROGRESSION_KEY, null)
+            });
+            const payload = await buildAutoWatchDiagnosticExport();
+            const json = JSON.stringify(payload, null, 2);
+            const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const datePart = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+            const safeUser = String(currentUser || 'guest').replace(/[^a-zA-Z0-9_-]+/g, '_');
+            const fileName = `animesss-autowatch-internal-log-${safeUser}-${datePart}.json`;
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = fileName;
+            link.style.display = 'none';
+            (document.body || document.documentElement).appendChild(link);
+            link.click();
+            link.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 30000);
+            console.info(`[AutoWatch Logger] Скачан ${fileName}. Записей: ${payload.summary.diagnosticEntries}`);
+            return {
+                downloaded: true,
+                fileName,
+                diagnosticEntries: payload.summary.diagnosticEntries,
+                requestEntries: payload.summary.requestEntries
+            };
+        }
+
+        async function clearAutoWatchDiagnosticLog() {
+            await diagnosticWriteQueue;
+            for (const key of getDiagnosticStoreKeys()) {
+                try { await GM_deleteValue(key); } catch (e) {}
+            }
+            console.info('[AutoWatch Logger] Диагностический журнал очищен.');
+            return { cleared: true };
+        }
+
+        function installAutoWatchDiagnosticConsoleCommands() {
+            const target = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+            target.ascmDownloadAutoWatchLog = downloadAutoWatchDiagnosticLog;
+            target.ascmClearAutoWatchLog = clearAutoWatchDiagnosticLog;
         }
         // =========================================================
         // RANK STATISTICS
@@ -10700,12 +11050,24 @@
                     serverMsg: 'OK'
                 });
 
-                await incrementDailyProgress();
+                const dailyProgress = await incrementDailyProgress();
+                saveDiagnosticLog('card_received', {
+                    receipt,
+                    serverResponse: responseData,
+                    smartProgressionAfter: state,
+                    dailyProgress
+                });
                 updateButtonState();
 
                 safePush('success', `Получена карта: ${card.name} [${String(card.rank || '?').toUpperCase()}]`);
             } catch (e) {
                 error('Ошибка в processCardReward:', e);
+                saveDiagnosticLog('process_card_reward_error', {
+                    source,
+                    requestPayload: diagnosticSanitizeBody(requestPayload),
+                    serverResponse: responseData,
+                    error: e
+                });
             }
         }
 
@@ -10744,6 +11106,11 @@
             const clampedDelay = Math.max(0, delayMs);
             nextRunAt = Date.now() + clampedDelay;
             checkNewCardTimeoutId = setTimeout(mainCardCheckLogic, clampedDelay);
+            saveDiagnosticLog('next_attempt_scheduled', {
+                delayMs: clampedDelay,
+                nextRunAt,
+                loopRunning: isLoopRunning
+            });
             updateButtonState();
         }
 
@@ -10839,6 +11206,7 @@
                 const initialPool = await buildOrderedPool();
                 if (!initialPool.length) {
                     log('База аниме пуста. Автолут остановлен до добавления аниме.');
+                    saveDiagnosticLog('anime_database_empty');
                     safePush('info', 'Добавьте аниме в базу, чтобы автолут мог получать карты.');
                     stopMainCardCheckLogic();
                     return;
@@ -10849,6 +11217,11 @@
                     // База есть, но все доступные серии уже выфармлены — ждём до 00:00 МСК
                     const msToMidnight = getMsUntilMskMidnight();
                     log(`Всё выфармлено. Жду до 00:00 МСК (${Math.ceil(msToMidnight / 60000)} мин.).`);
+                    saveDiagnosticLog('all_episodes_considered_farmed', {
+                        smartProgression: state,
+                        animePoolSize: initialPool.length,
+                        waitMs: msToMidnight
+                    });
                     safePush('info', 'Всё выфармлено. Жду нового дня по МСК.');
                     scheduleNext(msToMidnight);
                     return;
@@ -10864,6 +11237,16 @@
 
                 const orderedEpsForCur = await getEpOrder(cur);
                 const targetEp = orderedEpsForCur[state.ep_offset] ?? (parseInt(cur.min_ep, 10) + state.ep_offset);
+                saveDiagnosticLog('target_episode_selected', {
+                    animeId: cur.anime_id,
+                    animeTitle: cur.title || '',
+                    season: cur.s || 1,
+                    episode: targetEp,
+                    translationId: cur.t_id,
+                    translationTitle: cur.t_title,
+                    smartProgression: state,
+                    episodeOrderLength: orderedEpsForCur.length
+                });
 
                 const rawBody =
                     `news_id=${cur.anime_id}` +
@@ -10880,17 +11263,17 @@
                     'X-AW-AUTO': '1'
                 };
 
-                await fetch('/ajax/calculate_series_watch/', {
+                await fetchData('/ajax/calculate_series_watch/', {
                     method: 'POST',
                     headers,
                     body: rawBody
-                });
+                }, 'response', false);
 
-                await fetch('/ajax/calculate_time_watch/', {
+                await fetchData('/ajax/calculate_time_watch/', {
                     method: 'POST',
                     headers,
                     body: rawBody
-                });
+                }, 'response', false);
 
                 ensureDailyKodikWarmup(cur, targetEp).catch(e => {
                     warn('Не удалось отправить запрос квеста просмотра:', e);
@@ -10910,7 +11293,9 @@
                     if (data.reason === 'no') {
                         const maxFailed = await GM_getValue(MAX_FAILED_ATTEMPTS_KEY, 2);
                         state.failed_attempts = (state.failed_attempts || 0) + 1;
+                        const failedAttemptNumber = state.failed_attempts;
                         const skipKey = `${cur.anime_id}_s${cur.s || 1}_e${targetEp}`;
+                        let episodeSkipped = false;
 
                         if (state.failed_attempts >= maxFailed) {
                             warn(`Нет карты ${state.failed_attempts}/${maxFailed} — серия исключена: ${skipKey}`);
@@ -10928,7 +11313,21 @@
                             state.ep_offset++;
                             state.cards_collected = 0;
                             state.failed_attempts = 0;
+                            episodeSkipped = true;
                         }
+
+                        saveDiagnosticLog('card_response_no', {
+                            animeId: cur.anime_id,
+                            animeTitle: cur.title || '',
+                            season: cur.s || 1,
+                            episode: targetEp,
+                            serverResponse: data,
+                            failedAttemptNumber,
+                            maxFailedAttempts: maxFailed,
+                            episodeSkipped,
+                            skipKey,
+                            smartProgressionAfter: state
+                        });
 
                         await saveRequestLog({
                             source: 'auto',
@@ -10952,6 +11351,13 @@
                         await parseAndStoreLimitFromReason(data.reason || data.error || '');
                         await GM_setValue(COLLECTION_PAUSED_KEY, true);
                         await GM_setValue(PAUSE_DATE_KEY, getMskDateKey());
+                        saveDiagnosticLog('server_daily_limit', {
+                            animeId: cur.anime_id || 0,
+                            season: cur.s || 1,
+                            episode: targetEp,
+                            serverResponse: data,
+                            smartProgression: state
+                        });
 
                         await saveRequestLog({
                             source: 'auto',
@@ -10974,6 +11380,13 @@
                         return;
 
                     } else {
+                        saveDiagnosticLog('card_response_error', {
+                            animeId: cur.anime_id || 0,
+                            season: cur.s || 1,
+                            episode: targetEp,
+                            serverResponse: data,
+                            smartProgression: state
+                        });
                         await saveRequestLog({
                             source: 'auto',
                             watchedAnimeId: cur.anime_id || 0,
@@ -10993,6 +11406,7 @@
                 scheduleNext(CHECK_NEW_CARD_INTERVAL + NEXT_LOOP_EXTRA_DELAY);
             } catch (e) {
                 error('Ошибка цикла:', e);
+                saveDiagnosticLog('main_loop_error', { error: e });
                 scheduleNext(15000);
             } finally {
                 isLoopRunning = false;
@@ -11026,6 +11440,17 @@
                         return response;
                     }
 
+                    if (url.includes('ajax/calculate_series_watch/') || url.includes('ajax/calculate_time_watch/')) {
+                        saveDiagnosticLog('site_watch_request_intercepted', {
+                            method: String(init?.method || 'GET').toUpperCase(),
+                            url: new URL(url, location.href).href,
+                            headers: diagnosticSanitizeHeaders(headers),
+                            body: diagnosticSanitizeBody(requestPayload),
+                            status: response.status,
+                            ok: response.ok
+                        });
+                    }
+
                     if (url.includes('ajax/calculate_time_watch/')) {
                         await GM_setValue(LAST_SUCCESSFUL_REQUEST_KEY, Date.now());
                     }
@@ -11041,6 +11466,13 @@
 
                         try {
                             const siteData = JSON.parse(content);
+                            saveDiagnosticLog('site_card_response_intercepted', {
+                                method: String(init?.method || 'GET').toUpperCase(),
+                                url: new URL(url, location.href).href,
+                                requestBody: diagnosticSanitizeBody(requestPayload),
+                                status: response.status,
+                                response: siteData
+                            });
                             if (siteData.cards) {
                                 await processCardReward(siteData, requestPayload, 'site');
                             } else {
@@ -11059,7 +11491,15 @@
                                     serverMsg: reason || 'unknown'
                                 });
                             }
-                        } catch (e) {}
+                        } catch (e) {
+                            saveDiagnosticLog('site_card_response_parse_failed', {
+                                url: new URL(url, location.href).href,
+                                requestBody: diagnosticSanitizeBody(requestPayload),
+                                status: response.status,
+                                responseText: content,
+                                error: e
+                            });
+                        }
                     }
                 } catch (e) {}
 
@@ -12349,8 +12789,10 @@
         // INIT
         // =========================================================
         async function init() {
+            installAutoWatchDiagnosticConsoleCommands();
             if (!currentUser) {
                 log('Пользователь не найден, скрипт остановлен.');
+                saveDiagnosticLog('module_init_stopped', { reason: 'current_user_not_found' });
                 return;
             }
 
@@ -12383,6 +12825,13 @@
 
             claimTabLock(document.hasFocus?.() === true);
             await updateCardCounter(false);
+            saveDiagnosticLog('module_initialized', {
+                scriptEnabledWatch,
+                pauseOnLimitEnabled,
+                tabLock: readTabLock(),
+                smartProgression: await GM_getValue(SMART_PROGRESSION_KEY, null),
+                dailyProgress: await GM_getValue(DAILY_PROGRESS_KEY, null)
+            });
 
             if (isTabVisible() && scriptEnabledWatch && isThisTabLeader()) {
                 // Восстанавливаем таймер из прошлого запроса — не сбрасываем при перезагрузке
@@ -12398,6 +12847,9 @@
         }
 
         window.__suiteAutoLootCardsCleanup = async () => {
+            saveDiagnosticLog('module_cleanup_requested', {
+                smartProgression: await GM_getValue(SMART_PROGRESSION_KEY, null)
+            });
             try {
                 scriptEnabledWatch = false;
                 await GM_setValue(STORAGE_KEY_WATCH, false);
