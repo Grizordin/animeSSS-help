@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.3
+// @version      3.4
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -691,7 +691,7 @@
       };
       diagnosticFetch.__suiteGlobalDiagnosticsHook = true;
       diagnosticFetch.__suiteGlobalDiagnosticsOriginal = originalFetch;
-      window.fetch = diagnosticFetch;
+      try { window.fetch = diagnosticFetch; } catch(e) {}
     }
 
     ['error', 'warn'].forEach(method => {
@@ -707,11 +707,15 @@
       };
       wrapped.__suiteGlobalDiagnosticsHook = true;
       wrapped.__suiteGlobalDiagnosticsOriginal = original;
-      console[method] = wrapped;
+      try { console[method] = wrapped; } catch(e) {}
     });
   }
 
-  installSuiteGlobalDiagnostics();
+  try {
+    installSuiteGlobalDiagnostics();
+  } catch(error) {
+    suiteTelemetryLog('suite', 'diagnostics_install_failed', { error }, 'error');
+  }
 
   async function suiteSendAccessInfo(status, nick, clubId) {
     return suiteReportEvent('access_check', { status, nick, clubId });
