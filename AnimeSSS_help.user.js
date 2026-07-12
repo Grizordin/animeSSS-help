@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.4
+// @version      3.5
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -479,7 +479,9 @@
   const SUITE_TELEMETRY_INSTALL_KEY = 'suite_telemetry_install_id_v1';
   const SUITE_TELEMETRY_FLUSH_MS = 5 * 60 * 1000;
   const SUITE_TELEMETRY_BATCH_SIZE = 10;
-  const SUITE_TELEMETRY_MAX_EVENTS = 2000;
+  const SUITE_TELEMETRY_MAX_EVENTS = 200;
+  const SUITE_TELEMETRY_MAX_EVENT_CHARS = 200000;
+  const SUITE_TELEMETRY_MAX_QUEUE_CHARS = 1000000;
   const SUITE_TELEMETRY_MAX_AGE_MS = 2 * 24 * 60 * 60 * 1000;
   const suiteTelemetrySessionId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const suiteTelemetryQueueKey = `${SUITE_TELEMETRY_QUEUE_PREFIX}${suiteTelemetrySessionId}`;
@@ -517,13 +519,28 @@
   }
 
   function suiteTelemetryReadQueue(key = suiteTelemetryQueueKey) {
-    const records = gmGet(key, []);
-    return Array.isArray(records) ? records : [];
+    try {
+      const raw = GM_getValue(key, null);
+      if(raw == null) return [];
+      const records = JSON.parse(raw);
+      if(Array.isArray(records)) return records;
+    } catch(e) {}
+    gmDelete(key);
+    return [];
   }
 
   function suiteTelemetryWriteQueue(records, key = suiteTelemetryQueueKey) {
-    if(records.length) gmSet(key, records.slice(-SUITE_TELEMETRY_MAX_EVENTS));
-    else gmDelete(key);
+    const limited = records.slice(-SUITE_TELEMETRY_MAX_EVENTS);
+    while(limited.length > 0){
+      let serialized = '';
+      try { serialized = JSON.stringify(limited); } catch(e) { limited.shift(); continue; }
+      if(serialized.length <= SUITE_TELEMETRY_MAX_QUEUE_CHARS){
+        try { GM_setValue(key, serialized); } catch(e) { gmDelete(key); }
+        return;
+      }
+      limited.shift();
+    }
+    gmDelete(key);
   }
 
   function suiteTelemetryLog(module, event, data = {}, level = 'debug') {
@@ -531,7 +548,7 @@
       const now = Date.now();
       const records = suiteTelemetryReadQueue()
         .filter(item => now - Number(item?.timestamp || now) <= SUITE_TELEMETRY_MAX_AGE_MS);
-      records.push({
+      const record = {
         id: `${now.toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
         timestamp: now,
         time: new Date(now).toISOString(),
@@ -542,7 +559,21 @@
         path: location.pathname,
         visibility: document.visibilityState,
         data: suiteTelemetrySanitize(data)
-      });
+      };
+      let recordChars = 0;
+      try { recordChars = JSON.stringify(record).length; } catch(e) { recordChars = SUITE_TELEMETRY_MAX_EVENT_CHARS + 1; }
+      if(recordChars > SUITE_TELEMETRY_MAX_EVENT_CHARS){
+        record.data = {
+          truncated:true,
+          originalChars:recordChars,
+          summary:suiteTelemetrySanitize(data, '', 4)
+        };
+        const summaryChars = JSON.stringify(record).length;
+        if(summaryChars > SUITE_TELEMETRY_MAX_EVENT_CHARS){
+          record.data = { truncated:true, originalChars:recordChars };
+        }
+      }
+      records.push(record);
       suiteTelemetryWriteQueue(records);
       if(records.filter(item => item.module === module).length >= SUITE_TELEMETRY_BATCH_SIZE) void suiteTelemetryFlush('size');
     } catch(e) {}
@@ -589,6 +620,12 @@
     return suiteTelemetryFlushPromise;
   }
 
+  setTimeout(() => {
+    for(const key of suiteTelemetryQueueKeys()){
+      const queue = suiteTelemetryReadQueue(key);
+      if(queue.length) suiteTelemetryWriteQueue(queue, key);
+    }
+  }, 0);
   setInterval(() => { void suiteTelemetryFlush('timer'); }, SUITE_TELEMETRY_FLUSH_MS);
   window.addEventListener('pagehide', () => { void suiteTelemetryFlush('pagehide'); });
   setTimeout(() => { void suiteTelemetryFlush('startup'); }, 15000);
@@ -700,8 +737,20 @@
       const wrapped = function(...args){
         try {
           const joined = args.map(value => value instanceof Error ? `${value.name}: ${value.message}` : String(value)).join(' ');
-          const tagged = method === 'error' || /\[(?:Suite|Auto|AutoWatch|QuizHL|CardValue|Neon|Stone)/i.test(joined);
-          if(tagged) report(`console_${method}`, { arguments:args }, method === 'error' ? 'error' : 'warning');
+          const tagged = /\[(?:Suite|Auto|AutoWatch|QuizHL|CardValue|Neon|Stone)/i.test(joined);
+          if(tagged){
+            const compactArgs = args.slice(0, 10).map(value => {
+              if(value instanceof Error) return { name:value.name, message:value.message, stack:String(value.stack || '').slice(0, 12000) };
+              if(typeof value === 'string') return value.slice(0, 5000);
+              if(value == null || typeof value === 'number' || typeof value === 'boolean') return value;
+              return {
+                type:value?.constructor?.name || typeof value,
+                message:String(value?.message || '').slice(0, 5000),
+                keys:Object.keys(value || {}).slice(0, 30)
+              };
+            });
+            report(`console_${method}`, { arguments:compactArgs }, method === 'error' ? 'error' : 'warning');
+          }
         } catch(e) {}
         return original.apply(this, args);
       };
