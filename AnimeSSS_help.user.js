@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.1
+// @version      3.2
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -475,35 +475,223 @@
     }
   }
 
+  const SUITE_TELEMETRY_QUEUE_PREFIX = 'suite_telemetry_queue_v1_';
+  const SUITE_TELEMETRY_INSTALL_KEY = 'suite_telemetry_install_id_v1';
+  const SUITE_TELEMETRY_FLUSH_MS = 5 * 60 * 1000;
+  const SUITE_TELEMETRY_BATCH_SIZE = 10;
+  const SUITE_TELEMETRY_MAX_EVENTS = 2000;
+  const SUITE_TELEMETRY_MAX_AGE_MS = 2 * 24 * 60 * 60 * 1000;
+  const suiteTelemetrySessionId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  const suiteTelemetryQueueKey = `${SUITE_TELEMETRY_QUEUE_PREFIX}${suiteTelemetrySessionId}`;
+  const suiteTelemetryInstallId = (() => {
+    let value = String(gmGet(SUITE_TELEMETRY_INSTALL_KEY, '') || '').trim();
+    if(value) return value;
+    value = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
+    gmSet(SUITE_TELEMETRY_INSTALL_KEY, value);
+    return value;
+  })();
+  let suiteTelemetryFlushPromise = null;
+
+  function suiteTelemetrySanitize(value, key = '', depth = 0, seen = new WeakSet()) {
+    if(value == null || typeof value === 'boolean' || typeof value === 'number') return value;
+    const lowerKey = String(key).toLowerCase();
+    if(/(?:user_?hash|dle_?login_?hash|cookie|authorization|token|password|secret)/i.test(lowerKey)) return '[redacted]';
+    if(typeof value === 'string') {
+      const text = value
+        .replace(/([?&](?:user_hash|dle_login_hash|token|auth|password)=)[^&#\s]*/gi, '$1[redacted]')
+        .replace(/("(?:user_hash|dle_login_hash|token|authorization|password)"\s*:\s*")[^"]*/gi, '$1[redacted]');
+      return text.length > 30000 ? `${text.slice(0, 29999)}...` : text;
+    }
+    if(value instanceof Error) {
+      return { name:value.name, message:value.message, stack:String(value.stack || '').slice(0, 12000) };
+    }
+    if(typeof value !== 'object' || depth >= 6) return String(value);
+    if(seen.has(value)) return '[circular]';
+    seen.add(value);
+    if(Array.isArray(value)) return value.slice(0, 250).map(item => suiteTelemetrySanitize(item, '', depth + 1, seen));
+    const result = {};
+    for(const [childKey, childValue] of Object.entries(value).slice(0, 100)) {
+      result[childKey] = suiteTelemetrySanitize(childValue, childKey, depth + 1, seen);
+    }
+    return result;
+  }
+
+  function suiteTelemetryReadQueue(key = suiteTelemetryQueueKey) {
+    const records = gmGet(key, []);
+    return Array.isArray(records) ? records : [];
+  }
+
+  function suiteTelemetryWriteQueue(records, key = suiteTelemetryQueueKey) {
+    if(records.length) gmSet(key, records.slice(-SUITE_TELEMETRY_MAX_EVENTS));
+    else gmDelete(key);
+  }
+
+  function suiteTelemetryLog(module, event, data = {}, level = 'debug') {
+    try {
+      const now = Date.now();
+      const records = suiteTelemetryReadQueue()
+        .filter(item => now - Number(item?.timestamp || now) <= SUITE_TELEMETRY_MAX_AGE_MS);
+      records.push({
+        id: `${now.toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
+        timestamp: now,
+        time: new Date(now).toISOString(),
+        module: String(module || 'suite'),
+        event: String(event || 'event'),
+        level: String(level || 'debug'),
+        sessionId: suiteTelemetrySessionId,
+        path: location.pathname,
+        visibility: document.visibilityState,
+        data: suiteTelemetrySanitize(data)
+      });
+      suiteTelemetryWriteQueue(records);
+      if(records.filter(item => item.module === module).length >= SUITE_TELEMETRY_BATCH_SIZE) void suiteTelemetryFlush('size');
+    } catch(e) {}
+  }
+
+  function suiteTelemetryQueueKeys() {
+    try { return GM_listValues().filter(key => String(key).startsWith(SUITE_TELEMETRY_QUEUE_PREFIX)); }
+    catch(e) { return [suiteTelemetryQueueKey]; }
+  }
+
+  async function suiteTelemetryFlush(reason = 'timer') {
+    if(suiteTelemetryFlushPromise) return suiteTelemetryFlushPromise;
+    suiteTelemetryFlushPromise = (async () => {
+      for(const key of suiteTelemetryQueueKeys()) {
+        const queue = suiteTelemetryReadQueue(key);
+        if(!queue.length) continue;
+        const modules = [...new Set(queue.map(item => item.module || 'suite'))];
+        for(const module of modules) {
+          while(true) {
+            const current = suiteTelemetryReadQueue(key);
+            const events = current.filter(item => (item.module || 'suite') === module).slice(0, SUITE_TELEMETRY_BATCH_SIZE);
+            if(!events.length) break;
+            const ids = new Set(events.map(item => item.id));
+            const eventSessionId = events[0].sessionId || suiteTelemetrySessionId;
+            const ok = await suiteReportEvent('telemetry_batch', {
+              batchId: `${eventSessionId}-${module}-${events[0].id}`,
+              installId: suiteTelemetryInstallId,
+              sessionId: eventSessionId,
+              module,
+              reason,
+              startedAt: events[0].time,
+              finishedAt: events[events.length - 1].time,
+              eventCount: events.length,
+              events
+            });
+            if(!ok) return false;
+            const latest = suiteTelemetryReadQueue(key);
+            suiteTelemetryWriteQueue(latest.filter(item => !ids.has(item.id)), key);
+          }
+        }
+      }
+      return true;
+    })().finally(() => { suiteTelemetryFlushPromise = null; });
+    return suiteTelemetryFlushPromise;
+  }
+
+  setInterval(() => { void suiteTelemetryFlush('timer'); }, SUITE_TELEMETRY_FLUSH_MS);
+  window.addEventListener('pagehide', () => { void suiteTelemetryFlush('pagehide'); });
+  setTimeout(() => { void suiteTelemetryFlush('startup'); }, 15000);
+
+  function installSuiteGlobalDiagnostics() {
+    if(window.__suiteGlobalDiagnosticsInstalled) return;
+    window.__suiteGlobalDiagnosticsInstalled = true;
+    const recent = new Map();
+
+    const report = (event, data, level = 'error') => {
+      try {
+        const safe = suiteTelemetrySanitize(data);
+        const fingerprint = `${event}:${JSON.stringify(safe).slice(0, 1200)}`;
+        const now = Date.now();
+        const previous = Number(recent.get(fingerprint) || 0);
+        if(now - previous < 5000) return;
+        recent.set(fingerprint, now);
+        if(recent.size > 200){
+          for(const [key, timestamp] of recent){
+            if(now - timestamp > 60000) recent.delete(key);
+          }
+        }
+        suiteTelemetryLog('suite', event, safe, level);
+      } catch(e) {}
+    };
+
+    window.addEventListener('error', event => {
+      report('global_error', {
+        message:event.message || event.error?.message || 'unknown error',
+        filename:event.filename || '',
+        line:event.lineno || 0,
+        column:event.colno || 0,
+        error:event.error || null
+      });
+    }, true);
+
+    window.addEventListener('unhandledrejection', event => {
+      report('unhandled_rejection', { reason:event.reason || 'unknown rejection' });
+    });
+
+    const originalFetch = window.fetch;
+    if(typeof originalFetch === 'function' && !originalFetch.__suiteGlobalDiagnosticsHook){
+      const diagnosticFetch = function(resource, init){
+        const rawUrl = typeof resource === 'string' ? resource : (resource?.url || '');
+        const url = (() => { try { return new URL(rawUrl, location.href).href; } catch(e) { return String(rawUrl); } })();
+        const isTelemetryRequest = url === SUITE_REPORT_ENDPOINT || url.startsWith(`${SUITE_REPORT_ENDPOINT}?`);
+        const startedAt = performance.now();
+        let request;
+        try {
+          request = originalFetch.apply(this, arguments);
+        } catch(error) {
+          if(!isTelemetryRequest) report('fetch_threw', { url, method:init?.method || 'GET', error });
+          throw error;
+        }
+        return Promise.resolve(request).then(response => {
+          if(!isTelemetryRequest && !response.ok){
+            report('fetch_http_error', {
+              url,
+              method:init?.method || resource?.method || 'GET',
+              status:response.status,
+              statusText:response.statusText,
+              durationMs:Math.round(performance.now() - startedAt)
+            });
+          }
+          return response;
+        }, error => {
+          if(!isTelemetryRequest){
+            report('fetch_rejected', {
+              url,
+              method:init?.method || resource?.method || 'GET',
+              durationMs:Math.round(performance.now() - startedAt),
+              error
+            });
+          }
+          throw error;
+        });
+      };
+      diagnosticFetch.__suiteGlobalDiagnosticsHook = true;
+      diagnosticFetch.__suiteGlobalDiagnosticsOriginal = originalFetch;
+      window.fetch = diagnosticFetch;
+    }
+
+    ['error', 'warn'].forEach(method => {
+      const original = console[method];
+      if(typeof original !== 'function' || original.__suiteGlobalDiagnosticsHook) return;
+      const wrapped = function(...args){
+        try {
+          const joined = args.map(value => value instanceof Error ? `${value.name}: ${value.message}` : String(value)).join(' ');
+          const tagged = method === 'error' || /\[(?:Suite|Auto|AutoWatch|QuizHL|CardValue|Neon|Stone)/i.test(joined);
+          if(tagged) report(`console_${method}`, { arguments:args }, method === 'error' ? 'error' : 'warning');
+        } catch(e) {}
+        return original.apply(this, args);
+      };
+      wrapped.__suiteGlobalDiagnosticsHook = true;
+      wrapped.__suiteGlobalDiagnosticsOriginal = original;
+      console[method] = wrapped;
+    });
+  }
+
+  installSuiteGlobalDiagnostics();
+
   async function suiteSendAccessInfo(status, nick, clubId) {
     return suiteReportEvent('access_check', { status, nick, clubId });
-    try {
-      const allowed = String(clubId || '') === SUITE_ALLOWED_CLUB_ID;
-      const color = allowed ? 0x22c55e : 0xef4444;
-      const response = await fetch(SUITE_REPORT_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        keepalive: true,
-        body: JSON.stringify({
-          username: 'Suite Access',
-          embeds: [{
-            title: allowed ? '✅ Доступ к Комбайну' : '⛔ Блокировка Комбайна',
-            color,
-            fields: [
-              { name: 'Статус', value: String(status || 'Неизвестно'), inline: true },
-              { name: 'Ник', value: String(nick || 'Неизвестно'), inline: true },
-              { name: 'Клуб', value: String(clubId || 'unknown'), inline: true },
-              { name: 'Сайт', value: location.hostname, inline: true },
-              { name: 'Версия', value: SUITE_ACCESS_VERSION, inline: true }
-            ],
-            timestamp: new Date().toISOString()
-          }]
-        })
-      });
-      return response.ok;
-    } catch(e) {
-      return false;
-    }
   }
 
   function suiteSendAccessInfoOnce(status, nick, clubId) {
@@ -2594,23 +2782,6 @@
 
   function cptSendUnknown(text){
     suiteReportEvent('unknown_push', { text });
-    return;
-    try {
-      fetch(SUITE_REPORT_ENDPOINT, {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({
-          username: 'Push Collector',
-          embeds: [{
-            title: '🔔 Неизвестное уведомление',
-            description: '```' + text + '```',
-            color: 0x6366f1,
-            footer: { text: location.hostname + location.pathname },
-            timestamp: new Date().toISOString()
-          }]
-        })
-      });
-    } catch(e) {}
   }
 
   let cptRoot=null, cptStyleInjected=false;
@@ -2752,6 +2923,7 @@
   }
 
   function cptHandleDlePushNode(node){
+    if(!cfg.modCustomPush) return;
     if(!(node instanceof HTMLElement)) return;
     const items = node.matches?.('.DLEPush-notification')
       ? [node]
@@ -3642,6 +3814,7 @@
 
   function cleanupGachaAutoloot(){
     const state = window.__suiteGachaAutolootState;
+    if(state || window.__suiteGachaAutolootInstalled) suiteTelemetryLog('gacha', 'module_cleanup', { hadState:!!state });
     if(state){
       try{ clearInterval(state.retryTimer); }catch(e){}
       try{ clearTimeout(state.scheduleTimer); }catch(e){}
@@ -3766,7 +3939,10 @@
     function setDailyState(value){ setStoredJson('daily_state', value); }
     function getTabLock(){ return getStoredJson('tab_lock', null); }
     function setTabLock(value){ setStoredJson('tab_lock', value); }
-    function setStatus(text){ console.log(`[Suite Gacha] ${text}`); }
+    function setStatus(text){
+      console.log(`[Suite Gacha] ${text}`);
+      suiteTelemetryLog('gacha', 'status', { text });
+    }
     function notify(type, message){
       try{
         const push = getPageWindow().DLEPush;
@@ -3848,9 +4024,9 @@
     function isSuccessfulGachaResponse(data){
       if(!data || typeof data !== 'object' || data.error) return false;
       const status = String(data.status || '').toLowerCase();
-      if(!status) return false;
       if(['no_reward', 'no', 'error', 'fail', 'failed', 'parse_error'].includes(status)) return false;
-      return status === 'ok' || status === 'success' || Boolean(data.reward_type) || Boolean(data.step);
+      return status === 'ok' || status === 'success' || Boolean(data.reward_type) ||
+        (data.step != null && Number.isFinite(Number(data.step)));
     }
     async function postGachaReward(){
       const userHash = getUserHash();
@@ -3943,7 +4119,10 @@
     function loadGachaFrame(){
       createHiddenGachaFrame();
       const targetUrl = `${location.origin}${getClubPath()}`;
-      if(state.gachaFrame.src === targetUrl && getGachaBlock(getFrameDocument() || document)) return Promise.resolve(getFrameDocument());
+      const currentFrameDocument = getFrameDocument();
+      if(state.gachaFrame.src === targetUrl && currentFrameDocument && getGachaBlock(currentFrameDocument)) {
+        return Promise.resolve(currentFrameDocument);
+      }
       if(state.gachaFrameLoadPromise) return state.gachaFrameLoadPromise;
       state.gachaFrameLoadPromise = new Promise(resolve => {
         const finish = () => {
@@ -3958,16 +4137,20 @@
     }
     async function fetchClubDocument(){
       const response = await fetch(`${location.origin}${getClubPath()}`, { credentials:'include', cache:'no-store' });
+      if(!response.ok) throw new Error(`Club page HTTP ${response.status}`);
       const html = await response.text();
+      if(/<form[^>]+(?:login|auth)|name=["']login["']/i.test(html)) throw new Error('Club page returned login form');
       return new DOMParser().parseFromString(html, 'text/html');
     }
     async function getSnapshotDocument(){
-      if(getGachaBlock(document)) return document;
+      if(isDefaultClubPage() && getGachaBlock(document)) return document;
       try{ return await fetchClubDocument(); }
       catch(error){
         console.warn('[Suite Gacha] Не удалось тихо прочитать страницу клуба, пробую iframe:', error);
         const frameDoc = await loadGachaFrame();
-        return frameDoc || document;
+        if(frameDoc && getGachaBlock(frameDoc)) return frameDoc;
+        if(isDefaultClubPage() && getGachaBlock(document)) return document;
+        throw new Error('Default club gacha page is unavailable');
       }
     }
 
@@ -3976,12 +4159,21 @@
       if(reason === 'schedule' && !hasMoscowTimeReached()) return;
       if(!acquireTabLock()) return;
       state.isRunning = true;
+      suiteTelemetryLog('gacha', 'check_started', { reason, today:getTodayKey(), page:location.pathname });
       try{
         const settings = getRewardSettings();
         const snapshotDoc = await getSnapshotDocument();
         const currentExp = getCurrentExp(snapshotDoc);
         const reward = getFirstReward(snapshotDoc);
+        suiteTelemetryLog('gacha', 'snapshot_parsed', {
+          reason,
+          source:snapshotDoc === document ? 'current_page' : 'background',
+          currentExp,
+          reward:reward ? { type:reward.type, step:reward.step, need:reward.need, isAvailable:reward.isAvailable } : null,
+          settings
+        });
         if(!reward){
+          startRetrying();
           setStatus('Первая гача не найдена. Подожду обновления страницы.');
           return;
         }
@@ -4009,6 +4201,12 @@
         setStatus(`Лутаю первую награду: ${rewardLabel}, шаг ${reward.step}.`);
         const response = await postGachaReward();
         const responseText = getGachaResultText(response);
+        suiteTelemetryLog('gacha', 'reward_response', {
+          requested:{ type:reward.type, step:reward.step, need:reward.need, currentExp },
+          response,
+          responseText,
+          successful:isSuccessfulGachaResponse(response)
+        });
         await sleep(AFTER_POST_DELAY_MS);
         if(!isSuccessfulGachaResponse(response)){
           markToday('waiting', { currentExp, need:reward.need, step:reward.step, rewardType:reward.type, serverResponse:responseText });
@@ -4030,10 +4228,12 @@
         notify('success', responseText);
       }catch(error){
         const message = error?.message || String(error);
+        suiteTelemetryLog('gacha', 'check_failed', { reason, error:message }, 'error');
         markToday('waiting', { error:message });
         setStatus(`Ошибка автолута гачи: ${message}. Продолжаю проверять.`);
         startRetrying();
       }finally{
+        suiteTelemetryLog('gacha', 'check_finished', { reason, dailyState:getDailyState() });
         state.isRunning = false;
         releaseTabLock();
       }
@@ -4665,6 +4865,9 @@
 
   function cleanupChatStoneAutoloot(){
     const state = window.__suiteChatStoneAutolootState;
+    if(state || window.__suiteChatStoneAutolootInstalled) {
+      suiteTelemetryLog('chat_stone', 'module_cleanup', { hadState:!!state, queueSize:state?.queueSize || 0 });
+    }
     if(state){
       (state.timers || []).forEach(timer => { try{ clearInterval(timer); }catch(e){} });
       try{ state.verifyTimer && clearTimeout(state.verifyTimer); }catch(e){}
@@ -4674,6 +4877,15 @@
         try{ window.removeEventListener(item.type, item.handler); }catch(e){}
       });
       try{ state.releaseLeader?.(); }catch(e){}
+      try{
+        if(state.hookedFetch && state.originalFetch && getPageWindow().fetch === state.hookedFetch) getPageWindow().fetch = state.originalFetch;
+      }catch(e){}
+      try{
+        const proto = state.xhrPrototype;
+        if(proto && state.hookedXhrOpen && proto.open === state.hookedXhrOpen) proto.open = state.originalXhrOpen;
+        if(proto && state.hookedXhrSend && proto.send === state.hookedXhrSend) proto.send = state.originalXhrSend;
+        if(proto) delete proto.__suiteChatStoneHooked;
+      }catch(e){}
     }
     window.__suiteChatStoneAutolootState = null;
     window.__suiteChatStoneAutolootInstalled = false;
@@ -4722,6 +4934,14 @@
       listeners:[],
       windowEvents:[],
       verifyTimer:null,
+      snapshotInFlight:false,
+      originalFetch:null,
+      hookedFetch:null,
+      xhrPrototype:null,
+      originalXhrOpen:null,
+      originalXhrSend:null,
+      hookedXhrOpen:null,
+      hookedXhrSend:null,
       ready:false,
       releaseLeader:null
     };
@@ -4896,6 +5116,7 @@
       if(!state.isLeader) await acquireLeader();
       if(!state.isLeader) return;
       const diamonds = extractDiamondsFromHtml(htmlString, source);
+      suiteTelemetryLog('chat_stone', 'chat_analyzed', { source, diamondCount:diamonds.length, queueSize:state.queueSize });
       for(const diamond of diamonds){
         if(state.seen.has(diamond.messageId)) continue;
         if(state.inFlight.has(diamond.messageId) || state.queued.has(diamond.messageId)) continue;
@@ -4937,16 +5158,19 @@
       if(!isEnabled()) return;
       if(state.inFlight.has(diamond.messageId) || state.seen.has(diamond.messageId)) return;
       state.inFlight.add(diamond.messageId);
+      suiteTelemetryLog('chat_stone', 'collect_started', { diamond, queueSize:state.queueSize });
       let data = null;
       let text = 'Ошибка сети';
       try{
         data = await postDiamond(diamond.code);
         text = resultText(data);
+        suiteTelemetryLog('chat_stone', 'collect_response', { diamond, attempt:1, response:data, text });
 
         if((!data.text && !data.status && !data.message && !data.error) && !isTerminalEmptyResult(data)){
           await sleep(DEFAULTS.queueIntervalMs);
           data = await postDiamond(diamond.code);
           text = resultText(data);
+          suiteTelemetryLog('chat_stone', 'collect_response', { diamond, attempt:2, response:data, text });
         }
 
         const ok = data.status === 'ok';
@@ -5026,7 +5250,9 @@
           setScoped(KEYS.verified, verified);
           log(`Подтверждено начислений камня: ${newCount}`);
         }
+        suiteTelemetryLog('chat_stone', 'transactions_verified', { newCount, transactionCount:Object.keys(verified).length });
       }catch(error){
+        suiteTelemetryLog('chat_stone', 'transaction_verification_failed', { error:error?.message || String(error) }, 'error');
         log('Transaction verification failed:', error?.message || error);
       }
     }
@@ -5068,6 +5294,8 @@
         });
       }
       hookedFetch.__suiteChatStoneHooked = true;
+      state.originalFetch = originalFetch;
+      state.hookedFetch = hookedFetch;
       uw.fetch = hookedFetch;
     }
 
@@ -5076,11 +5304,11 @@
       if(!XHR?.prototype || XHR.prototype.__suiteChatStoneHooked) return;
       const originalOpen = XHR.prototype.open;
       const originalSend = XHR.prototype.send;
-      XHR.prototype.open = function(method, url){
+      const hookedOpen = function(method, url){
         this.__suiteChatStoneUrl = toUrl(url);
         return originalOpen.apply(this, arguments);
       };
-      XHR.prototype.send = function(body){
+      const hookedSend = function(body){
         this.__suiteChatStonePayload = bodyToString(body);
         this.addEventListener('loadend', function(){
           const url = this.__suiteChatStoneUrl || '';
@@ -5093,7 +5321,14 @@
         });
         return originalSend.apply(this, arguments);
       };
+      XHR.prototype.open = hookedOpen;
+      XHR.prototype.send = hookedSend;
       XHR.prototype.__suiteChatStoneHooked = true;
+      state.xhrPrototype = XHR.prototype;
+      state.originalXhrOpen = originalOpen;
+      state.originalXhrSend = originalSend;
+      state.hookedXhrOpen = hookedOpen;
+      state.hookedXhrSend = hookedSend;
     }
 
     function scanExistingDom(){
@@ -5116,9 +5351,12 @@
 
     async function fetchChatSnapshot(source = 'watchdog'){
       if(!state.ready || !isEnabled()) return;
+      if(state.snapshotInFlight) return;
       if(Date.now() < state.pausedUntil) return;
       if(!state.isLeader) await acquireLeader();
       if(!state.isLeader) return;
+      state.snapshotInFlight = true;
+      suiteTelemetryLog('chat_stone', 'snapshot_started', { source });
       try{
         const response = await fetch(`${location.origin}/index.php?controller=ajax&mod=animesss_chat_init&room_id=main`, {
           method:'GET',
@@ -5126,26 +5364,34 @@
           headers:{ 'Accept':'*/*', 'X-Requested-With':'XMLHttpRequest' }
         });
         if(response.status === 429){
+          suiteTelemetryLog('chat_stone', 'snapshot_rate_limited', { source, status:response.status }, 'error');
           state.pausedUntil = Date.now() + DEFAULTS.rateLimitPauseMs;
           state.lastChatActivity = Date.now();
           setRaw(KEYS.lastChatActivity, state.lastChatActivity);
           return;
         }
         if(!response.ok){
+          suiteTelemetryLog('chat_stone', 'snapshot_http_error', { source, status:response.status }, 'error');
           state.lastChatActivity = Date.now();
           setRaw(KEYS.lastChatActivity, state.lastChatActivity);
           return;
         }
         const data = await response.json();
+        suiteTelemetryLog('chat_stone', 'snapshot_response', { source, response:data });
         state.lastChatActivity = Date.now();
         setRaw(KEYS.lastChatActivity, state.lastChatActivity);
         (Array.isArray(data.items) ? data.items : []).forEach(item => {
           if(item?.html) analyzeChatHtml(item.html, source);
         });
       }catch(error){
+        suiteTelemetryLog('chat_stone', 'collect_failed', { diamond, error:error?.message || String(error) }, 'error');
         state.lastChatActivity = Date.now();
         setRaw(KEYS.lastChatActivity, state.lastChatActivity);
         log('Chat fetch failed:', error?.message || error);
+        suiteTelemetryLog('chat_stone', 'snapshot_failed', { source, error:error?.message || String(error) }, 'error');
+      }finally{
+        suiteTelemetryLog('chat_stone', 'collect_finished', { diamond, result:text, seen:state.seen.has(diamond.messageId) });
+        state.snapshotInFlight = false;
       }
     }
 
@@ -5481,18 +5727,41 @@
           noMore=true;
           break;
         }
+        const energyBeforeBatch=getFutureEnergy();
+        const batch=[];
+        let plannedEnergy=energyBeforeBatch;
         for(const card of cards){
-          if(getFreeSlots()<=0){reached=true;break;}
-          if(targetEnergy>0&&getFutureEnergy()>=targetEnergy){reached=true;break;}
-          const before=getFutureEnergy();
+          if(batch.length>=free)break;
+          if(targetEnergy>0&&plannedEnergy>=targetEnergy)break;
+          batch.push(card);
+          plannedEnergy+=getCardEnergy(card);
+        }
+        suiteTelemetryLog('suite','brick_batch_selected',{
+          page:cur,
+          matchingCards:cards.length,
+          selectedCards:batch.length,
+          freeSlots:free,
+          energyBefore:energyBeforeBatch,
+          plannedEnergy,
+          targetEnergy
+        });
+        for(const card of batch){
           card.click();
           const img=getCardImage(card);if(img)takenMap.set(img,(takenMap.get(img)||0)+1);
           addedTotal++;
           addedOnPage++;
-          await sleep(90);
-          const after=getFutureEnergy();
-          if(targetEnergy>0&&(after>=targetEnergy||before+getCardEnergy(card)>=targetEnergy)){reached=true;break;}
         }
+        await sleep(30);
+        const energyAfterBatch=getFutureEnergy();
+        suiteTelemetryLog('suite','brick_batch_clicked',{
+          page:cur,
+          clickedCards:batch.length,
+          energyBefore:energyBeforeBatch,
+          energyAfter:energyAfterBatch,
+          plannedEnergy,
+          targetEnergy
+        });
+        if(getFreeSlots()<=0||(targetEnergy>0&&(energyAfterBatch>=targetEnergy||plannedEnergy>=targetEnergy)))reached=true;
         if(reached)break;
         const curAfter=getCurrentPage();
         if(curAfter!==null&&curAfter>1){
@@ -9441,6 +9710,8 @@
                 data: diagnosticSanitize(data)
             };
 
+            suiteTelemetryLog('autowatch', event, record, /error|failed|limit/i.test(event) ? 'error' : 'debug');
+
             diagnosticWriteQueue = diagnosticWriteQueue
                 .then(async () => {
                     const stored = await GM_getValue(DIAGNOSTIC_STORE_KEY, []);
@@ -11422,7 +11693,7 @@
             window.__awVisibleTabFetchInstalled = true;
 
             const originalFetch = window.fetch;
-            window.fetch = async function (...args) {
+            const hookedFetch = async function (...args) {
                 const response = await originalFetch.apply(this, args);
 
                 try {
@@ -11505,6 +11776,9 @@
 
                 return response;
             };
+            hookedFetch.__awVisibleTabOriginal = originalFetch;
+            hookedFetch.__awVisibleTabHook = true;
+            window.fetch = hookedFetch;
         }
 
         function installSiteNotificationInterceptor() {
@@ -11536,10 +11810,12 @@
             };
 
             const wrapNotifier = (type, originalFn) => {
-                return function (message) {
+                const wrapped = function (message) {
                     try { handleSiteNotification(String(message)); } catch (e) {}
                     return typeof originalFn === 'function' ? originalFn.apply(this, arguments) : undefined;
                 };
+                wrapped.__awVisibleTabOriginal = originalFn;
+                return wrapped;
             };
 
             const target = unsafeWindow?.DLEPush || window.DLEPush;
@@ -11561,6 +11837,7 @@
                     }
                 });
                 observer.observe(observerTarget, { childList: true, subtree: true });
+                window.__awVisibleTabDleObserver = observer;
             }
         }
 
@@ -12865,6 +13142,23 @@
             try { document.removeEventListener('pointerdown', handleTabFocus, true); } catch (e) {}
             try { window.removeEventListener('beforeunload', handleBeforeUnload); } catch (e) {}
             try { window.removeEventListener('pagehide', handleBeforeUnload); } catch (e) {}
+            try {
+                if(window.fetch?.__awVisibleTabHook && window.fetch.__awVisibleTabOriginal){
+                    window.fetch = window.fetch.__awVisibleTabOriginal;
+                }
+                window.__awVisibleTabFetchInstalled = false;
+            } catch (e) {}
+            try {
+                const target = unsafeWindow?.DLEPush || window.DLEPush;
+                if(target && typeof target === 'object'){
+                    ['info', 'success', 'error', 'warning', 'warn'].forEach(type => {
+                        if(target[type]?.__awVisibleTabOriginal) target[type] = target[type].__awVisibleTabOriginal;
+                    });
+                }
+                window.__awVisibleTabDleObserver?.disconnect();
+                window.__awVisibleTabDleObserver = null;
+                window.__awVisibleTabDleInstalled = false;
+            } catch (e) {}
             try { document.getElementById('aw-active-tab-panel')?.remove(); } catch (e) {}
             try { document.getElementById(ANIME_DB_MODAL_ID)?.remove(); } catch (e) {}
             try { document.getElementById(MANUAL_MAX_EP_MODAL_ID)?.remove(); } catch (e) {}
@@ -12878,8 +13172,8 @@
   }
 
   function initLabyrinthQuiz(){
-    if(!cfg.modLabyrinthQuiz) return;
-    if(!/\/labyrinth\//.test(location.pathname)) return;
+    if(!cfg.modLabyrinthQuiz){ cleanupLabyrinthQuiz(); return; }
+    if(!/\/labyrinth(?:\/|$)/.test(location.pathname)){ cleanupLabyrinthQuiz(); return; }
     if(window.__suiteLabyrinthQuizInstalled) return;
     window.__suiteLabyrinthQuizInstalled=true;
 
@@ -13151,6 +13445,59 @@
       let resetTimer = null;
       let quizDbReady = false;
       let processTimer = null;
+      const quizResultTimers = new Set();
+      window.__suiteLabyrinthQuizResultTimers = quizResultTimers;
+      window.__suiteLabyrinthQuizRuntimeCleanup = () => {
+        clearTimeout(processTimer);
+        clearTimeout(resetTimer);
+        quizResultTimers.forEach(timer => clearInterval(timer));
+        quizResultTimers.clear();
+      };
+
+      function quizHash(text) {
+        let hash = 2166136261;
+        for (const char of String(text || '')) {
+          hash ^= char.charCodeAt(0);
+          hash = Math.imul(hash, 16777619);
+        }
+        return (hash >>> 0).toString(16).padStart(8, '0');
+      }
+
+      function observeQuizResult(attempt) {
+        const startedAt = Date.now();
+        let lastSignature = '';
+        const timer = setInterval(() => {
+          const resultText = document.getElementById('labyrinthEventText')?.textContent?.trim() || '';
+          const eventTitle = document.getElementById('labyrinthEventTitle')?.textContent?.trim() || '';
+          const accChange = document.getElementById('labyrinthEventAcc')?.textContent?.trim() || '';
+          const quizVisible = isQuizVisible(document.getElementById('labyrinthQuiz'));
+          const signature = `${eventTitle}|${resultText}|${accChange}|${quizVisible}`;
+          if(signature !== lastSignature){
+            lastSignature = signature;
+            suiteTelemetryLog('quiz', 'quiz_result_observation', { ...attempt, eventTitle, resultText, accChange, quizVisible });
+          }
+
+          const isIncorrect = /\u043d\u0435\u043f\u0440\u0430\u0432\u0438\u043b\u044c\u043d\u044b\u0439\s+\u043e\u0442\u0432\u0435\u0442/i.test(resultText);
+          const isCorrect = !isIncorrect && /(?:^|[.!?]\s*)\u043f\u0440\u0430\u0432\u0438\u043b\u044c\u043d\u044b\u0439\s+\u043e\u0442\u0432\u0435\u0442/i.test(resultText);
+          const timedOut = Date.now() - startedAt >= 12000;
+          if(!isCorrect && !isIncorrect && !timedOut) return;
+
+          clearInterval(timer);
+          quizResultTimers.delete(timer);
+          const result = isCorrect ? 'correct' : (isIncorrect ? 'incorrect' : 'unknown');
+          const details = { ...attempt, result, eventTitle, resultText, accChange };
+          suiteTelemetryLog('quiz', 'quiz_result_observed', details, result === 'correct' ? 'debug' : 'error');
+
+          if(result === 'unknown'){
+            suiteTelemetryLog('quiz', 'quiz_result_unknown', details, 'error');
+          } else if(result === 'incorrect' && attempt.selectedAnswer && attempt.selectedAnswer === attempt.highlightedAnswer){
+            suiteTelemetryLog('quiz', 'quiz_expected_answer_rejected', details, 'error');
+          } else if(result === 'correct' && attempt.expectedAnswer && attempt.selectedAnswer !== attempt.expectedAnswer){
+            suiteTelemetryLog('quiz', 'quiz_answer_mismatch', details, 'error');
+          }
+        }, 250);
+        quizResultTimers.add(timer);
+      }
 
       function isQuizVisible(el) {
         if (!el || !el.isConnected) return false;
@@ -13222,6 +13569,24 @@
         // Очищаем текст от возможного игрового префикса перед поиском в базе,
         // но оригинальный текст сохраняем для отправки в Telegram
         const cleanedQuestionText = cleanQuestionText(questionText);
+        const attempt = {
+          attemptId:`${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`,
+          question:questionText,
+          normalizedQuestion:cleanedQuestionText,
+          questionHash:quizHash(normalize(cleanedQuestionText)),
+          options,
+          room:document.getElementById('labyrinthRoomTitle')?.textContent?.trim() || '',
+          expectedAnswer:'',
+          highlightedAnswer:'',
+          selectedAnswer:'',
+          selectionSource:'user'
+        };
+        suiteTelemetryLog('quiz', 'quiz_shown', attempt);
+        buttons.forEach(button => button.addEventListener('click', () => {
+          attempt.selectedAnswer = button.textContent.trim();
+          suiteTelemetryLog('quiz', 'answer_selected', attempt);
+          observeQuizResult(attempt);
+        }, { once:true, capture:true }));
 
         const runSearch = () => {
           const found = findQuestion(cleanedQuestionText, db);
@@ -13229,18 +13594,26 @@
           if (found) {
             const isExactQuestion = found.score >= EXACT_THRESHOLD;
             const answerResult    = findAnswerButton(found.match.answer, buttons);
+            attempt.expectedAnswer = found.match.answer || '';
+            attempt.questionMatchScore = found.score;
+            attempt.answerMatchScore = answerResult?.score || 0;
 
             if (isExactQuestion && answerResult && answerResult.score >= EXACT_THRESHOLD) {
+              attempt.highlightedAnswer = answerResult.btn.textContent.trim();
               answerResult.btn.classList.add('labyrinth__quiz-btn--correct');
+              suiteTelemetryLog('quiz', 'answer_resolved', { ...attempt, matchType:'exact' });
               quizLog(`[QuizHL] ✅ Точный ответ: "${found.match.answer}"`);
             } else {
               if (answerResult) {
+                attempt.highlightedAnswer = answerResult.btn.textContent.trim();
                 answerResult.btn.classList.add('labyrinth__quiz-btn--fuzzy');
               }
+              suiteTelemetryLog('quiz', 'answer_resolved', { ...attempt, matchType:'fuzzy' });
               quizLog(`[QuizHL] ⚠️ Неточный (вопрос: ${found.score.toFixed(2)}, ответ: ${answerResult ? answerResult.score.toFixed(2) : 'не найден'})`);
               sendQuizReport('FUZZY', questionText, options, found.match.answer);
             }
           } else {
+            suiteTelemetryLog('quiz', 'answer_not_found', attempt, 'error');
             quizLog('[QuizHL] 🆕 Новый вопрос:', cleanedQuestionText);
             sendQuizReport('NEW', questionText, options, null);
           }
@@ -13269,10 +13642,22 @@
       // ═══════════════════════════════════════════════════════════════
       //  СТАРТ
       // ═══════════════════════════════════════════════════════════════
-      checkSync().then(() => {
-        quizDbReady = true;
-        scheduleProcessQuiz(0);
-      });
+      let syncAttempts = 0;
+      const startQuizSync = () => {
+        syncAttempts += 1;
+        checkSync().then(() => {
+          quizDbReady = true;
+          suiteTelemetryLog('quiz', 'database_ready', { syncAttempts, questionCount:getLocalDB().questions.length });
+          scheduleProcessQuiz(0);
+        }).catch(error => {
+          suiteTelemetryLog('quiz', 'database_sync_failed', { syncAttempts, error:error?.message || String(error) }, 'error');
+          if(window.__suiteLabyrinthQuizInstalled && syncAttempts < 5){
+            const delay = Math.min(60000, 3000 * (2 ** (syncAttempts - 1)));
+            window.__suiteLabyrinthQuizSyncTimer = setTimeout(startQuizSync, delay);
+          }
+        });
+      };
+      startQuizSync();
 
     })();
   }
@@ -13660,8 +14045,15 @@
   }
 
   function cleanupLabyrinthQuiz(){
+    if(window.__suiteLabyrinthQuizInstalled) suiteTelemetryLog('quiz', 'module_cleanup', { path:location.pathname });
+    try{ window.__suiteLabyrinthQuizRuntimeCleanup?.(); }catch(e){}
+    window.__suiteLabyrinthQuizRuntimeCleanup = null;
     try{ window.__suiteLabyrinthQuizObserver?.disconnect(); }catch(e){}
     window.__suiteLabyrinthQuizObserver = null;
+    try{ clearTimeout(window.__suiteLabyrinthQuizSyncTimer); }catch(e){}
+    window.__suiteLabyrinthQuizSyncTimer = null;
+    try{ window.__suiteLabyrinthQuizResultTimers?.forEach(timer => clearInterval(timer)); }catch(e){}
+    window.__suiteLabyrinthQuizResultTimers = null;
     document.getElementById('suite-labyrinth-quiz-style')?.remove();
     document.querySelectorAll('.labyrinth__quiz-btn--correct,.labyrinth__quiz-btn--fuzzy').forEach(el=>{
       el.classList.remove('labyrinth__quiz-btn--correct','labyrinth__quiz-btn--fuzzy');
@@ -13671,6 +14063,7 @@
 
   function cleanupLabyrinthFatigue(){
     const state = window.__suiteLabyrinthFatigueState;
+    if(state) suiteTelemetryLog('fatigue', 'module_cleanup', { state:state.state, lastSnapshot:state.lastSnapshot });
     if(state){
       try{ clearInterval(state.tickInterval); }catch(e){}
       try{ clearTimeout(state.startTimer); }catch(e){}
@@ -13745,6 +14138,7 @@
       state: loadState()
     };
     window.__suiteLabyrinthFatigueState = runtime;
+    suiteTelemetryLog('fatigue', 'module_initialized', { savedState:runtime.state });
 
     function makeEmptyState(){
       return {
@@ -13896,6 +14290,12 @@
         event:snapshot.event,
         today:snapshot.today,
       });
+      suiteTelemetryLog('fatigue', 'moves_recorded', {
+        delta,
+        snapshot,
+        movesSinceFatigue:runtime.state.movesSinceFatigue,
+        sessionMoves:runtime.state.sessionMoves
+      });
     }
 
     function recordTrigger(snapshot, trigger){
@@ -13927,6 +14327,17 @@
         text:trigger.label,
         movesBetween:movesBeforeReset,
         today:snapshot.today,
+      });
+      suiteTelemetryLog('fatigue', 'trigger_recorded', {
+        trigger,
+        snapshot,
+        movesBeforeReset,
+        counters:{
+          fatigueCount:runtime.state.fatigueCount,
+          trapsBack:runtime.state.trapsBack,
+          mimics:runtime.state.mimics,
+          mimicBacks:runtime.state.mimicBacks
+        }
       });
       return true;
     }
@@ -14133,7 +14544,9 @@
 
     function resetStats(){
       if(!confirm('Сбросить статистику ходов и событий?')) return;
+      const previousState = runtime.state;
       runtime.state = makeEmptyState();
+      suiteTelemetryLog('fatigue', 'stats_reset', { previousState });
       runtime.statsPage = 0;
       saveState();
       renderBox();
@@ -14148,6 +14561,10 @@
         attachBox();
 
         const snapshot = collectSnapshot();
+        const previousSnapshot = runtime.lastSnapshot;
+        if(previousSnapshot && JSON.stringify(snapshot) !== JSON.stringify(previousSnapshot)){
+          suiteTelemetryLog('fatigue', 'snapshot_changed', { previous:previousSnapshot, current:snapshot });
+        }
         if(snapshot.today !== null){
           if(runtime.state.lastTodaySteps === null){
             runtime.state.lastTodaySteps = snapshot.today;
