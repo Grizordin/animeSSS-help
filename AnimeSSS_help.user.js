@@ -482,6 +482,7 @@
   const SUITE_TELEMETRY_QUEUE_PREFIX = 'suite_telemetry_queue_v1_';
   const SUITE_TELEMETRY_INSTALL_KEY = 'suite_telemetry_install_id_v1';
   const SUITE_TELEMETRY_ACTIVE_KEY = 'suite_telemetry_active_day_v1';
+  const SUITE_TELEMETRY_ACTIVE_LOCK_KEY = 'suite_telemetry_active_lock_v1';
   const SUITE_TELEMETRY_FLUSH_MS = 5 * 60 * 1000;
   const SUITE_TELEMETRY_BATCH_SIZE = 10;
   const SUITE_TELEMETRY_MAX_EVENTS = 200;
@@ -651,14 +652,54 @@
     const day = new Date().toISOString().slice(0, 10);
     const marker = `${day}:${SUITE_ACCESS_VERSION}:${nick}:${clubId}`;
     if(gmGet(SUITE_TELEMETRY_ACTIVE_KEY, '') === marker) return;
-    gmSet(SUITE_TELEMETRY_ACTIVE_KEY, marker);
-    suiteTelemetryLog('suite', 'script_initialized', { nick, clubId });
-    suiteTelemetryPersistPending();
-    void suiteTelemetryFlush('script_initialized');
+    const now = Date.now();
+    const activeLock = Number(gmGet(SUITE_TELEMETRY_ACTIVE_LOCK_KEY, 0) || 0);
+    if(activeLock && now - activeLock < 15000) return;
+    gmSet(SUITE_TELEMETRY_ACTIVE_LOCK_KEY, now);
+    const time = new Date(now).toISOString();
+    const event = {
+      id:`${now.toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
+      timestamp:now,
+      time,
+      module:'suite',
+      event:'script_initialized',
+      level:'debug',
+      sessionId:suiteTelemetrySessionId,
+      path:location.pathname,
+      visibility:document.visibilityState,
+      data:{ nick, clubId }
+    };
+    void (async () => {
+      const ok = await suiteReportEvent('telemetry_batch', {
+        batchId:`${suiteTelemetrySessionId}-suite-${event.id}`,
+        installId:suiteTelemetryInstallId,
+        sessionId:suiteTelemetrySessionId,
+        module:'suite',
+        reason:'script_initialized',
+        startedAt:time,
+        finishedAt:time,
+        eventCount:1,
+        events:[event],
+        nick
+      });
+      try {
+        if(ok){
+          gmSet(SUITE_TELEMETRY_ACTIVE_KEY, marker);
+          return;
+        }
+        suiteTelemetryPendingRecords.push(event);
+        suiteTelemetryPersistPending();
+      } finally {
+        gmDelete(SUITE_TELEMETRY_ACTIVE_LOCK_KEY);
+      }
+    })();
   }
 
   function suiteTelemetryQueueKeys() {
-    try { return GM_listValues().filter(key => String(key).startsWith(SUITE_TELEMETRY_QUEUE_PREFIX)); }
+    try {
+      const keys = GM_listValues().filter(key => String(key).startsWith(SUITE_TELEMETRY_QUEUE_PREFIX));
+      return [suiteTelemetryQueueKey, ...keys.filter(key => key !== suiteTelemetryQueueKey)];
+    }
     catch(e) { return [suiteTelemetryQueueKey]; }
   }
 
