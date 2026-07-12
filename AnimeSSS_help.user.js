@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.51
+// @version      3.52
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -418,7 +418,10 @@
     }
   }
 
+  let suiteAuthenticatedNickname = '';
+
   function suiteGetSafeNickname() {
+    if(suiteAuthenticatedNickname) return suiteAuthenticatedNickname;
     try {
       const nick = String(suiteGetMyNickname() || '').trim();
       if (nick) return nick;
@@ -437,6 +440,7 @@
   }
 
   function suiteGetCurrentUserName() {
+    if(suiteAuthenticatedNickname) return suiteAuthenticatedNickname;
     try {
       const nick = String(suiteGetMyNickname() || '').trim();
       if (nick) return suiteDecodeNickname(nick);
@@ -477,11 +481,13 @@
 
   const SUITE_TELEMETRY_QUEUE_PREFIX = 'suite_telemetry_queue_v1_';
   const SUITE_TELEMETRY_INSTALL_KEY = 'suite_telemetry_install_id_v1';
+  const SUITE_TELEMETRY_ACTIVE_KEY = 'suite_telemetry_active_day_v1';
   const SUITE_TELEMETRY_FLUSH_MS = 5 * 60 * 1000;
   const SUITE_TELEMETRY_BATCH_SIZE = 10;
   const SUITE_TELEMETRY_MAX_EVENTS = 200;
   const SUITE_TELEMETRY_MAX_EVENT_CHARS = 200000;
   const SUITE_TELEMETRY_MAX_QUEUE_CHARS = 1000000;
+  const SUITE_TELEMETRY_MAX_BATCH_CHARS = 350000;
   const SUITE_TELEMETRY_MAX_AGE_MS = 2 * 24 * 60 * 60 * 1000;
   const suiteTelemetrySessionId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const suiteTelemetryQueueKey = `${SUITE_TELEMETRY_QUEUE_PREFIX}${suiteTelemetrySessionId}`;
@@ -531,8 +537,30 @@
     return [];
   }
 
+  function suiteTelemetryNormalizeRecord(record) {
+    if(!record || typeof record !== 'object') return null;
+    let chars = 0;
+    try { chars = JSON.stringify(record).length; } catch(e) { chars = SUITE_TELEMETRY_MAX_EVENT_CHARS + 1; }
+    if(chars <= SUITE_TELEMETRY_MAX_EVENT_CHARS) return record;
+    return {
+      id:String(record.id || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`),
+      timestamp:Number(record.timestamp || Date.now()),
+      time:String(record.time || new Date().toISOString()),
+      module:String(record.module || 'suite'),
+      event:String(record.event || 'oversized_event'),
+      level:String(record.level || 'debug'),
+      sessionId:String(record.sessionId || suiteTelemetrySessionId),
+      path:String(record.path || ''),
+      visibility:String(record.visibility || ''),
+      data:{ truncated:true, originalChars:chars, recoveredFromStoredQueue:true }
+    };
+  }
+
   function suiteTelemetryWriteQueue(records, key = suiteTelemetryQueueKey) {
-    const limited = records.slice(-SUITE_TELEMETRY_MAX_EVENTS);
+    const limited = records
+      .map(suiteTelemetryNormalizeRecord)
+      .filter(Boolean)
+      .slice(-SUITE_TELEMETRY_MAX_EVENTS);
     while(limited.length > 0){
       let serialized = '';
       try { serialized = JSON.stringify(limited); } catch(e) { limited.shift(); continue; }
@@ -543,6 +571,23 @@
       limited.shift();
     }
     gmDelete(key);
+  }
+
+  function suiteTelemetryTakeBatch(records, module) {
+    const candidates = records
+      .filter(item => (item.module || 'suite') === module)
+      .slice(0, SUITE_TELEMETRY_BATCH_SIZE)
+      .map(suiteTelemetryNormalizeRecord)
+      .filter(Boolean);
+    const batch = [];
+    for(const event of candidates){
+      let chars = 0;
+      try { chars = JSON.stringify([...batch, event]).length; }
+      catch(e) { continue; }
+      if(batch.length && chars > SUITE_TELEMETRY_MAX_BATCH_CHARS) break;
+      if(chars <= SUITE_TELEMETRY_MAX_BATCH_CHARS) batch.push(event);
+    }
+    return batch;
   }
 
   function suiteTelemetryPersistPending() {
@@ -590,13 +635,26 @@
         }
       }
       suiteTelemetryPendingRecords.push(record);
-      if(suiteTelemetryPendingRecords.filter(item => item.module === module).length >= SUITE_TELEMETRY_BATCH_SIZE){
+      if(level === 'error'){
+        suiteTelemetryPersistPending();
+        void suiteTelemetryFlush('error');
+      } else if(suiteTelemetryPendingRecords.filter(item => item.module === module).length >= SUITE_TELEMETRY_BATCH_SIZE){
         suiteTelemetryPersistPending();
         void suiteTelemetryFlush('size');
       } else {
         suiteTelemetrySchedulePersist();
       }
     } catch(e) {}
+  }
+
+  function suiteTelemetryLogActiveOnce(nick, clubId) {
+    const day = new Date().toISOString().slice(0, 10);
+    const marker = `${day}:${SUITE_ACCESS_VERSION}:${nick}:${clubId}`;
+    if(gmGet(SUITE_TELEMETRY_ACTIVE_KEY, '') === marker) return;
+    gmSet(SUITE_TELEMETRY_ACTIVE_KEY, marker);
+    suiteTelemetryLog('suite', 'script_initialized', { nick, clubId });
+    suiteTelemetryPersistPending();
+    void suiteTelemetryFlush('script_initialized');
   }
 
   function suiteTelemetryQueueKeys() {
@@ -615,7 +673,7 @@
         for(const module of modules) {
           while(true) {
             const current = suiteTelemetryReadQueue(key);
-            const events = current.filter(item => (item.module || 'suite') === module).slice(0, SUITE_TELEMETRY_BATCH_SIZE);
+            const events = suiteTelemetryTakeBatch(current, module);
             if(!events.length) break;
             const ids = new Set(events.map(item => item.id));
             const eventSessionId = events[0].sessionId || suiteTelemetrySessionId;
@@ -830,7 +888,8 @@
       clubId = suiteGetMyClubId();
     }
 
-    const nick = suiteGetSafeNickname();
+    const nick = suiteDecodeNickname(suiteGetSafeNickname());
+    if(nick && nick !== 'Неизвестно') suiteAuthenticatedNickname = nick;
 
     if (clubId !== SUITE_ALLOWED_CLUB_ID) {
       suiteSendAccessInfoOnce('Заблокирован', nick, clubId || 'unknown');
@@ -839,6 +898,7 @@
       throw new Error('Unauthorized usage');
     }
 
+    suiteTelemetryLogActiveOnce(nick, clubId);
     suiteSendAccessInfoOnce('Разрешён', nick, clubId);
     return true;
   }
@@ -5286,9 +5346,15 @@
         }
       }catch(error){
         text = error?.message || 'Ошибка сети';
+        suiteTelemetryLog('chat_stone', 'collect_failed', { diamond, error:text }, 'error');
         log(`Collect failed for ${diamond.code}:`, text);
       }finally{
         state.inFlight.delete(diamond.messageId);
+        suiteTelemetryLog('chat_stone', 'collect_finished', {
+          diamond,
+          result:text,
+          seen:state.seen.has(diamond.messageId)
+        });
         await sleep(DEFAULTS.queueIntervalMs);
       }
     }
@@ -5487,13 +5553,12 @@
           if(item?.html) analyzeChatHtml(item.html, source);
         });
       }catch(error){
-        suiteTelemetryLog('chat_stone', 'collect_failed', { diamond, error:error?.message || String(error) }, 'error');
         state.lastChatActivity = Date.now();
         setRaw(KEYS.lastChatActivity, state.lastChatActivity);
         log('Chat fetch failed:', error?.message || error);
         suiteTelemetryLog('chat_stone', 'snapshot_failed', { source, error:error?.message || String(error) }, 'error');
       }finally{
-        suiteTelemetryLog('chat_stone', 'collect_finished', { diamond, result:text, seen:state.seen.has(diamond.messageId) });
+        suiteTelemetryLog('chat_stone', 'snapshot_finished', { source });
         state.snapshotInFlight = false;
       }
     }
