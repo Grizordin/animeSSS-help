@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.2
+// @version      3.3
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -616,6 +616,29 @@
     };
 
     window.addEventListener('error', event => {
+      const target = event.target;
+      if(target && target !== window){
+        if(target instanceof HTMLMediaElement){
+          const rawSource = target.currentSrc || target.src || target.querySelector?.('source[src]')?.src || '';
+          const source = (() => {
+            try {
+              const url = new URL(rawSource, location.href);
+              return `${url.origin}${url.pathname}`;
+            } catch(e) {
+              return String(rawSource).split(/[?#]/, 1)[0];
+            }
+          })();
+          report('media_resource_error', {
+            tag:String(target.tagName || '').toLowerCase(),
+            source,
+            mediaErrorCode:target.error?.code || 0,
+            mediaErrorMessage:target.error?.message || '',
+            networkState:target.networkState,
+            readyState:target.readyState
+          }, 'warn');
+        }
+        return;
+      }
       report('global_error', {
         message:event.message || event.error?.message || 'unknown error',
         filename:event.filename || '',
@@ -8198,28 +8221,39 @@
   function setupLabyrinthQuizRouteWatcher(){
     if(labyrinthRouteWatcherInstalled) return;
     labyrinthRouteWatcherInstalled=true;
-    let lastHref=location.href;
+    const isLabyrinthRoute=()=>/\/labyrinth(?:\/|$)/.test(location.pathname);
+    let wasLabyrinth=isLabyrinthRoute();
+    let routeCheckTimer=null;
     const check=()=>{
-      if(location.href===lastHref && window.__suiteLabyrinthQuizInstalled && window.__suiteLabyrinthEmissionInstalled && window.__suiteLabyrinthFatigueInstalled && window.__suiteClubWarRelationsInstalled) return;
-      lastHref=location.href;
-      if(cfg.modLabyrinthQuiz) initLabyrinthQuiz();
-      if(cfg.modLabyrinthEmission) initLabyrinthEmission();
-      else cleanupLabyrinthEmission();
-      if(cfg.modLabyrinthFatigue) initLabyrinthFatigue();
-      else cleanupLabyrinthFatigue();
-      if(cfg.modLabyrinthClubWar) initClubWarRelations();
-      else cleanupClubWarRelations();
+      const isLabyrinth=isLabyrinthRoute();
+      if(isLabyrinth===wasLabyrinth) return;
+      wasLabyrinth=isLabyrinth;
+      if(isLabyrinth){
+        if(cfg.modLabyrinthQuiz) initLabyrinthQuiz();
+        if(cfg.modLabyrinthEmission) initLabyrinthEmission();
+        if(cfg.modLabyrinthFatigue) initLabyrinthFatigue();
+        if(cfg.modLabyrinthClubWar) initClubWarRelations();
+        return;
+      }
+      cleanupLabyrinthQuiz();
+      cleanupLabyrinthEmission();
+      cleanupLabyrinthFatigue();
+      cleanupClubWarRelations();
+    };
+    const scheduleCheck=()=>{
+      clearTimeout(routeCheckTimer);
+      routeCheckTimer=setTimeout(check,100);
     };
     ['pushState','replaceState'].forEach(name=>{
       const original=history[name];
       if(typeof original!=='function') return;
       history[name]=function(...args){
         const result=original.apply(this,args);
-        setTimeout(check,0);
+        scheduleCheck();
         return result;
       };
     });
-    window.addEventListener('popstate',()=>setTimeout(check,0));
+    window.addEventListener('popstate',scheduleCheck);
   }
 
   async function init(){

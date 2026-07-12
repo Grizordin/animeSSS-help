@@ -26,6 +26,10 @@ export default {
         return corsResponse(request, null, 204);
       }
 
+      if (request.method === 'GET' && url.pathname.startsWith('/admin/')) {
+        return handleAdminRead(request, env, url);
+      }
+
       if (request.method === 'GET') {
         return corsResponse(request, {
           ok: true,
@@ -99,6 +103,166 @@ export default {
     ctx.waitUntil(deleteExpiredTelemetry(env.TELEMETRY_DB));
   },
 };
+
+async function handleAdminRead(request, env, url) {
+  if (!env.TELEMETRY_DB) return adminResponse({ ok: false, error: 'telemetry_not_configured' }, 503);
+  if (!isAdminAuthorized(request, env)) return adminResponse({ ok: false, error: 'unauthorized' }, 401);
+
+  if (url.pathname === '/admin/health') {
+    const row = await env.TELEMETRY_DB.prepare('SELECT COUNT(*) AS batch_count FROM telemetry_batches').first();
+    return adminResponse({ ok: true, database: 'connected', batchCount: Number(row?.batch_count || 0) });
+  }
+
+  if (url.pathname === '/admin/logs') return readTelemetryLogs(env.TELEMETRY_DB, url.searchParams);
+  if (url.pathname === '/admin/incidents') return readTelemetryIncidents(env.TELEMETRY_DB, url.searchParams);
+  if (url.pathname === '/admin/session') return readTelemetrySession(env.TELEMETRY_DB, url.searchParams);
+  if (url.pathname === '/admin/stats') return readTelemetryStats(env.TELEMETRY_DB, url.searchParams);
+  return adminResponse({ ok: false, error: 'admin_route_not_found' }, 404);
+}
+
+function isAdminAuthorized(request, env) {
+  const expected = String(env.LOG_READ_TOKEN || '');
+  const header = String(request.headers.get('Authorization') || '');
+  const provided = header.startsWith('Bearer ') ? header.slice(7) : '';
+  if (!expected || expected.length !== provided.length) return false;
+  let mismatch = 0;
+  for (let index = 0; index < expected.length; index += 1) {
+    mismatch |= expected.charCodeAt(index) ^ provided.charCodeAt(index);
+  }
+  return mismatch === 0;
+}
+
+function adminResponse(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store, max-age=0',
+      'X-Content-Type-Options': 'nosniff',
+    },
+  });
+}
+
+function readLimit(params, fallback = 50, maximum = 200) {
+  const value = Number.parseInt(params.get('limit') || '', 10);
+  return Number.isFinite(value) ? Math.max(1, Math.min(maximum, value)) : fallback;
+}
+
+function readHours(params, fallback = 24) {
+  const value = Number.parseInt(params.get('hours') || '', 10);
+  return Number.isFinite(value) ? Math.max(1, Math.min(168, value)) : fallback;
+}
+
+function readSinceIso(params) {
+  return new Date(Date.now() - readHours(params) * 60 * 60 * 1000).toISOString();
+}
+
+function parseJsonColumn(value, fallback) {
+  try { return JSON.parse(value); } catch (error) { return fallback; }
+}
+
+async function readTelemetryLogs(db, params) {
+  const module = String(params.get('module') || '').trim();
+  const nick = String(params.get('nick') || '').trim();
+  const before = String(params.get('before') || '').trim();
+  const limitValue = readLimit(params);
+  const conditions = ['received_at >= ?'];
+  const values = [readSinceIso(params)];
+  if (module) { conditions.push('module = ?'); values.push(module); }
+  if (nick) { conditions.push('nick = ? COLLATE NOCASE'); values.push(nick); }
+  if (before) { conditions.push('received_at < ?'); values.push(before); }
+  values.push(limitValue);
+
+  const query = `
+    SELECT batch_id, received_at, started_at, finished_at, nick, install_id,
+      session_id, module, reason, event_count, script_version, host, path,
+      country, events_json
+    FROM telemetry_batches
+    WHERE ${conditions.join(' AND ')}
+    ORDER BY received_at DESC
+    LIMIT ?
+  `;
+  const result = await db.prepare(query).bind(...values).all();
+  const rows = (result.results || []).map(row => ({
+    ...row,
+    events: parseJsonColumn(row.events_json, []),
+    events_json: undefined,
+  }));
+  return adminResponse({ ok: true, count: rows.length, rows });
+}
+
+async function readTelemetryIncidents(db, params) {
+  const nick = String(params.get('nick') || '').trim();
+  const incidentType = String(params.get('type') || '').trim();
+  const limitValue = readLimit(params);
+  const conditions = ['received_at >= ?'];
+  const values = [readSinceIso(params)];
+  if (nick) { conditions.push('nick = ? COLLATE NOCASE'); values.push(nick); }
+  if (incidentType) { conditions.push('incident_type = ?'); values.push(incidentType); }
+  values.push(limitValue);
+
+  const result = await db.prepare(`
+    SELECT incident_key, batch_id, received_at, module, incident_type, nick, details_json
+    FROM telemetry_incidents
+    WHERE ${conditions.join(' AND ')}
+    ORDER BY received_at DESC
+    LIMIT ?
+  `).bind(...values).all();
+  const rows = (result.results || []).map(row => ({
+    ...row,
+    details: parseJsonColumn(row.details_json, {}),
+    details_json: undefined,
+  }));
+  return adminResponse({ ok: true, count: rows.length, rows });
+}
+
+async function readTelemetrySession(db, params) {
+  const sessionId = String(params.get('session_id') || '').trim();
+  if (!sessionId) return adminResponse({ ok: false, error: 'session_id_required' }, 400);
+  const limitValue = readLimit(params, 100, 500);
+  const result = await db.prepare(`
+    SELECT batch_id, received_at, started_at, finished_at, nick, install_id,
+      session_id, module, reason, event_count, script_version, host, path,
+      country, events_json
+    FROM telemetry_batches
+    WHERE session_id = ?
+    ORDER BY started_at ASC
+    LIMIT ?
+  `).bind(sessionId, limitValue).all();
+  const rows = (result.results || []).map(row => ({
+    ...row,
+    events: parseJsonColumn(row.events_json, []),
+    events_json: undefined,
+  }));
+  return adminResponse({ ok: true, count: rows.length, rows });
+}
+
+async function readTelemetryStats(db, params) {
+  const since = readSinceIso(params);
+  const [modules, incidents] = await Promise.all([
+    db.prepare(`
+      SELECT module, COUNT(*) AS batch_count, COALESCE(SUM(event_count), 0) AS event_count,
+        COUNT(DISTINCT nick) AS user_count
+      FROM telemetry_batches
+      WHERE received_at >= ?
+      GROUP BY module
+      ORDER BY event_count DESC
+    `).bind(since).all(),
+    db.prepare(`
+      SELECT incident_type, COUNT(*) AS incident_count
+      FROM telemetry_incidents
+      WHERE received_at >= ?
+      GROUP BY incident_type
+      ORDER BY incident_count DESC
+    `).bind(since).all(),
+  ]);
+  return adminResponse({
+    ok: true,
+    since,
+    modules: modules.results || [],
+    incidents: incidents.results || [],
+  });
+}
 
 async function storeTelemetryBatch(env, payload, meta) {
   const batchId = limit(String(payload.batchId || '').trim(), 160);
