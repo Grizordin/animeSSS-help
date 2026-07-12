@@ -10,10 +10,15 @@ const ALLOWED_TYPES = new Set([
   'unknown_push',
   'quiz_question',
   'labyrinth_fatigue_log',
+  'telemetry_batch',
 ]);
 
+const TELEMETRY_MODULES = new Set(['suite', 'autowatch', 'chat_stone', 'gacha', 'fatigue', 'quiz']);
+const TELEMETRY_MAX_EVENTS = 10;
+const TELEMETRY_RETENTION_SECONDS = 7 * 24 * 60 * 60;
+
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     try {
       const url = new URL(request.url);
 
@@ -53,6 +58,17 @@ export default {
       const meta = buildMeta(request);
       const safePayload = sanitizePayload(payload);
 
+      if (type === 'telemetry_batch') {
+        if (!env.TELEMETRY_DB) {
+          return corsResponse(request, { ok: false, error: 'telemetry_not_configured' }, 503);
+        }
+        const stored = await storeTelemetryBatch(env, payload, meta);
+        if (stored.quizIncident) {
+          ctx.waitUntil(sendTelegramQuizIncident(env, stored.quizIncident, meta));
+        }
+        return corsResponse(request, { ok: true, stored: true, duplicate: stored.duplicate });
+      }
+
       if (type === 'access_check') {
         await sendDiscordAccess(env, safePayload, meta);
       }
@@ -77,7 +93,136 @@ export default {
       }, 500);
     }
   },
+
+  async scheduled(_controller, env, ctx) {
+    if (!env.TELEMETRY_DB) return;
+    ctx.waitUntil(deleteExpiredTelemetry(env.TELEMETRY_DB));
+  },
 };
+
+async function storeTelemetryBatch(env, payload, meta) {
+  const batchId = limit(String(payload.batchId || '').trim(), 160);
+  const module = limit(String(payload.module || '').trim(), 40);
+  const events = Array.isArray(payload.events) ? payload.events.slice(0, TELEMETRY_MAX_EVENTS) : [];
+  if (!batchId || !TELEMETRY_MODULES.has(module) || !events.length) {
+    throw new Error('invalid_telemetry_batch');
+  }
+
+  const safeEvents = events.map(event => sanitizeTelemetryValue(event));
+  const eventsJson = JSON.stringify(safeEvents);
+  if (eventsJson.length > 500000) throw new Error('telemetry_batch_too_large');
+  const quizIncident = module === 'quiz' ? findQuizIncident(safeEvents, payload) : null;
+  const result = await env.TELEMETRY_DB.prepare(`
+    INSERT OR IGNORE INTO telemetry_batches (
+      batch_id, received_at, started_at, finished_at, nick, install_id,
+      session_id, module, reason, event_count, script_version, host,
+      path, country, events_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    batchId,
+    meta.time,
+    limit(payload.startedAt || meta.time, 40),
+    limit(payload.finishedAt || meta.time, 40),
+    limit(payload.nick || 'unknown', 120),
+    limit(payload.installId || '', 160),
+    limit(payload.sessionId || '', 160),
+    module,
+    limit(payload.reason || '', 40),
+    safeEvents.length,
+    limit(payload.version || '', 40),
+    limit(payload.host || '', 120),
+    limit(payload.path || '', 500),
+    limit(meta.country, 12),
+    eventsJson
+  ).run();
+
+  const duplicate = !result.meta?.changes;
+  const shouldNotify = !duplicate && quizIncident
+    ? await registerQuizIncident(env.TELEMETRY_DB, quizIncident, batchId, meta.time)
+    : false;
+  return { duplicate, quizIncident: shouldNotify ? quizIncident : null };
+}
+
+function sanitizeTelemetryValue(value, key = '', depth = 0) {
+  if (value == null || typeof value === 'boolean' || typeof value === 'number') return value;
+  if (/(?:user_?hash|dle_?login_?hash|cookie|authorization|token|password|secret)/i.test(key)) return '[redacted]';
+  if (typeof value === 'string') {
+    return limit(value
+      .replace(/([?&](?:user_hash|dle_login_hash|token|auth|password)=)[^&#\s]*/gi, '$1[redacted]')
+      .replace(/("(?:user_hash|dle_login_hash|token|authorization|password)"\s*:\s*")[^"]*/gi, '$1[redacted]'), 30000);
+  }
+  if (typeof value !== 'object' || depth >= 6) return limit(String(value), 1000);
+  if (Array.isArray(value)) return value.slice(0, 250).map(item => sanitizeTelemetryValue(item, '', depth + 1));
+  const result = {};
+  for (const [childKey, childValue] of Object.entries(value).slice(0, 100)) {
+    result[childKey] = sanitizeTelemetryValue(childValue, childKey, depth + 1);
+  }
+  return result;
+}
+
+function findQuizIncident(events, payload) {
+  const incident = [...events].reverse().find(event =>
+    ['quiz_answer_mismatch', 'quiz_result_unknown', 'quiz_expected_answer_rejected'].includes(event?.event)
+  );
+  if (!incident) return null;
+  return {
+    ...incident.data,
+    incidentType: incident.event,
+    nick: payload.nick,
+    version: payload.version,
+    path: payload.path,
+  };
+}
+
+async function registerQuizIncident(db, incident, batchId, receivedAt) {
+  const fingerprintSource = [
+    incident.incidentType,
+    incident.questionHash || incident.question,
+    incident.expectedAnswer,
+    incident.selectedAnswer,
+    incident.result,
+  ].join('|');
+  const incidentKey = simpleHash(fingerprintSource);
+  const result = await db.prepare(`
+    INSERT OR IGNORE INTO telemetry_incidents (
+      incident_key, batch_id, received_at, module, incident_type, nick, details_json
+    ) VALUES (?, ?, ?, 'quiz', ?, ?, ?)
+  `).bind(
+    incidentKey,
+    batchId,
+    receivedAt,
+    limit(incident.incidentType || 'quiz_incident', 80),
+    limit(incident.nick || 'unknown', 120),
+    JSON.stringify(sanitizeTelemetryValue(incident))
+  ).run();
+  return Number(result.meta?.changes || 0) > 0;
+}
+
+function simpleHash(value) {
+  let hash = 2166136261;
+  for (const char of String(value || '')) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+async function deleteExpiredTelemetry(db) {
+  const cutoff = new Date(Date.now() - TELEMETRY_RETENTION_SECONDS * 1000).toISOString();
+  for (let i = 0; i < 10; i += 1) {
+    const result = await db.prepare(`
+      DELETE FROM telemetry_batches
+      WHERE batch_id IN (
+        SELECT batch_id FROM telemetry_batches
+        WHERE received_at < ?
+        ORDER BY received_at
+        LIMIT 1000
+      )
+    `).bind(cutoff).run();
+    if (Number(result.meta?.changes || 0) < 1000) break;
+  }
+  await db.prepare('DELETE FROM telemetry_incidents WHERE received_at < ?').bind(cutoff).run();
+}
 
 function corsResponse(request, data, status = 200) {
   const origin = request.headers.get('Origin') || '';
@@ -150,16 +295,16 @@ async function sendDiscordAccess(env, payload, meta) {
 
   const allowed = /разреш|allowed|ok/i.test(payload.status || '');
   const embed = {
-    title: allowed ? 'Script access allowed' : 'Script access blocked',
+    title: allowed ? 'Доступ к скрипту' : 'Блокировка скрипта',
     color: allowed ? 0x22c55e : 0xef4444,
     fields: [
-      field('Status', payload.status),
-      field('Nick', payload.nick),
-      field('Club', payload.clubId),
-      field('Site', payload.host || payload.site),
-      field('Version', payload.version),
+      field('Статус', payload.status),
+      field('Ник', payload.nick),
+      field('Клуб', payload.clubId),
+      field('Сайт', payload.host || payload.site),
+      field('Версия', payload.version),
       field('IP', meta.ip),
-      field('Country', meta.country),
+      field('Страна', meta.country),
       field('User-Agent', meta.userAgent, false),
     ],
     timestamp: meta.time,
@@ -175,13 +320,14 @@ async function sendDiscordUnknownPush(env, payload, meta) {
   if (!env.DISCORD_WEBHOOK_URL) return;
 
   const embed = {
-    title: 'Unknown notification',
+    title: 'Неизвестное уведомление',
     description: '```' + limit(payload.text || 'empty', 1500) + '```',
     color: 0x6366f1,
     fields: [
-      field('Page', payload.path || payload.url || 'unknown', false),
+      field('Ник', payload.nick),
+      field('Страница', payload.path || payload.url || 'unknown', false),
       field('IP', meta.ip),
-      field('Country', meta.country),
+      field('Страна', meta.country),
       field('User-Agent', meta.userAgent, false),
     ],
     timestamp: meta.time,
@@ -257,6 +403,7 @@ async function sendTelegramQuiz(env, payload, meta) {
 
   let text =
     `${payload.quizType === 'FUZZY' ? '<b>NOT EXACT</b>' : '<b>NEW</b>'}\n\n` +
+    `<b>Ник:</b> ${escapeHtml(payload.nick || 'unknown')}\n\n` +
     `<b>Question:</b>\n${escapeHtml(payload.question || 'unknown')}\n\n` +
     `<b>Options:</b>\n${options || 'unknown'}\n\n`;
 
@@ -290,6 +437,44 @@ function normalizeFileName(value) {
     .replace(/[\\/:*?"<>|]/g, '_')
     .slice(0, 120);
   return name.endsWith('.json') ? name : `${name}.json`;
+}
+
+async function sendTelegramQuizIncident(env, payload, meta) {
+  if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_IDS) return;
+  const chatIds = String(env.TELEGRAM_CHAT_IDS).split(',').map(value => value.trim()).filter(Boolean);
+  if (!chatIds.length) return;
+
+  const options = Array.isArray(payload.options)
+    ? payload.options.map((option, index) => `${index + 1}. ${escapeHtml(option)}`).join('\n')
+    : 'unknown';
+  const labels = {
+    quiz_expected_answer_rejected: 'SCRIPT ANSWER REJECTED',
+    quiz_answer_mismatch: 'QUIZ ANSWER MISMATCH',
+    quiz_result_unknown: 'QUIZ RESULT UNKNOWN',
+  };
+  const text = limit(
+    `<b>${labels[payload.incidentType] || 'QUIZ INCIDENT'}</b>\n\n` +
+    `<b>Ник:</b> ${escapeHtml(payload.nick || 'unknown')}\n` +
+    `<b>Версия:</b> ${escapeHtml(payload.version || 'unknown')}\n` +
+    `<b>Комната:</b> ${escapeHtml(payload.room || payload.path || 'unknown')}\n\n` +
+    `<b>Вопрос:</b>\n${escapeHtml(payload.question || 'unknown')}\n\n` +
+    `<b>Варианты:</b>\n${options}\n\n` +
+    `<b>Ответ скрипта:</b> ${escapeHtml(payload.expectedAnswer || 'unknown')}\n` +
+    `<b>Подсвечен:</b> ${escapeHtml(payload.highlightedAnswer || 'unknown')}\n` +
+    `<b>Выбран:</b> ${escapeHtml(payload.selectedAnswer || 'unknown')}\n` +
+    `<b>Итог сайта:</b> ${escapeHtml(payload.resultText || payload.result || 'unknown')}\n` +
+    `<b>ACC:</b> ${escapeHtml(payload.accChange || 'unknown')}\n\n` +
+    `<b>IP:</b> ${escapeHtml(meta.ip)}\n` +
+    `<b>Country:</b> ${escapeHtml(meta.country)}\n` +
+    `<b>Time:</b> ${escapeHtml(meta.time)}`,
+    3900
+  );
+
+  await Promise.all(chatIds.map(chatId => fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML', disable_web_page_preview: true }),
+  })));
 }
 
 function escapeHtml(value) {
