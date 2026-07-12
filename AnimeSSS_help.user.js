@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.5
+// @version      3.51
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -493,6 +493,8 @@
     return value;
   })();
   let suiteTelemetryFlushPromise = null;
+  let suiteTelemetryPendingRecords = [];
+  let suiteTelemetryPersistTimer = null;
 
   function suiteTelemetrySanitize(value, key = '', depth = 0, seen = new WeakSet()) {
     if(value == null || typeof value === 'boolean' || typeof value === 'number') return value;
@@ -543,11 +545,25 @@
     gmDelete(key);
   }
 
+  function suiteTelemetryPersistPending() {
+    clearTimeout(suiteTelemetryPersistTimer);
+    suiteTelemetryPersistTimer = null;
+    if(!suiteTelemetryPendingRecords.length) return;
+    const now = Date.now();
+    const pending = suiteTelemetryPendingRecords.splice(0);
+    const records = suiteTelemetryReadQueue()
+      .filter(item => now - Number(item?.timestamp || now) <= SUITE_TELEMETRY_MAX_AGE_MS);
+    suiteTelemetryWriteQueue(records.concat(pending));
+  }
+
+  function suiteTelemetrySchedulePersist() {
+    if(suiteTelemetryPersistTimer) return;
+    suiteTelemetryPersistTimer = setTimeout(suiteTelemetryPersistPending, 500);
+  }
+
   function suiteTelemetryLog(module, event, data = {}, level = 'debug') {
     try {
       const now = Date.now();
-      const records = suiteTelemetryReadQueue()
-        .filter(item => now - Number(item?.timestamp || now) <= SUITE_TELEMETRY_MAX_AGE_MS);
       const record = {
         id: `${now.toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
         timestamp: now,
@@ -573,9 +589,13 @@
           record.data = { truncated:true, originalChars:recordChars };
         }
       }
-      records.push(record);
-      suiteTelemetryWriteQueue(records);
-      if(records.filter(item => item.module === module).length >= SUITE_TELEMETRY_BATCH_SIZE) void suiteTelemetryFlush('size');
+      suiteTelemetryPendingRecords.push(record);
+      if(suiteTelemetryPendingRecords.filter(item => item.module === module).length >= SUITE_TELEMETRY_BATCH_SIZE){
+        suiteTelemetryPersistPending();
+        void suiteTelemetryFlush('size');
+      } else {
+        suiteTelemetrySchedulePersist();
+      }
     } catch(e) {}
   }
 
@@ -585,6 +605,7 @@
   }
 
   async function suiteTelemetryFlush(reason = 'timer') {
+    suiteTelemetryPersistPending();
     if(suiteTelemetryFlushPromise) return suiteTelemetryFlushPromise;
     suiteTelemetryFlushPromise = (async () => {
       for(const key of suiteTelemetryQueueKeys()) {
@@ -621,10 +642,16 @@
   }
 
   setTimeout(() => {
-    for(const key of suiteTelemetryQueueKeys()){
+    const keys = suiteTelemetryQueueKeys();
+    const compactNext = () => {
+      const key = keys.shift();
+      if(!key) return;
       const queue = suiteTelemetryReadQueue(key);
       if(queue.length) suiteTelemetryWriteQueue(queue, key);
-    }
+      if(typeof requestIdleCallback === 'function') requestIdleCallback(compactNext, { timeout:1000 });
+      else setTimeout(compactNext, 50);
+    };
+    compactNext();
   }, 0);
   setInterval(() => { void suiteTelemetryFlush('timer'); }, SUITE_TELEMETRY_FLUSH_MS);
   window.addEventListener('pagehide', () => { void suiteTelemetryFlush('pagehide'); });
@@ -771,7 +798,7 @@
   }
 
   function suiteSendAccessInfoOnce(status, nick, clubId) {
-    setTimeout(async () => {
+    void (async () => {
       const safeNick = String(nick || suiteGetSafeNickname()).trim() || 'Неизвестно';
       const safeClub = String(clubId || suiteGetMyClubId() || 'unknown');
       const keyBase = `${status || 'unknown'}_${safeNick}_${safeClub}`;
@@ -791,7 +818,7 @@
       } finally {
         localStorage.removeItem(lockKey);
       }
-    }, 2000);
+    })();
   }
 
   function suiteSleep(ms){return new Promise(resolve=>setTimeout(resolve,ms));}
@@ -2837,7 +2864,7 @@
     {s:'Вы уже получали карту с этого пака', icon:'warn', title:'Пак', theme:'neon-amber'},
     {s:'Публикация успешно убрана из ваших закладок на сайте', icon:'save', title:'Закладки', theme:'emerald'},
     {
-      r:/с момента Вашего отсутствия на сайте Вам было прислано .* сообщения/i,
+      r:/(?:с момента вашего отсутствия на сайте вам было прислано|у вас(?: сейчас)?)\s+\d+\s+(?:(?:нов(?:ое|ых)|непрочитанн(?:ое|ых))\s+)*сообщени(?:е|я|й)/i,
       icon:'bell',
       title:'Сообщения',
       theme:'neon-blue'
