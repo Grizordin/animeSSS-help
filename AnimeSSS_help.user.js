@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.52
+// @version      3.53
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -511,6 +511,11 @@
       const text = value
         .replace(/([?&](?:user_hash|dle_login_hash|token|auth|password)=)[^&#\s]*/gi, '$1[redacted]')
         .replace(/("(?:user_hash|dle_login_hash|token|authorization|password)"\s*:\s*")[^"]*/gi, '$1[redacted]');
+      if(/^data:/i.test(text)) {
+        const commaIndex = text.indexOf(',');
+        const descriptor = (commaIndex >= 0 ? text.slice(0, commaIndex) : text.slice(0, 120)).slice(0, 120);
+        return `${descriptor},[payload omitted: ${text.length} chars]`;
+      }
       return text.length > 30000 ? `${text.slice(0, 29999)}...` : text;
     }
     if(value instanceof Error) {
@@ -761,13 +766,13 @@
     window.__suiteGlobalDiagnosticsInstalled = true;
     const recent = new Map();
 
-    const report = (event, data, level = 'error') => {
+    const report = (event, data, level = 'error', dedupeMs = 5000) => {
       try {
         const safe = suiteTelemetrySanitize(data);
         const fingerprint = `${event}:${JSON.stringify(safe).slice(0, 1200)}`;
         const now = Date.now();
         const previous = Number(recent.get(fingerprint) || 0);
-        if(now - previous < 5000) return;
+        if(now - previous < dedupeMs) return;
         recent.set(fingerprint, now);
         if(recent.size > 200){
           for(const [key, timestamp] of recent){
@@ -784,11 +789,17 @@
         if(target instanceof HTMLMediaElement){
           const rawSource = target.currentSrc || target.src || target.querySelector?.('source[src]')?.src || '';
           const source = (() => {
+            const raw = String(rawSource || '');
+            if(/^data:/i.test(raw)){
+              const commaIndex = raw.indexOf(',');
+              return (commaIndex >= 0 ? raw.slice(0, commaIndex) : raw.slice(0, 120)).slice(0, 120);
+            }
+            if(/^blob:/i.test(raw)) return 'blob:media';
             try {
-              const url = new URL(rawSource, location.href);
+              const url = new URL(raw, location.href);
               return `${url.origin}${url.pathname}`;
             } catch(e) {
-              return String(rawSource).split(/[?#]/, 1)[0];
+              return raw.split(/[?#]/, 1)[0].slice(0, 500);
             }
           })();
           report('media_resource_error', {
@@ -798,10 +809,11 @@
             mediaErrorMessage:target.error?.message || '',
             networkState:target.networkState,
             readyState:target.readyState
-          }, 'warn');
+          }, 'warn', 60 * 60 * 1000);
         }
         return;
       }
+      if(!event.message && !event.error && !event.filename && !event.lineno && !event.colno) return;
       report('global_error', {
         message:event.message || event.error?.message || 'unknown error',
         filename:event.filename || '',
@@ -812,6 +824,11 @@
     }, true);
 
     window.addEventListener('unhandledrejection', event => {
+      const reasonText = String(event.reason?.message || event.reason || '');
+      if(/Failed to load because no supported source was found/i.test(reasonText)){
+        report('media_playback_rejection', { message:reasonText }, 'warn', 60 * 60 * 1000);
+        return;
+      }
       report('unhandled_rejection', { reason:event.reason || 'unknown rejection' });
     });
 
@@ -5146,6 +5163,8 @@
       originalXhrSend:null,
       hookedXhrOpen:null,
       hookedXhrSend:null,
+      userHash:'',
+      userHashCheckedAt:0,
       ready:false,
       releaseLeader:null
     };
@@ -5166,13 +5185,27 @@
     function parseJson(text){ try{ return JSON.parse(text); }catch(e){ return null; } }
 
     function getUserHash(){
+      if(state.userHash) return state.userHash;
       const fromWindow = uw.dle_login_hash || window.dle_login_hash;
-      if(fromWindow) return String(fromWindow);
+      if(fromWindow){
+        state.userHash = String(fromWindow);
+        return state.userHash;
+      }
       const input = document.querySelector('input[name="user_hash"], input[name="dle_login_hash"]');
-      if(input?.value) return String(input.value);
-      const html = document.documentElement?.innerHTML || '';
-      const match = html.match(/(?:dle_login_hash|user_hash)["'\s:=]+([a-zA-Z0-9_-]{8,})/);
-      return match ? match[1] : '';
+      if(input?.value){
+        state.userHash = String(input.value);
+        return state.userHash;
+      }
+      const now = Date.now();
+      if(now - state.userHashCheckedAt < 1000) return '';
+      state.userHashCheckedAt = now;
+      for(const script of document.querySelectorAll('script:not([src])')){
+        const match = String(script.textContent || '').match(/(?:dle_login_hash|user_hash)["'\s:=]+([a-zA-Z0-9_-]{8,})/);
+        if(!match) continue;
+        state.userHash = match[1];
+        return state.userHash;
+      }
+      return '';
     }
 
     function getAccountKey(){
@@ -5296,6 +5329,7 @@
 
     function extractDiamondsFromHtml(htmlString, source){
       if(!htmlString || !String(htmlString).trim()) return [];
+      if(!String(htmlString).includes('diamonds-chat')) return [];
       const doc = new DOMParser().parseFromString(`<div>${htmlString}</div>`, 'text/html');
       const result = [];
       for(const node of [...doc.querySelectorAll('#diamonds-chat')]){
@@ -5317,16 +5351,42 @@
 
     async function analyzeChatHtml(htmlString, source = 'chat'){
       if(!state.ready || !isEnabled()) return;
+      if(!htmlString || !String(htmlString).includes('diamonds-chat')) return 0;
       if(!state.isLeader) await acquireLeader();
-      if(!state.isLeader) return;
+      if(!state.isLeader) return 0;
       const diamonds = extractDiamondsFromHtml(htmlString, source);
-      suiteTelemetryLog('chat_stone', 'chat_analyzed', { source, diamondCount:diamonds.length, queueSize:state.queueSize });
+      if(!diamonds.length) return 0;
+      let queuedCount = 0;
       for(const diamond of diamonds){
         if(state.seen.has(diamond.messageId)) continue;
         if(state.inFlight.has(diamond.messageId) || state.queued.has(diamond.messageId)) continue;
         state.queued.add(diamond.messageId);
         queueCollect(diamond);
+        queuedCount += 1;
       }
+      suiteTelemetryLog('chat_stone', 'chat_analyzed', {
+        source,
+        diamondCount:diamonds.length,
+        queuedCount,
+        queueSize:state.queueSize
+      });
+      return diamonds.length;
+    }
+
+    async function analyzeChatItems(items, source){
+      const list = Array.isArray(items) ? items : [];
+      const candidates = list
+        .map(item => item?.html)
+        .filter(html => typeof html === 'string' && html.includes('diamonds-chat'));
+      if(!candidates.length){
+        return { itemCount:list.length, candidateItemCount:0, diamondCount:0 };
+      }
+      const diamondCount = await analyzeChatHtml(candidates.join(''), source);
+      return {
+        itemCount:list.length,
+        candidateItemCount:candidates.length,
+        diamondCount:Number(diamondCount || 0)
+      };
     }
 
     function queueCollect(diamond){
@@ -5478,14 +5538,14 @@
       setRaw(KEYS.lastChatActivity, state.lastChatActivity);
       const data = parseJson(text);
       if(data && Array.isArray(data.items)){
-        data.items.forEach(item => { if(item?.html) analyzeChatHtml(item.html, 'hook'); });
+        void analyzeChatItems(data.items, 'hook');
         return;
       }
       if(data?.html){
-        analyzeChatHtml(data.html, 'hook');
+        void analyzeChatHtml(data.html, 'hook');
         return;
       }
-      analyzeChatHtml(text, 'hook');
+      if(String(text || '').includes('diamonds-chat')) void analyzeChatHtml(text, 'hook');
     }
 
     function installFetchHook(){
@@ -5542,7 +5602,12 @@
     }
 
     function scanExistingDom(){
-      if(document.body) analyzeChatHtml(document.body.innerHTML, 'dom');
+      if(!document.body) return;
+      const items = new Set();
+      document.querySelectorAll('#diamonds-chat').forEach(node => {
+        items.add(node.closest('.animesss-chat__item') || node);
+      });
+      if(items.size) void analyzeChatHtml([...items].map(node => node.outerHTML).join(''), 'dom');
     }
 
     function installDomObserver(){
@@ -5587,11 +5652,13 @@
           return;
         }
         const data = await response.json();
-        suiteTelemetryLog('chat_stone', 'snapshot_response', { source, response:data });
         state.lastChatActivity = Date.now();
         setRaw(KEYS.lastChatActivity, state.lastChatActivity);
-        (Array.isArray(data.items) ? data.items : []).forEach(item => {
-          if(item?.html) analyzeChatHtml(item.html, source);
+        const summary = await analyzeChatItems(data.items, source);
+        suiteTelemetryLog('chat_stone', 'snapshot_response', {
+          source,
+          status:data?.status || '',
+          ...summary
         });
       }catch(error){
         state.lastChatActivity = Date.now();
@@ -5648,17 +5715,17 @@
       state.ready = true;
       scanExistingDom();
       installDomObserver();
-      state.timers.push(setInterval(acquireLeader, DEFAULTS.lockRenewMs));
       state.timers.push(setInterval(renewLeader, DEFAULTS.lockRenewMs));
       state.timers.push(setInterval(async () => {
         if(!state.ready || !isEnabled()) return;
-        const storedActivity = Number(getRaw(KEYS.lastChatActivity, 0) || 0);
-        state.lastChatActivity = Math.max(state.lastChatActivity, storedActivity);
         if(Date.now() - state.lastChatActivity >= DEFAULTS.chatIdleMs && state.queueSize === 0){
           fetchChatSnapshot('watchdog');
         }
       }, DEFAULTS.watchdogMs));
       state.timers.push(setInterval(pingOnline, 5000));
+      state.listeners.push(GM_addValueChangeListener(rawKey(KEYS.lastChatActivity), (_key, _oldValue, newValue, remote) => {
+        if(remote) state.lastChatActivity = Math.max(state.lastChatActivity, Number(newValue || 0));
+      }));
       state.listeners.push(GM_addValueChangeListener(scopedKey(KEYS.seen), (_key, _oldValue, newValue, remote) => {
         if(remote && Array.isArray(newValue)) newValue.forEach(id => state.seen.add(id));
       }));
@@ -9767,8 +9834,7 @@
         }
 
         function getMskDateParts(date = new Date()) {
-            const utc = date.getTime() + (date.getTimezoneOffset() * 60000);
-            const msk = new Date(utc + 3 * 60 * 60 * 1000);
+            const msk = new Date(date.getTime() + 3 * 60 * 60 * 1000);
             return {
                 year: msk.getUTCFullYear(),
                 month: String(msk.getUTCMonth() + 1).padStart(2, '0'),
