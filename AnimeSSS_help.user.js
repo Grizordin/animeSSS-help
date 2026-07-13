@@ -600,7 +600,10 @@
     }
   }
 
-  const SUITE_TELEMETRY_QUEUE_PREFIX = 'suite_telemetry_queue_v1_';
+  const SUITE_TELEMETRY_LEGACY_QUEUE_PREFIX = 'suite_telemetry_queue_v1_';
+  const SUITE_TELEMETRY_QUEUE_KEY = 'suite_telemetry_queue_v2';
+  const SUITE_TELEMETRY_QUEUE_LOCK_KEY = 'suite_telemetry_queue_lock_v2';
+  const SUITE_STORAGE_CLEANUP_KEY = 'suite_obsolete_local_logs_cleaned_v1';
   const SUITE_TELEMETRY_INSTALL_KEY = 'suite_telemetry_install_id_v1';
   const SUITE_TELEMETRY_ACTIVE_KEY = 'suite_telemetry_active_day_v1';
   const SUITE_TELEMETRY_ACTIVE_LOCK_KEY = 'suite_telemetry_active_lock_v1';
@@ -612,7 +615,6 @@
   const SUITE_TELEMETRY_MAX_BATCH_CHARS = 350000;
   const SUITE_TELEMETRY_MAX_AGE_MS = 2 * 24 * 60 * 60 * 1000;
   const suiteTelemetrySessionId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-  const suiteTelemetryQueueKey = `${SUITE_TELEMETRY_QUEUE_PREFIX}${suiteTelemetrySessionId}`;
   const suiteTelemetryInstallId = (() => {
     let value = String(gmGet(SUITE_TELEMETRY_INSTALL_KEY, '') || '').trim();
     if(value) return value;
@@ -623,6 +625,31 @@
   let suiteTelemetryFlushPromise = null;
   let suiteTelemetryPendingRecords = [];
   let suiteTelemetryPersistTimer = null;
+  let suiteTelemetryPersistPromise = Promise.resolve();
+
+  const suiteTelemetryDelay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+  async function suiteTelemetryWithQueueLock(callback, fallback) {
+    const owner = `${suiteTelemetrySessionId}-${Math.random().toString(36).slice(2, 10)}`;
+    const deadline = Date.now() + 2500;
+    while(Date.now() < deadline){
+      const now = Date.now();
+      const lock = gmGet(SUITE_TELEMETRY_QUEUE_LOCK_KEY, null);
+      if(!lock || !lock.owner || Number(lock.expiresAt || 0) <= now || lock.owner === owner){
+        gmSet(SUITE_TELEMETRY_QUEUE_LOCK_KEY, { owner, expiresAt:now + 5000 });
+        const verified = gmGet(SUITE_TELEMETRY_QUEUE_LOCK_KEY, null);
+        if(verified?.owner === owner){
+          try { return callback(); }
+          finally {
+            const latest = gmGet(SUITE_TELEMETRY_QUEUE_LOCK_KEY, null);
+            if(latest?.owner === owner) gmDelete(SUITE_TELEMETRY_QUEUE_LOCK_KEY);
+          }
+        }
+      }
+      await suiteTelemetryDelay(25 + Math.floor(Math.random() * 50));
+    }
+    return fallback;
+  }
 
   function suiteTelemetrySanitize(value, key = '', depth = 0, seen = new WeakSet()) {
     if(value == null || typeof value === 'boolean' || typeof value === 'number') return value;
@@ -653,14 +680,14 @@
     return result;
   }
 
-  function suiteTelemetryReadQueue(key = suiteTelemetryQueueKey) {
+  function suiteTelemetryReadQueue() {
     try {
-      const raw = GM_getValue(key, null);
+      const raw = GM_getValue(SUITE_TELEMETRY_QUEUE_KEY, null);
       if(raw == null) return [];
       const records = JSON.parse(raw);
       if(Array.isArray(records)) return records;
     } catch(e) {}
-    gmDelete(key);
+    gmDelete(SUITE_TELEMETRY_QUEUE_KEY);
     return [];
   }
 
@@ -683,7 +710,7 @@
     };
   }
 
-  function suiteTelemetryWriteQueue(records, key = suiteTelemetryQueueKey) {
+  function suiteTelemetryWriteQueue(records) {
     const limited = records
       .map(suiteTelemetryNormalizeRecord)
       .filter(Boolean)
@@ -692,12 +719,13 @@
       let serialized = '';
       try { serialized = JSON.stringify(limited); } catch(e) { limited.shift(); continue; }
       if(serialized.length <= SUITE_TELEMETRY_MAX_QUEUE_CHARS){
-        try { GM_setValue(key, serialized); } catch(e) { gmDelete(key); }
+        try { GM_setValue(SUITE_TELEMETRY_QUEUE_KEY, serialized); }
+        catch(e) { gmDelete(SUITE_TELEMETRY_QUEUE_KEY); }
         return;
       }
       limited.shift();
     }
-    gmDelete(key);
+    gmDelete(SUITE_TELEMETRY_QUEUE_KEY);
   }
 
   function suiteTelemetryTakeBatch(records, module) {
@@ -720,12 +748,21 @@
   function suiteTelemetryPersistPending() {
     clearTimeout(suiteTelemetryPersistTimer);
     suiteTelemetryPersistTimer = null;
-    if(!suiteTelemetryPendingRecords.length) return;
-    const now = Date.now();
+    if(!suiteTelemetryPendingRecords.length) return suiteTelemetryPersistPromise;
     const pending = suiteTelemetryPendingRecords.splice(0);
-    const records = suiteTelemetryReadQueue()
-      .filter(item => now - Number(item?.timestamp || now) <= SUITE_TELEMETRY_MAX_AGE_MS);
-    suiteTelemetryWriteQueue(records.concat(pending));
+    suiteTelemetryPersistPromise = suiteTelemetryPersistPromise.then(async () => {
+      const saved = await suiteTelemetryWithQueueLock(() => {
+        const now = Date.now();
+        const records = suiteTelemetryReadQueue()
+          .filter(item => now - Number(item?.timestamp || now) <= SUITE_TELEMETRY_MAX_AGE_MS);
+        suiteTelemetryWriteQueue(records.concat(pending));
+        return true;
+      }, false);
+      if(!saved) suiteTelemetryPendingRecords.unshift(...pending);
+    }).catch(() => {
+      suiteTelemetryPendingRecords.unshift(...pending);
+    });
+    return suiteTelemetryPersistPromise;
   }
 
   function suiteTelemetrySchedulePersist() {
@@ -821,60 +858,66 @@
     })();
   }
 
-  function suiteTelemetryQueueKeys(includePrevious = true) {
-    if(!includePrevious) return [suiteTelemetryQueueKey];
+  async function suiteCleanupObsoleteLocalLogs() {
+    const now = Date.now();
+    const lastCleanup = Number(gmGet(SUITE_STORAGE_CLEANUP_KEY, 0) || 0);
+    if(lastCleanup && now - lastCleanup < 60 * 60 * 1000) return;
     try {
-      const keys = GM_listValues().filter(key => String(key).startsWith(SUITE_TELEMETRY_QUEUE_PREFIX));
-      return [suiteTelemetryQueueKey, ...keys.filter(key => key !== suiteTelemetryQueueKey)];
+      const keys = GM_listValues().filter(key => {
+        const name = String(key);
+        return name.startsWith(SUITE_TELEMETRY_LEGACY_QUEUE_PREFIX)
+          || name.includes('_diagnostic_log_')
+          || name.endsWith('_request_log');
+      });
+      for(let index = 0; index < keys.length; index += 25){
+        for(const key of keys.slice(index, index + 25)) gmDelete(key);
+        await suiteTelemetryDelay(20);
+      }
+      gmSet(SUITE_STORAGE_CLEANUP_KEY, now);
     }
-    catch(e) { return [suiteTelemetryQueueKey]; }
+    catch(e) {}
   }
 
   async function suiteTelemetryFlush(reason = 'timer') {
-    suiteTelemetryPersistPending();
+    await suiteTelemetryPersistPending();
     if(suiteTelemetryFlushPromise) return suiteTelemetryFlushPromise;
     suiteTelemetryFlushPromise = (async () => {
-      const includePrevious = reason === 'timer' || reason === 'manual';
-      for(const key of suiteTelemetryQueueKeys(includePrevious)) {
-        const queue = suiteTelemetryReadQueue(key);
-        if(!queue.length) continue;
-        const modules = [...new Set(queue.map(item => item.module || 'suite'))];
-        for(const module of modules) {
-          while(true) {
-            const current = suiteTelemetryReadQueue(key);
-            const events = suiteTelemetryTakeBatch(current, module);
-            if(!events.length) break;
-            const ids = new Set(events.map(item => item.id));
-            const eventSessionId = events[0].sessionId || suiteTelemetrySessionId;
-            const ok = await suiteReportEvent('telemetry_batch', {
-              batchId: `${eventSessionId}-${module}-${events[0].id}`,
-              installId: suiteTelemetryInstallId,
-              sessionId: eventSessionId,
-              module,
-              reason,
-              startedAt: events[0].time,
-              finishedAt: events[events.length - 1].time,
-              eventCount: events.length,
-              events
-            });
-            if(!ok) return false;
-            const latest = suiteTelemetryReadQueue(key);
-            suiteTelemetryWriteQueue(latest.filter(item => !ids.has(item.id)), key);
-          }
-        }
+      while(true) {
+        const events = await suiteTelemetryWithQueueLock(() => {
+          const current = suiteTelemetryReadQueue();
+          if(!current.length) return [];
+          return suiteTelemetryTakeBatch(current, current[0].module || 'suite');
+        }, []);
+        if(!events.length) break;
+        const module = events[0].module || 'suite';
+        const ids = new Set(events.map(item => item.id));
+        const eventSessionId = events[0].sessionId || suiteTelemetrySessionId;
+        const ok = await suiteReportEvent('telemetry_batch', {
+          batchId: `${eventSessionId}-${module}-${events[0].id}`,
+          installId: suiteTelemetryInstallId,
+          sessionId: eventSessionId,
+          module,
+          reason,
+          startedAt: events[0].time,
+          finishedAt: events[events.length - 1].time,
+          eventCount: events.length,
+          events
+        });
+        if(!ok) return false;
+        await suiteTelemetryWithQueueLock(() => {
+          const latest = suiteTelemetryReadQueue();
+          suiteTelemetryWriteQueue(latest.filter(item => !ids.has(item.id)));
+        });
       }
       return true;
     })().finally(() => { suiteTelemetryFlushPromise = null; });
     return suiteTelemetryFlushPromise;
   }
 
-  setTimeout(() => {
-    const queue = suiteTelemetryReadQueue();
-    if(queue.length) suiteTelemetryWriteQueue(queue);
-  }, 0);
+  setTimeout(() => { void suiteCleanupObsoleteLocalLogs(); }, 0);
+  setTimeout(() => { void suiteTelemetryFlush('startup'); }, 3000);
   setInterval(() => { void suiteTelemetryFlush('timer'); }, SUITE_TELEMETRY_FLUSH_MS);
   window.addEventListener('pagehide', () => { void suiteTelemetryFlush('pagehide'); });
-  setTimeout(() => { void suiteTelemetryFlush('startup'); }, 15000);
 
   function installSuiteGlobalDiagnostics() {
     if(window.__suiteGlobalDiagnosticsInstalled) return;
@@ -9767,8 +9810,6 @@
         const KNOWN_DAILY_LIMIT_KEY = 'aw_active_tab_known_daily_limit_v2';
         const DAILY_PROGRESS_KEY = 'aw_active_tab_daily_progress_v2';
         const PANEL_COLLAPSED_KEY = 'aw_active_tab_panel_collapsed_v2';
-        const DIAGNOSTIC_LOG_MAX = 1500;
-        const DIAGNOSTIC_EXPORT_MAX = 6000;
         const DIAGNOSTIC_TEXT_LIMIT = 30000;
 
         const ANIME_DB_KEY = 'aw_anime_database_v2';
@@ -9813,14 +9854,11 @@
         let nextRunAt = 0;
         let profileFetchInProgress = false;
         let kodikWarmupPromise = null;
-        let diagnosticWriteQueue = Promise.resolve();
         let diagnosticRequestSequence = 0;
 
         const currentUser = getCurrentUser();
         const AW_GM_DB_PREFIX = `aw_active_tab_store_v1_${currentUser || 'guest'}_`;
-        const DIAGNOSTIC_STORE_PREFIX = `${AW_GM_DB_PREFIX}diagnostic_log_`;
-        const DIAGNOSTIC_STORE_KEY = `${DIAGNOSTIC_STORE_PREFIX}${TAB_ID}`;
-        const AW_GM_STORES = ['anime_history', 'card_receipts', 'skipped_episodes', 'request_log'];
+        const AW_GM_STORES = ['anime_history', 'card_receipts', 'skipped_episodes'];
 
         // =========================================================
         // UTIL
@@ -10112,19 +10150,6 @@
             };
 
             suiteTelemetryLog('autowatch', event, record, /error|failed|limit/i.test(event) ? 'error' : 'debug');
-
-            diagnosticWriteQueue = diagnosticWriteQueue
-                .then(async () => {
-                    const stored = await GM_getValue(DIAGNOSTIC_STORE_KEY, []);
-                    const records = Array.isArray(stored) ? stored : [];
-                    records.push(record);
-                    if (records.length > DIAGNOSTIC_LOG_MAX) {
-                        records.splice(0, records.length - DIAGNOSTIC_LOG_MAX);
-                    }
-                    await GM_setValue(DIAGNOSTIC_STORE_KEY, records);
-                })
-                .catch(e => console.warn('[AutoWatch Logger] Не удалось сохранить запись:', e));
-            return diagnosticWriteQueue;
         }
 
         async function fetchData(url, options = {}, type = 'json', requireOk = true) {
@@ -10320,8 +10345,8 @@
             await setGmStore('card_receipts', receipts);
         }
 
-        async function saveRequestLog(entry) {
-            const record = {
+        function saveRequestLog(entry) {
+            suiteTelemetryLog('autowatch', 'request_result', {
                 requestedAt: Date.now(),
                 dateMsk: getMoscowTimeString(),
                 source: entry.source || 'auto',
@@ -10333,11 +10358,7 @@
                 cardRank: entry.cardRank || '—',
                 serverMsg: entry.serverMsg || '',
                 scriptNote: entry.scriptNote || ''
-            };
-
-            const log = await getGmStore('request_log');
-            log.push(record);
-            await setGmStore('request_log', log);
+            }, entry.status === 'error' ? 'error' : 'debug');
         }
 
         async function getAllReceipts() {
@@ -10362,166 +10383,6 @@
             await setGmStore('skipped_episodes', skipped);
         }
 
-        function buildDiagnosticEventCounts(records) {
-            return records.reduce((counts, record) => {
-                const key = record?.event || 'unknown';
-                counts[key] = (counts[key] || 0) + 1;
-                return counts;
-            }, {});
-        }
-
-        function getDiagnosticStoreKeys() {
-            try {
-                const keys = GM_listValues();
-                return Array.isArray(keys)
-                    ? keys.filter(key => String(key).startsWith(DIAGNOSTIC_STORE_PREFIX))
-                    : [];
-            } catch (e) {
-                return [DIAGNOSTIC_STORE_KEY];
-            }
-        }
-
-        async function getAllDiagnosticLogs() {
-            await diagnosticWriteQueue;
-            const allRecords = [];
-            for (const key of getDiagnosticStoreKeys()) {
-                try {
-                    const records = await GM_getValue(key, []);
-                    if (Array.isArray(records)) allRecords.push(...records);
-                } catch (e) {}
-            }
-            allRecords.sort((a, b) => Number(a?.timestamp || 0) - Number(b?.timestamp || 0));
-            return allRecords.length > DIAGNOSTIC_EXPORT_MAX
-                ? allRecords.slice(-DIAGNOSTIC_EXPORT_MAX)
-                : allRecords;
-        }
-
-        async function buildAutoWatchDiagnosticExport() {
-            await diagnosticWriteQueue;
-            const [
-                diagnosticLog,
-                requestLog,
-                cardReceipts,
-                skippedEpisodes,
-                animeHistory,
-                animeDatabase,
-                finishedArchive,
-                smartProgression,
-                dailyProgress,
-                knownDailyLimit,
-                collectionPaused,
-                pauseDate,
-                lastSuccessfulRequest
-            ] = await Promise.all([
-                getAllDiagnosticLogs(),
-                getGmStore('request_log'),
-                getGmStore('card_receipts'),
-                getGmStore('skipped_episodes'),
-                getGmStore('anime_history'),
-                GM_getValue(ANIME_DB_KEY, []),
-                GM_getValue(FINISHED_ANIME_ARCHIVE_KEY, []),
-                GM_getValue(SMART_PROGRESSION_KEY, null),
-                GM_getValue(DAILY_PROGRESS_KEY, null),
-                GM_getValue(KNOWN_DAILY_LIMIT_KEY, null),
-                GM_getValue(COLLECTION_PAUSED_KEY, false),
-                GM_getValue(PAUSE_DATE_KEY, null),
-                GM_getValue(LAST_SUCCESSFUL_REQUEST_KEY, 0)
-            ]);
-
-            return {
-                schemaVersion: 1,
-                exportedAt: new Date().toISOString(),
-                logger: {
-                    name: 'AnimeSSS встроенный логгер Auto-Watch',
-                    version: 1,
-                    helperVersion: typeof GM_info !== 'undefined' ? GM_info?.script?.version || null : null
-                },
-                user: currentUser || 'guest',
-                page: location.href,
-                environment: {
-                    userAgent: navigator.userAgent,
-                    language: navigator.language,
-                    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
-                    visibility: document.visibilityState,
-                    focused: document.hasFocus?.() ?? null
-                },
-                summary: {
-                    diagnosticEntries: diagnosticLog.length,
-                    requestEntries: requestLog.length,
-                    cardReceipts: cardReceipts.length,
-                    skippedEpisodes: skippedEpisodes.length,
-                    eventCounts: buildDiagnosticEventCounts(diagnosticLog)
-                },
-                currentState: {
-                    tabLock: diagnosticSanitize(readTabLock()),
-                    smartProgression: diagnosticSanitize(smartProgression),
-                    dailyProgress: diagnosticSanitize(dailyProgress),
-                    knownDailyLimit,
-                    collectionPaused,
-                    pauseDate,
-                    lastSuccessfulRequest,
-                    panel: {
-                        toggle: clean(document.getElementById('aw-active-tab-toggle')?.textContent),
-                        info: clean(document.getElementById('aw-active-tab-info')?.textContent),
-                        holder: clean(document.getElementById('aw-active-tab-holder')?.textContent),
-                        pause: clean(document.getElementById('aw-active-tab-pause')?.textContent),
-                        daily: clean(document.getElementById('aw-active-tab-daily')?.textContent),
-                        timer: clean(document.getElementById('aw-active-tab-timer')?.textContent),
-                        lastCard: clean(document.getElementById('aw-active-tab-last-card')?.textContent)
-                    }
-                },
-                diagnosticLog,
-                requestLog,
-                cardReceipts,
-                skippedEpisodes,
-                animeHistory,
-                animeDatabase: diagnosticSanitize(animeDatabase),
-                finishedArchive: diagnosticSanitize(finishedArchive)
-            };
-        }
-
-        async function downloadAutoWatchDiagnosticLog() {
-            saveDiagnosticLog('manual_export_requested', {
-                smartProgression: await GM_getValue(SMART_PROGRESSION_KEY, null)
-            });
-            const payload = await buildAutoWatchDiagnosticExport();
-            const json = JSON.stringify(payload, null, 2);
-            const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
-            const url = URL.createObjectURL(blob);
-            const datePart = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
-            const safeUser = String(currentUser || 'guest').replace(/[^a-zA-Z0-9_-]+/g, '_');
-            const fileName = `animesss-autowatch-internal-log-${safeUser}-${datePart}.json`;
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = fileName;
-            link.style.display = 'none';
-            (document.body || document.documentElement).appendChild(link);
-            link.click();
-            link.remove();
-            setTimeout(() => URL.revokeObjectURL(url), 30000);
-            console.info(`[AutoWatch Logger] Скачан ${fileName}. Записей: ${payload.summary.diagnosticEntries}`);
-            return {
-                downloaded: true,
-                fileName,
-                diagnosticEntries: payload.summary.diagnosticEntries,
-                requestEntries: payload.summary.requestEntries
-            };
-        }
-
-        async function clearAutoWatchDiagnosticLog() {
-            await diagnosticWriteQueue;
-            for (const key of getDiagnosticStoreKeys()) {
-                try { await GM_deleteValue(key); } catch (e) {}
-            }
-            console.info('[AutoWatch Logger] Диагностический журнал очищен.');
-            return { cleared: true };
-        }
-
-        function installAutoWatchDiagnosticConsoleCommands() {
-            const target = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
-            target.ascmDownloadAutoWatchLog = downloadAutoWatchDiagnosticLog;
-            target.ascmClearAutoWatchLog = clearAutoWatchDiagnosticLog;
-        }
         // =========================================================
         // RANK STATISTICS
         // =========================================================
@@ -10670,7 +10531,7 @@
                 if (!confirmed) return;
 
                 try {
-                    for (const store of ['card_receipts', 'skipped_episodes', 'request_log']) {
+                    for (const store of ['card_receipts', 'skipped_episodes']) {
                         await setGmStore(store, []);
                     }
                     // Сбрасываем дневной прогресс
@@ -13467,7 +13328,6 @@
         // INIT
         // =========================================================
         async function init() {
-            installAutoWatchDiagnosticConsoleCommands();
             if (!currentUser) {
                 log('Пользователь не найден, скрипт остановлен.');
                 saveDiagnosticLog('module_init_stopped', { reason: 'current_user_not_found' });
