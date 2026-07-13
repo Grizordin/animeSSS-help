@@ -391,12 +391,18 @@
     }, nextHourDelay);
   }
 
+  let suiteAuthenticatedClubId = '';
+
   function suiteGetMyClubId() {
+    if(suiteAuthenticatedClubId) return suiteAuthenticatedClubId;
     const links = [...document.querySelectorAll('a[href*="/clubs/"]')];
     for (const a of links) {
       const text = (a.textContent || '').trim();
       const match = String(a.href || '').match(/\/clubs\/(\d+)\/?/);
-      if (text === 'Мой клуб' && match) return match[1];
+      if (text === 'Мой клуб' && match) {
+        suiteAuthenticatedClubId = match[1];
+        return suiteAuthenticatedClubId;
+      }
     }
     return null;
   }
@@ -419,6 +425,121 @@
   }
 
   let suiteAuthenticatedNickname = '';
+
+  const SUITE_USER_HASH_CACHE_PREFIX = 'suite_user_hash_v1:';
+  const SUITE_USER_HASH_RECHECK_MS = 24 * 60 * 60 * 1000;
+  const SUITE_USER_HASH_WRITE_MS = 60 * 60 * 1000;
+  let suiteUserHashMemory = { key:'', value:'', checkedAt:0 };
+
+  function suiteUserHashCacheKey() {
+    const nick = suiteGetCurrentUserName() || 'unknown';
+    return `${SUITE_USER_HASH_CACHE_PREFIX}${location.hostname}:${String(nick).toLowerCase()}`;
+  }
+
+  function suiteReadUserHashCache() {
+    const key = suiteUserHashCacheKey();
+    if(suiteUserHashMemory.key === key && suiteUserHashMemory.value) {
+      return { value:suiteUserHashMemory.value, checkedAt:suiteUserHashMemory.checkedAt };
+    }
+    const cached = gmStoreGet(key, null);
+    if(typeof cached === 'string') {
+      suiteUserHashMemory = { key, value:cached, checkedAt:0 };
+      return { value:cached, checkedAt:0 };
+    }
+    if(!cached || typeof cached !== 'object') return { value:'', checkedAt:0 };
+    suiteUserHashMemory = {
+      key,
+      value:String(cached.value || ''),
+      checkedAt:Number(cached.checkedAt || 0)
+    };
+    return { value:suiteUserHashMemory.value, checkedAt:suiteUserHashMemory.checkedAt };
+  }
+
+  function suiteSaveUserHash(value) {
+    const hash = String(value || '').trim();
+    if(!hash) return '';
+    const key = suiteUserHashCacheKey();
+    const now = Date.now();
+    const cached = suiteReadUserHashCache();
+    if(cached.value === hash && now - cached.checkedAt < SUITE_USER_HASH_WRITE_MS) return hash;
+    suiteUserHashMemory = { key, value:hash, checkedAt:now };
+    gmStoreSet(key, { value:hash, checkedAt:now });
+    return hash;
+  }
+
+  function suiteReadUserHashFromPage(source = document, allowScriptScan = false) {
+    if(source === document) {
+      const pageWindow = getPageWindow();
+      const fromWindow = pageWindow?.dle_login_hash || pageWindow?.user_hash ||
+        window.dle_login_hash || window.user_hash;
+      if(fromWindow) return String(fromWindow);
+    }
+
+    const root = source?.querySelector ? source : document;
+    const selectors = [
+      '[name="user_hash"]',
+      '[name="dle_login_hash"]',
+      'meta[name="user_hash"]',
+      'meta[name="dle_login_hash"]',
+      '[data-user-hash]',
+      '[data-hash]'
+    ];
+    for(const selector of selectors) {
+      const element = root.querySelector(selector);
+      const value = element?.value || element?.content || element?.dataset?.userHash || element?.dataset?.hash;
+      if(value) return String(value);
+    }
+
+    if(!allowScriptScan) return '';
+    for(const script of root.querySelectorAll('script:not([src])')) {
+      const match = String(script.textContent || '').match(/(?:dle_login_hash|user_hash)["'\s:=]+([a-zA-Z0-9_-]{8,})/);
+      if(match) return match[1];
+    }
+    return '';
+  }
+
+  function suiteGetUserHash(options = {}) {
+    const forceScan = !!options.forceScan;
+    const source = options.source || document;
+    const direct = suiteReadUserHashFromPage(source, false);
+    if(direct) return suiteSaveUserHash(direct);
+
+    const cached = suiteReadUserHashCache();
+    const cacheIsFresh = cached.value && Date.now() - cached.checkedAt < SUITE_USER_HASH_RECHECK_MS;
+    if(cacheIsFresh && !forceScan) return cached.value;
+
+    const scanned = suiteReadUserHashFromPage(source, true);
+    if(scanned) return suiteSaveUserHash(scanned);
+    return cached.value;
+  }
+
+  function suiteInvalidateUserHash() {
+    const key = suiteUserHashCacheKey();
+    suiteUserHashMemory = { key, value:'', checkedAt:0 };
+    gmStoreDelete(key);
+  }
+
+  async function suiteRefreshUserHashFromServer() {
+    suiteInvalidateUserHash();
+    try {
+      const response = await fetch(`${location.origin}/`, {
+        method:'GET',
+        credentials:'same-origin',
+        cache:'no-cache',
+        headers:{ 'Accept':'text/html,application/xhtml+xml' }
+      });
+      if(!response.ok) return '';
+      const doc = new DOMParser().parseFromString(await response.text(), 'text/html');
+      const refreshed = suiteReadUserHashFromPage(doc, true);
+      if(refreshed) return suiteSaveUserHash(refreshed);
+    } catch(e) {}
+    return suiteGetUserHash({ forceScan:true });
+  }
+
+  function suiteIsUserHashError(value) {
+    const text = String(value || '');
+    return /(?:HTTP\s*(?:401|403)|user[_\s-]*hash|login[_\s-]*hash|unauthori[sz]ed|forbidden|session|сесси|не\s+авториз|ошибка\s+доступа|доступ\s+запрещ)/i.test(text);
+  }
 
   function suiteGetSafeNickname() {
     if(suiteAuthenticatedNickname) return suiteAuthenticatedNickname;
@@ -700,7 +821,8 @@
     })();
   }
 
-  function suiteTelemetryQueueKeys() {
+  function suiteTelemetryQueueKeys(includePrevious = true) {
+    if(!includePrevious) return [suiteTelemetryQueueKey];
     try {
       const keys = GM_listValues().filter(key => String(key).startsWith(SUITE_TELEMETRY_QUEUE_PREFIX));
       return [suiteTelemetryQueueKey, ...keys.filter(key => key !== suiteTelemetryQueueKey)];
@@ -712,7 +834,8 @@
     suiteTelemetryPersistPending();
     if(suiteTelemetryFlushPromise) return suiteTelemetryFlushPromise;
     suiteTelemetryFlushPromise = (async () => {
-      for(const key of suiteTelemetryQueueKeys()) {
+      const includePrevious = reason === 'timer' || reason === 'manual';
+      for(const key of suiteTelemetryQueueKeys(includePrevious)) {
         const queue = suiteTelemetryReadQueue(key);
         if(!queue.length) continue;
         const modules = [...new Set(queue.map(item => item.module || 'suite'))];
@@ -746,16 +869,8 @@
   }
 
   setTimeout(() => {
-    const keys = suiteTelemetryQueueKeys();
-    const compactNext = () => {
-      const key = keys.shift();
-      if(!key) return;
-      const queue = suiteTelemetryReadQueue(key);
-      if(queue.length) suiteTelemetryWriteQueue(queue, key);
-      if(typeof requestIdleCallback === 'function') requestIdleCallback(compactNext, { timeout:1000 });
-      else setTimeout(compactNext, 50);
-    };
-    compactNext();
+    const queue = suiteTelemetryReadQueue();
+    if(queue.length) suiteTelemetryWriteQueue(queue);
   }, 0);
   setInterval(() => { void suiteTelemetryFlush('timer'); }, SUITE_TELEMETRY_FLUSH_MS);
   window.addEventListener('pagehide', () => { void suiteTelemetryFlush('pagehide'); });
@@ -945,6 +1060,7 @@
       await suiteSleep(500);
       clubId = suiteGetMyClubId();
     }
+    suiteAuthenticatedClubId = clubId;
 
     const nick = suiteDecodeNickname(suiteGetSafeNickname());
     if(nick && nick !== 'Неизвестно') suiteAuthenticatedNickname = nick;
@@ -4228,16 +4344,7 @@
       const matches = String(text || '').replace(/\s+/g, '').match(/\d+/g);
       return matches?.length ? Number(matches[matches.length - 1]) : null;
     }
-    function getUserHash(){
-      const pageWindow = getPageWindow();
-      const fromWindow = pageWindow.dle_login_hash || window.dle_login_hash;
-      if(fromWindow) return String(fromWindow);
-      const input = document.querySelector('input[name="user_hash"], input[name="dle_login_hash"]');
-      if(input?.value) return String(input.value);
-      const html = document.documentElement?.innerHTML || '';
-      const match = html.match(/(?:dle_login_hash|user_hash)["'\s:=]+([a-zA-Z0-9_-]{8,})/);
-      return match ? match[1] : '';
-    }
+    function getUserHash(){ return suiteGetUserHash(); }
     function getGachaResultText(data){
       if(!data) return 'empty_response';
       return data.status || data.message || data.text || data.error || JSON.stringify(data);
@@ -4249,9 +4356,7 @@
       return status === 'ok' || status === 'success' || Boolean(data.reward_type) ||
         (data.step != null && Number.isFinite(Number(data.step)));
     }
-    async function postGachaReward(){
-      const userHash = getUserHash();
-      if(!userHash) throw new Error('user_hash not found');
+    async function postGachaRewardOnce(userHash){
       const response = await fetch(`${location.origin}/gacha_reward/`, {
         method:'POST',
         credentials:'include',
@@ -4262,10 +4367,29 @@
         },
         body:new URLSearchParams({ user_hash:userHash }).toString()
       });
-      if(!response.ok) throw new Error(`HTTP ${response.status}`);
       const text = await response.text();
-      try{ return JSON.parse(text); }
-      catch(error){ return { status:'parse_error', text:text || error.message }; }
+      let data;
+      try{ data = JSON.parse(text); }
+      catch(error){ data = { status:'parse_error', text:text || error.message }; }
+      if(!response.ok) {
+        const error = new Error(`HTTP ${response.status}: ${getGachaResultText(data)}`);
+        error.status = response.status;
+        throw error;
+      }
+      return data;
+    }
+    async function postGachaReward(){
+      let userHash = getUserHash();
+      if(!userHash) throw new Error('user_hash not found');
+      try {
+        const data = await postGachaRewardOnce(userHash);
+        if(!suiteIsUserHashError(JSON.stringify(data))) return data;
+      } catch(error) {
+        if(!suiteIsUserHashError(error?.message)) throw error;
+      }
+      const refreshedHash = await suiteRefreshUserHashFromServer();
+      if(!refreshedHash || refreshedHash === userHash) throw new Error('Не удалось обновить user_hash');
+      return postGachaRewardOnce(refreshedHash);
     }
 
     function getClubPath(){
@@ -5130,7 +5254,7 @@
     };
     const LIMIT = 10;
     const DEFAULTS = {
-      chatIdleMs:15000,
+      chatIdleMs:60000,
       watchdogMs:3000,
       onlinePingMs:60000,
       queueIntervalMs:10000,
@@ -5164,7 +5288,6 @@
       hookedXhrOpen:null,
       hookedXhrSend:null,
       userHash:'',
-      userHashCheckedAt:0,
       ready:false,
       releaseLeader:null
     };
@@ -5186,26 +5309,8 @@
 
     function getUserHash(){
       if(state.userHash) return state.userHash;
-      const fromWindow = uw.dle_login_hash || window.dle_login_hash;
-      if(fromWindow){
-        state.userHash = String(fromWindow);
-        return state.userHash;
-      }
-      const input = document.querySelector('input[name="user_hash"], input[name="dle_login_hash"]');
-      if(input?.value){
-        state.userHash = String(input.value);
-        return state.userHash;
-      }
-      const now = Date.now();
-      if(now - state.userHashCheckedAt < 1000) return '';
-      state.userHashCheckedAt = now;
-      for(const script of document.querySelectorAll('script:not([src])')){
-        const match = String(script.textContent || '').match(/(?:dle_login_hash|user_hash)["'\s:=]+([a-zA-Z0-9_-]{8,})/);
-        if(!match) continue;
-        state.userHash = match[1];
-        return state.userHash;
-      }
-      return '';
+      state.userHash = suiteGetUserHash();
+      return state.userHash;
     }
 
     function getAccountKey(){
@@ -5400,9 +5505,7 @@
         });
     }
 
-    async function postDiamond(code){
-      const userHash = getUserHash();
-      if(!userHash) throw new Error('Не найден user_hash');
+    async function postDiamondOnce(code, userHash){
       const response = await fetch(`${location.origin}/ajax/find_diamond/`, {
         method:'POST',
         credentials:'same-origin',
@@ -5413,9 +5516,30 @@
         },
         body:new URLSearchParams({ code, user_hash:userHash })
       });
-      if(!response.ok) throw new Error(`HTTP ${response.status}`);
       const text = await response.text();
-      return parseJson(text) || { text };
+      const data = parseJson(text) || { text };
+      if(!response.ok) {
+        const error = new Error(`HTTP ${response.status}: ${resultText(data)}`);
+        error.status = response.status;
+        throw error;
+      }
+      return data;
+    }
+
+    async function postDiamond(code){
+      let userHash = getUserHash();
+      if(!userHash) throw new Error('Не найден user_hash');
+      try {
+        const data = await postDiamondOnce(code, userHash);
+        if(!suiteIsUserHashError(JSON.stringify(data))) return data;
+      } catch(error) {
+        if(!suiteIsUserHashError(error?.message)) throw error;
+      }
+      state.userHash = '';
+      const refreshedHash = await suiteRefreshUserHashFromServer();
+      if(!refreshedHash || refreshedHash === userHash) throw new Error('Не удалось обновить user_hash');
+      state.userHash = refreshedHash;
+      return postDiamondOnce(code, refreshedHash);
     }
 
     async function collectDiamond(diamond){
@@ -5628,6 +5752,9 @@
       if(!state.ready || !isEnabled()) return;
       if(state.snapshotInFlight) return;
       if(Date.now() < state.pausedUntil) return;
+      const sharedLastActivity = Number(getRaw(KEYS.lastChatActivity, 0) || 0);
+      state.lastChatActivity = Math.max(state.lastChatActivity, sharedLastActivity);
+      if(Date.now() - state.lastChatActivity < DEFAULTS.chatIdleMs) return;
       if(!state.isLeader) await acquireLeader();
       if(!state.isLeader) return;
       state.snapshotInFlight = true;
@@ -8915,28 +9042,11 @@
   }
 
   function nnGetHash(source=document) {
-    const globalHash = window.dle_login_hash || window.user_hash || '';
-    if(globalHash) return String(globalHash);
-
-    const root = source && source.querySelector ? source : document;
-    const selectors = [
-      '[name="user_hash"]',
-      '[name="dle_login_hash"]',
-      'input[name*="hash"]',
-      'meta[name="user_hash"]',
-      'meta[name="dle_login_hash"]',
-      '[data-user-hash]',
-      '[data-hash]'
-    ];
-    for(const sel of selectors) {
-      const el = root.querySelector(sel);
-      const val = el?.value || el?.content || el?.dataset?.userHash || el?.dataset?.hash || '';
-      if(val) return String(val);
+    if(source !== document) {
+      const extracted = suiteReadUserHashFromPage(source, true);
+      return extracted ? suiteSaveUserHash(extracted) : suiteGetUserHash();
     }
-
-    const html = root === document ? document.documentElement?.innerHTML || '' : root.documentElement?.innerHTML || '';
-    const m = html.match(/(?:user_hash|dle_login_hash)['"]?\s*[:=]\s*['"]([^'"]+)['"]/i);
-    return m ? m[1] : '';
+    return suiteGetUserHash();
   }
 
   function nnInit(userName) {
@@ -8962,8 +9072,11 @@
     let noNeedQueue = [], noNeedQueueRunning = false, autoNoNeedRunning = false, noNeedRetryCount = 0;
     let scanBuffer = [], scanSent = 0, scanFound = 0, scanTotalPages = 0, scanCurPage = 0;
     let panelCollapsed = false;
-    let cachedUserHash = gmStoreGet(HASH_KEY, '') || nnGetHash();
-    if(cachedUserHash) gmStoreSet(HASH_KEY,cachedUserHash);
+    let cachedUserHash = nnGetHash() || gmStoreGet(HASH_KEY, '');
+    if(cachedUserHash) {
+      suiteSaveUserHash(cachedUserHash);
+      gmStoreSet(HASH_KEY,cachedUserHash);
+    }
     document.addEventListener('suite-setting-change',e=>{
       if(e.detail?.key!=='noNeedButtonsAlways')return;
       buttonsHoverOnly=!cfg.noNeedButtonsAlways;
@@ -9130,6 +9243,7 @@
     function saveUserHash(hash) {
       if(!hash) return '';
       cachedUserHash=String(hash);
+      suiteSaveUserHash(cachedUserHash);
       gmStoreSet(HASH_KEY,cachedUserHash);
       return cachedUserHash;
     }
@@ -9223,6 +9337,7 @@
       let parsed=await postOnce(hash);
       if(!parsed.ok && /hash|хеш|сесс|session|token|токен/i.test(parsed.message||'')) {
         gmStoreDelete(HASH_KEY);
+        suiteInvalidateUserHash();
         cachedUserHash='';
         hash=await refreshUserHash();
         if(hash) parsed=await postOnce(hash);
