@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.54
+// @version      3.55
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -4148,6 +4148,7 @@
 
       let dragging = false;
       let moved = false;
+      let suppressClickUntil = 0;
       let startX = 0;
       let startY = 0;
       let startLeft = 0;
@@ -4179,7 +4180,7 @@
         button.style.top = newTop + 'px';
         event.preventDefault();
       };
-      const finishDrag = () => {
+      const finishDrag = (activate = false) => {
         if(!dragging) return;
         dragging = false;
         button.style.transition = '';
@@ -4191,6 +4192,10 @@
           bottom:Math.max(0, window.innerHeight - rect.bottom)
         };
         saveCache(nextCache);
+        if(activate && !moved){
+          suppressClickUntil = Date.now() + 700;
+          openModal();
+        }
       };
       on(button, 'mousedown', event => {
         if(event.button !== 0) return;
@@ -4204,9 +4209,14 @@
       on(document, 'touchmove', event => {
         if(dragging) moveDrag(event,event.touches[0]);
       }, {passive:false});
-      on(document, 'touchend', finishDrag);
-      on(document, 'touchcancel', finishDrag);
+      on(document, 'touchend', () => finishDrag(true));
+      on(document, 'touchcancel', () => finishDrag(false));
       on(button, 'click', event => {
+        if(Date.now() < suppressClickUntil){
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
         if(moved){
           moved = false;
           event.preventDefault();
@@ -8682,7 +8692,12 @@
       btn.style.top=newTop+'px';
       e.preventDefault();
     };
-    const finishButtonDrag=()=>{
+    let suppressButtonClickUntil=0;
+    const toggleSettingsPanel=()=>{
+      panel.style.display=panel.style.display==='none'?'block':'none';
+      if(panel.style.display !== 'none') requestAnimationFrame(() => panel._suiteKeepInViewport?.());
+    };
+    const finishButtonDrag=(activate=false)=>{
       if(!btnDragging)return;
       btnDragging=false;
       btn.style.transition='';
@@ -8691,6 +8706,10 @@
       cfg.settingsBtnLeft=rect.left;
       cfg.settingsBtnBottom=Math.max(0,window.innerHeight-rect.bottom);
       saveCfg();
+      if(activate&&!btnMoved){
+        suppressButtonClickUntil=Date.now()+700;
+        toggleSettingsPanel();
+      }
     };
     btn.addEventListener('mousedown', function(e){
       if(e.button!==0)return;
@@ -8704,12 +8723,16 @@
     document.addEventListener('touchmove',e=>{
       if(btnDragging) moveButtonDrag(e,e.touches[0]);
     },{passive:false});
-    document.addEventListener('touchend',finishButtonDrag);
-    document.addEventListener('touchcancel',finishButtonDrag);
-    btn.addEventListener('click',()=>{
+    document.addEventListener('touchend',()=>finishButtonDrag(true));
+    document.addEventListener('touchcancel',()=>finishButtonDrag(false));
+    btn.addEventListener('click',e=>{
+      if(Date.now()<suppressButtonClickUntil){
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
       if(btnMoved)return; // не открываем если тащили
-      panel.style.display=panel.style.display==='none'?'block':'none';
-      if(panel.style.display !== 'none') requestAnimationFrame(() => panel._suiteKeepInViewport?.());
+      toggleSettingsPanel();
     });
   }
 
