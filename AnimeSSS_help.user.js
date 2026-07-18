@@ -259,9 +259,24 @@
     listeners: new Set()
   };
 
-  function loadSavedSuiteUpdateState() {
-    const saved = gmGet(SUITE_UPDATE_AVAILABLE_KEY, null);
-    if(!saved || typeof saved !== 'object') return;
+  function normalizeSuiteUpdateStorageValue(value) {
+    if(value && typeof value === 'object') return value;
+    if(typeof value !== 'string' || !value) return null;
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch(e) {
+      return null;
+    }
+  }
+
+  function applySavedSuiteUpdateState(value) {
+    const saved = normalizeSuiteUpdateStorageValue(value);
+    if(!saved) {
+      suiteUpdateState.remoteVersion = '';
+      suiteUpdateState.hasUpdate = false;
+      return false;
+    }
 
     const remoteVersion = String(saved.remoteVersion || '').trim();
     const hasUpdate = !!remoteVersion &&
@@ -269,18 +284,25 @@
 
     if(!hasUpdate) {
       gmDelete(SUITE_UPDATE_AVAILABLE_KEY);
-      return;
+      suiteUpdateState.remoteVersion = remoteVersion;
+      suiteUpdateState.hasUpdate = false;
+      return false;
     }
 
     suiteUpdateState.remoteVersion = remoteVersion;
     suiteUpdateState.hasUpdate = true;
     suiteUpdateState.checked = true;
     suiteUpdateState.error = false;
+    return true;
+  }
+
+  function loadSavedSuiteUpdateState() {
+    applySavedSuiteUpdateState(gmStoreGet(SUITE_UPDATE_AVAILABLE_KEY, null));
   }
 
   function saveSuiteUpdateState() {
     if(suiteUpdateState.hasUpdate && suiteUpdateState.remoteVersion) {
-      gmSet(SUITE_UPDATE_AVAILABLE_KEY, {
+      gmStoreSet(SUITE_UPDATE_AVAILABLE_KEY, {
         remoteVersion: suiteUpdateState.remoteVersion,
         foundAt: Date.now()
       });
@@ -313,6 +335,25 @@
   }
 
   loadSavedSuiteUpdateState();
+
+  function syncSuiteUpdateStateFromStorage() {
+    applySavedSuiteUpdateState(gmStoreGet(SUITE_UPDATE_AVAILABLE_KEY, null));
+    notifySuiteUpdateState();
+  }
+
+  if(typeof GM_addValueChangeListener === 'function') {
+    GM_addValueChangeListener(SUITE_UPDATE_AVAILABLE_KEY, (_key, _oldValue, newValue, remote) => {
+      if(!remote) return;
+      applySavedSuiteUpdateState(newValue);
+      notifySuiteUpdateState();
+    });
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if(!document.hidden) syncSuiteUpdateStateFromStorage();
+  }, {passive:true});
+  window.addEventListener('pageshow', syncSuiteUpdateStateFromStorage, {passive:true});
+  window.addEventListener('focus', syncSuiteUpdateStateFromStorage, {passive:true});
 
   async function fetchSuiteRemoteVersion() {
     const res = await fetch(`${SUITE_REMOTE_VERSION_URL}?t=${Date.now()}`, { cache:'no-store' });
@@ -2325,44 +2366,100 @@
     if(typeof cptApplyScale === 'function') cptApplyScale();
   }
 
-  function suiteResolveFloatingButtonOverlaps() {
+  function suiteResolveFloatingButtonOverlaps(preferredElement = null) {
     const viewport = suiteGetVisibleViewport();
     const gap = 8;
     const selector = [
+      '#aw-active-tab-panel',
+      '#suite-settings-panel',
       '#suite-settings-btn',
       '#suite-suggestion-authors-button',
       '.cv-stones-floating-btn',
       '.circle-btn'
     ].join(',');
-    const buttons = [...document.querySelectorAll(selector)].filter(button => {
-      const style = getComputedStyle(button);
-      return style.display !== 'none' && style.visibility !== 'hidden' && button.getBoundingClientRect().width > 0;
+    const controls = [...new Set([
+      ...suiteViewportItems.keys(),
+      ...document.querySelectorAll(selector)
+    ])].filter(control => {
+      if(!control?.isConnected) return false;
+      const style = getComputedStyle(control);
+      const rect = control.getBoundingClientRect();
+      return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+    });
+    if(!controls.length) return;
+
+    const preferred = preferredElement && controls.includes(preferredElement) ? preferredElement : null;
+    const priority = control => {
+      if(control.matches('#suite-settings-btn')) return 0;
+      if(control.matches('#suite-settings-panel')) return 1;
+      if(control.matches('#aw-active-tab-panel')) return 2;
+      if(control.matches('#suite-suggestion-authors-button')) return 3;
+      return 10;
+    };
+    const ordered = controls.sort((a,b) => {
+      const priorityDiff = priority(a) - priority(b);
+      if(priorityDiff) return priorityDiff;
+      if(a === preferred) return -1;
+      if(b === preferred) return 1;
+      const aRect = a.getBoundingClientRect();
+      const bRect = b.getBoundingClientRect();
+      return (bRect.width * bRect.height) - (aRect.width * aRect.height);
     });
     const occupied = [];
     const overlaps = (a,b) => a.left < b.right + gap && a.right + gap > b.left && a.top < b.bottom + gap && a.bottom + gap > b.top;
 
-    buttons.forEach(button => {
-      let rect = button.getBoundingClientRect();
-      for(const other of occupied){
-        if(!overlaps(rect,other)) continue;
-        const candidates = [
-          {left:rect.left, top:other.top - rect.height - gap},
-          {left:rect.left, top:other.bottom + gap},
-          {left:other.left - rect.width - gap, top:rect.top},
-          {left:other.right + gap, top:rect.top}
-        ];
-        const candidate = candidates.find(pos =>
-          pos.left >= viewport.left + gap && pos.left + rect.width <= viewport.right - gap &&
-          pos.top >= viewport.top + gap && pos.top + rect.height <= viewport.bottom - gap &&
-          occupied.every(item => !overlaps({left:pos.left,top:pos.top,right:pos.left+rect.width,bottom:pos.top+rect.height},item))
+    ordered.forEach(control => {
+      let rect = control.getBoundingClientRect();
+      if(occupied.some(other => overlaps(rect,other))){
+        const candidates = [];
+        const addCandidate = (left,top) => candidates.push({left,top});
+        occupied.forEach(other => {
+          addCandidate(rect.left, other.top - rect.height - gap);
+          addCandidate(rect.left, other.bottom + gap);
+          addCandidate(other.left - rect.width - gap, rect.top);
+          addCandidate(other.right + gap, rect.top);
+          addCandidate(other.left, other.top - rect.height - gap);
+          addCandidate(other.left, other.bottom + gap);
+          addCandidate(other.left - rect.width - gap, other.top);
+          addCandidate(other.right + gap, other.top);
+        });
+        addCandidate(viewport.left + gap, viewport.top + gap);
+        addCandidate(viewport.right - gap - rect.width, viewport.top + gap);
+        addCandidate(viewport.left + gap, viewport.bottom - gap - rect.height);
+        addCandidate(viewport.right - gap - rect.width, viewport.bottom - gap - rect.height);
+
+        const xEdges = [viewport.left + gap, viewport.right - gap - rect.width];
+        const yEdges = [viewport.top + gap, viewport.bottom - gap - rect.height];
+        occupied.forEach(other => {
+          xEdges.push(other.left - rect.width - gap, other.right + gap);
+          yEdges.push(other.top - rect.height - gap, other.bottom + gap);
+        });
+        xEdges.forEach(left => yEdges.forEach(top => addCandidate(left,top)));
+
+        const valid = candidates.filter(pos => {
+          const candidateRect = {
+            left:pos.left,
+            top:pos.top,
+            right:pos.left + rect.width,
+            bottom:pos.top + rect.height
+          };
+          return candidateRect.left >= viewport.left + gap && candidateRect.right <= viewport.right - gap &&
+            candidateRect.top >= viewport.top + gap && candidateRect.bottom <= viewport.bottom - gap &&
+            occupied.every(item => !overlaps(candidateRect,item));
+        });
+        valid.sort((a,b) =>
+          ((a.left - rect.left) ** 2 + (a.top - rect.top) ** 2) -
+          ((b.left - rect.left) ** 2 + (b.top - rect.top) ** 2)
         );
+        const candidate = valid[0];
         if(candidate){
-          button.style.transform = 'none';
-          button.style.left = `${Math.round(candidate.left)}px`;
-          button.style.top = `${Math.round(candidate.top)}px`;
-          button.style.right = 'auto';
-          button.style.bottom = 'auto';
-          rect = button.getBoundingClientRect();
+          control.style.transform = 'none';
+          control.style.left = `${Math.round(candidate.left)}px`;
+          control.style.top = `${Math.round(candidate.top)}px`;
+          control.style.right = 'auto';
+          control.style.bottom = 'auto';
+          rect = control.getBoundingClientRect();
+          try{ control._suitePersistFloatingPosition?.(); }catch(e){}
         }
       }
       occupied.push(rect);
@@ -2384,7 +2481,7 @@
       window.visualViewport?.addEventListener('resize', suiteScheduleViewportRefresh, {passive:true});
       window.visualViewport?.addEventListener('scroll', suiteScheduleViewportRefresh, {passive:true});
     }
-    requestAnimationFrame(() => suiteClampToViewport(element, options));
+    suiteScheduleViewportRefresh();
   }
 
   const suiteCollapsedPanelAnchors = new WeakMap();
@@ -2407,6 +2504,7 @@
         }
       }
       suiteClampToViewport(panel, {margin:8, constrainSize:true});
+      suiteResolveFloatingButtonOverlaps(panel);
     });
   }
 
@@ -2415,6 +2513,11 @@
       ? (typeof handleSelectorOrEl === 'string' ? panel.querySelector(handleSelectorOrEl) : handleSelectorOrEl)
       : panel;
     if (!handle) return;
+    panel._suitePersistFloatingPosition = () => {
+      if(!onDrop) return;
+      const rect = panel.getBoundingClientRect();
+      onDrop(rect.left, rect.top);
+    };
     suiteKeepInViewport(panel, {margin:8, constrainSize:true});
     handle.style.cursor = 'grab';
     handle.style.touchAction = 'none';
@@ -2498,22 +2601,25 @@
       isDragging = false;
       handle.style.cursor = 'grab';
       suiteClampToViewport(panel, {margin:8, constrainSize:true});
+      suiteResolveFloatingButtonOverlaps(panel);
       // Вызываем callback с финальными координатами (если передан)
-      if (onDrop) onDrop(parseFloat(panel.style.left)||0, parseFloat(panel.style.top)||0);
+      panel._suitePersistFloatingPosition();
     });
     document.addEventListener('touchend', function() {
       if (!isDragging) return;
       isDragging = false;
       handle.style.cursor = 'grab';
       suiteClampToViewport(panel, {margin:8, constrainSize:true});
-      if (onDrop) onDrop(parseFloat(panel.style.left)||0, parseFloat(panel.style.top)||0);
+      suiteResolveFloatingButtonOverlaps(panel);
+      panel._suitePersistFloatingPosition();
     });
     document.addEventListener('touchcancel', function() {
       if (!isDragging) return;
       isDragging = false;
       handle.style.cursor = 'grab';
       suiteClampToViewport(panel, {margin:8, constrainSize:true});
-      if (onDrop) onDrop(parseFloat(panel.style.left)||0, parseFloat(panel.style.top)||0);
+      suiteResolveFloatingButtonOverlaps(panel);
+      panel._suitePersistFloatingPosition();
     });
   }
 
@@ -4145,6 +4251,15 @@
         button.style.top = 'auto';
       }
       suiteKeepInViewport(button, {margin:8, constrainSize:false});
+      button._suitePersistFloatingPosition = () => {
+        const rect = button.getBoundingClientRect();
+        const nextCache = loadCache();
+        nextCache.suggestionButtonPosition = {
+          x:rect.left,
+          bottom:Math.max(0, window.innerHeight - rect.bottom)
+        };
+        saveCache(nextCache);
+      };
 
       let dragging = false;
       let moved = false;
@@ -4185,13 +4300,8 @@
         dragging = false;
         button.style.transition = '';
         suiteClampToViewport(button, {margin:8, constrainSize:false});
-        const rect = button.getBoundingClientRect();
-        const nextCache = loadCache();
-        nextCache.suggestionButtonPosition = {
-          x:rect.left,
-          bottom:Math.max(0, window.innerHeight - rect.bottom)
-        };
-        saveCache(nextCache);
+        suiteResolveFloatingButtonOverlaps(button);
+        button._suitePersistFloatingPosition();
         if(activate && !moved){
           suppressClickUntil = Date.now() + 700;
           openModal();
@@ -8662,6 +8772,12 @@
     }
     document.body.appendChild(btn);
     suiteKeepInViewport(btn, {margin:8, constrainSize:false});
+    btn._suitePersistFloatingPosition=()=>{
+      const rect=btn.getBoundingClientRect();
+      cfg.settingsBtnLeft=rect.left;
+      cfg.settingsBtnBottom=Math.max(0,window.innerHeight-rect.bottom);
+      saveCfg();
+    };
     const panel=createSettingsPanel();
     subscribeSuiteUpdateState(state=>applySuiteSettingsButtonUpdateState(btn, state));
     startSuiteVersionChecker();
@@ -8695,17 +8811,15 @@
     let suppressButtonClickUntil=0;
     const toggleSettingsPanel=()=>{
       panel.style.display=panel.style.display==='none'?'block':'none';
-      if(panel.style.display !== 'none') requestAnimationFrame(() => panel._suiteKeepInViewport?.());
+      if(panel.style.display !== 'none') suiteScheduleViewportRefresh();
     };
     const finishButtonDrag=(activate=false)=>{
       if(!btnDragging)return;
       btnDragging=false;
       btn.style.transition='';
       suiteClampToViewport(btn,{margin:8,constrainSize:false});
-      const rect=btn.getBoundingClientRect();
-      cfg.settingsBtnLeft=rect.left;
-      cfg.settingsBtnBottom=Math.max(0,window.innerHeight-rect.bottom);
-      saveCfg();
+      suiteResolveFloatingButtonOverlaps(btn);
+      btn._suitePersistFloatingPosition();
       if(activate&&!btnMoved){
         suppressButtonClickUntil=Date.now()+700;
         toggleSettingsPanel();
@@ -13393,6 +13507,10 @@
                 </div>
             `;
             document.body.appendChild(panel);
+            panel._suitePersistFloatingPosition = () => GM_setValue(PANEL_POSITION_KEY, {
+                left: panel.style.left,
+                top: panel.style.top
+            });
             suiteKeepInViewport(panel, {margin:8, constrainSize:true});
 
             panel.querySelector('#aw-active-tab-toggle').addEventListener('click', toggleWatch);
@@ -13488,30 +13606,24 @@
                 dragging = false;
                 head.style.cursor = 'grab';
                 clampPanelToViewport(panel);
-                await GM_setValue(PANEL_POSITION_KEY, {
-                    left: panel.style.left,
-                    top:  panel.style.top
-                });
+                suiteResolveFloatingButtonOverlaps(panel);
+                await panel._suitePersistFloatingPosition();
             });
             document.addEventListener('touchend', async () => {
                 if (!dragging) return;
                 dragging = false;
                 head.style.cursor = 'grab';
                 clampPanelToViewport(panel);
-                await GM_setValue(PANEL_POSITION_KEY, {
-                    left: panel.style.left,
-                    top:  panel.style.top
-                });
+                suiteResolveFloatingButtonOverlaps(panel);
+                await panel._suitePersistFloatingPosition();
             });
             document.addEventListener('touchcancel', async () => {
                 if (!dragging) return;
                 dragging = false;
                 head.style.cursor = 'grab';
                 clampPanelToViewport(panel);
-                await GM_setValue(PANEL_POSITION_KEY, {
-                    left: panel.style.left,
-                    top:  panel.style.top
-                });
+                suiteResolveFloatingButtonOverlaps(panel);
+                await panel._suitePersistFloatingPosition();
             });
             window.addEventListener('resize', () => clampPanelToViewport(panel));
         }
