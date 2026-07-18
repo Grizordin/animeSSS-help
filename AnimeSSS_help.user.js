@@ -23,6 +23,7 @@
 // @connect      raw.githubusercontent.com
 // @connect      animesss-report-proxy.inaricyn69.workers.dev
 // @connect      kodikplayer.com
+// @connect      predlojka-o4s8.onrender.com
 // @connect      predlojka.onrender.com
 // ==/UserScript==
 
@@ -3920,7 +3921,11 @@
     if(window.__suiteSuggestionAuthorsInstalled) return;
     window.__suiteSuggestionAuthorsInstalled = true;
 
-    const API_BASE = 'https://predlojka.onrender.com';
+    const API_BASES = [
+      'https://predlojka-o4s8.onrender.com',
+      'https://predlojka.onrender.com'
+    ];
+    let activeApiBase = API_BASES[0];
     const CACHE_KEY = 'suite_suggestion_authors_cache_v1';
     const HOUR_MS = 60 * 60 * 1000;
     const MANUAL_REFRESH_COOLDOWN_MS = 30 * 1000;
@@ -3952,20 +3957,38 @@
       return value && typeof value === 'object' ? value : {};
     }
     function saveCache(cache){ gmStoreSet(CACHE_KEY, cache); }
-    function apiGet(path){
+    function apiGetFrom(baseUrl,path){
       return new Promise((resolve, reject) => {
         GM_xmlhttpRequest({
           method:'GET',
-          url:API_BASE + path,
+          url:baseUrl + path,
           timeout:30000,
           onload:response => {
+            if(response.status < 200 || response.status >= 300){
+              reject(new Error(`${baseUrl}: HTTP ${response.status || 0}`));
+              return;
+            }
             try{ resolve(JSON.parse(response.responseText || '{}')); }
-            catch(error){ reject(error); }
+            catch(error){ reject(new Error(`${baseUrl}: invalid JSON`)); }
           },
-          onerror:() => reject(new Error('network error')),
-          ontimeout:() => reject(new Error('timeout'))
+          onerror:() => reject(new Error(`${baseUrl}: network error`)),
+          ontimeout:() => reject(new Error(`${baseUrl}: timeout`))
         });
       });
+    }
+    async function apiGet(path){
+      const candidates=[activeApiBase,...API_BASES.filter(base=>base!==activeApiBase)];
+      let lastError=null;
+      for(const baseUrl of candidates){
+        try{
+          const result=await apiGetFrom(baseUrl,path);
+          activeApiBase=baseUrl;
+          return result;
+        }catch(error){
+          lastError=error;
+        }
+      }
+      throw lastError || new Error('suggestion API unavailable');
     }
     function escapeHtml(value){
       return String(value ?? '').replace(/[&<>"]/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[ch]));
