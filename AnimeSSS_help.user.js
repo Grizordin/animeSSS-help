@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.53
+// @version      3.54
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -923,6 +923,7 @@
     if(window.__suiteGlobalDiagnosticsInstalled) return;
     window.__suiteGlobalDiagnosticsInstalled = true;
     const recent = new Map();
+    let lastIgnoredPlaceholderMediaAt = 0;
 
     const report = (event, data, level = 'error', dedupeMs = 5000) => {
       try {
@@ -946,6 +947,10 @@
       if(target && target !== window){
         if(target instanceof HTMLMediaElement){
           const rawSource = target.currentSrc || target.src || target.querySelector?.('source[src]')?.src || '';
+          if(/^data:video\/(?:mp4|webm);base64,/i.test(rawSource) && String(rawSource).length <= 256){
+            lastIgnoredPlaceholderMediaAt = Date.now();
+            return;
+          }
           const source = (() => {
             const raw = String(rawSource || '');
             if(/^data:/i.test(raw)){
@@ -984,6 +989,7 @@
     window.addEventListener('unhandledrejection', event => {
       const reasonText = String(event.reason?.message || event.reason || '');
       if(/Failed to load because no supported source was found/i.test(reasonText)){
+        if(Date.now() - lastIgnoredPlaceholderMediaAt < 5000) return;
         report('media_playback_rejection', { message:reasonText }, 'warn', 60 * 60 * 1000);
         return;
       }
@@ -1197,6 +1203,7 @@
       color:#e2e8f0;font-family:'Segoe UI',Arial,sans-serif;
       box-shadow:0 10px 28px rgba(0,0,0,.38),0 0 0 1px rgba(30,41,59,.22);
       user-select:none;pointer-events:none;backdrop-filter:blur(6px);
+      box-sizing:border-box;max-width:calc(100% - 24px);
     }
     #suite-emission-timer .suite-emission-head {
       display:flex;align-items:center;gap:8px;margin-bottom:5px;
@@ -1313,6 +1320,8 @@
     #suite-lab-fatigue-modal .suite-lab-fatigue-reset-btn{min-width:58px;border-color:rgba(248,113,113,.35);color:#fecaca;}
     @media(max-width:760px){
       #suite-lab-fatigue-counter{top:104px;right:12px;min-width:172px;width:calc(100% - 24px);max-width:220px;}
+      #suite-lab-fatigue-modal .suite-lab-fatigue-pages{flex-wrap:wrap;}
+      #suite-lab-fatigue-modal .suite-lab-fatigue-page-state{order:3;flex:1 0 100%;}
     }
     /* Неоновые обводки */
     .neon-outline-wrapper {
@@ -1555,6 +1564,49 @@
       color:#fde68a;
       font-weight:800;
       text-shadow:0 0 10px rgba(245,158,11,.28);
+    }
+    #cv-stats-panel,
+    #stone-brick-panel,
+    #remelt-panel,
+    #cv-auto-open-panel,
+    #missing-panel,
+    #aw-active-tab-panel {
+      box-sizing:border-box;
+      max-width:calc(100vw - 16px) !important;
+      max-height:calc(100dvh - 16px) !important;
+    }
+    #cv-stats-content,
+    #stone-brick-body,
+    #remelt-panel-body,
+    #missing-panel-body {
+      max-height:calc(100dvh - 120px) !important;
+      overflow-y:auto !important;
+      overscroll-behavior:contain;
+    }
+    #cv-confirm-overlay,
+    #cv-pack-confirm-overlay {
+      box-sizing:border-box;
+      padding:8px;
+    }
+    #cv-confirm-overlay > div,
+    #cv-pack-confirm-overlay > div {
+      box-sizing:border-box;
+      max-width:calc(100vw - 16px) !important;
+      max-height:calc(100dvh - 16px);
+      overflow:auto;
+      overscroll-behavior:contain;
+    }
+    #__cpt-root {
+      max-width:calc(100vw - 16px);
+      max-height:calc(100dvh - 16px);
+      overflow:hidden;
+    }
+    @media(max-width:520px){
+      #cv-confirm-overlay > div,
+      #cv-pack-confirm-overlay > div { padding:20px 16px 16px !important; }
+      #cv-confirm-overlay > div > div:last-child,
+      #cv-pack-confirm-overlay > div > div:last-child { flex-wrap:wrap; }
+      .cpt-toast { width:min(230px,calc(100vw - 16px)) !important; }
     }
     .suite-toggle {
       position:relative;
@@ -2221,11 +2273,148 @@
   //  DRAG — универсальное перетаскивание панелей
   // ============================================================
 
+  const suiteViewportItems = new Map();
+  let suiteViewportListenersInstalled = false;
+  let suiteViewportFrame = 0;
+
+  function suiteGetVisibleViewport() {
+    const vv = window.visualViewport;
+    const left = Number.isFinite(vv?.offsetLeft) ? vv.offsetLeft : 0;
+    const top = Number.isFinite(vv?.offsetTop) ? vv.offsetTop : 0;
+    const width = Math.max(1, Number.isFinite(vv?.width) ? vv.width : window.innerWidth);
+    const height = Math.max(1, Number.isFinite(vv?.height) ? vv.height : window.innerHeight);
+    return { left, top, right:left + width, bottom:top + height, width, height };
+  }
+
+  function suiteClampToViewport(element, options = {}) {
+    if(!element?.isConnected || getComputedStyle(element).display === 'none') return;
+    const margin = Number.isFinite(options.margin) ? options.margin : 8;
+    const viewport = suiteGetVisibleViewport();
+
+    if(options.constrainSize !== false){
+      element.style.boxSizing = 'border-box';
+      element.style.maxWidth = `${Math.max(80, viewport.width - margin * 2)}px`;
+      element.style.maxHeight = `${Math.max(80, viewport.height - margin * 2)}px`;
+    }
+
+    let rect = element.getBoundingClientRect();
+    let left = rect.left;
+    let top = rect.top;
+    if(rect.right > viewport.right - margin) left -= rect.right - (viewport.right - margin);
+    if(rect.bottom > viewport.bottom - margin) top -= rect.bottom - (viewport.bottom - margin);
+    left = Math.max(viewport.left + margin, left);
+    top = Math.max(viewport.top + margin, top);
+
+    if(Math.abs(left - rect.left) > .5 || Math.abs(top - rect.top) > .5){
+      element.style.transform = 'none';
+      element.style.left = `${Math.round(left)}px`;
+      element.style.top = `${Math.round(top)}px`;
+      element.style.right = 'auto';
+      element.style.bottom = 'auto';
+    }
+  }
+
+  function suiteRefreshViewportItems() {
+    suiteViewportFrame = 0;
+    for(const [element, options] of suiteViewportItems){
+      if(!element?.isConnected){ suiteViewportItems.delete(element); continue; }
+      suiteClampToViewport(element, options);
+    }
+    suiteResolveFloatingButtonOverlaps();
+    if(typeof cptApplyScale === 'function') cptApplyScale();
+  }
+
+  function suiteResolveFloatingButtonOverlaps() {
+    const viewport = suiteGetVisibleViewport();
+    const gap = 8;
+    const selector = [
+      '#suite-settings-btn',
+      '#suite-suggestion-authors-button',
+      '.cv-stones-floating-btn',
+      '.circle-btn'
+    ].join(',');
+    const buttons = [...document.querySelectorAll(selector)].filter(button => {
+      const style = getComputedStyle(button);
+      return style.display !== 'none' && style.visibility !== 'hidden' && button.getBoundingClientRect().width > 0;
+    });
+    const occupied = [];
+    const overlaps = (a,b) => a.left < b.right + gap && a.right + gap > b.left && a.top < b.bottom + gap && a.bottom + gap > b.top;
+
+    buttons.forEach(button => {
+      let rect = button.getBoundingClientRect();
+      for(const other of occupied){
+        if(!overlaps(rect,other)) continue;
+        const candidates = [
+          {left:rect.left, top:other.top - rect.height - gap},
+          {left:rect.left, top:other.bottom + gap},
+          {left:other.left - rect.width - gap, top:rect.top},
+          {left:other.right + gap, top:rect.top}
+        ];
+        const candidate = candidates.find(pos =>
+          pos.left >= viewport.left + gap && pos.left + rect.width <= viewport.right - gap &&
+          pos.top >= viewport.top + gap && pos.top + rect.height <= viewport.bottom - gap &&
+          occupied.every(item => !overlaps({left:pos.left,top:pos.top,right:pos.left+rect.width,bottom:pos.top+rect.height},item))
+        );
+        if(candidate){
+          button.style.transform = 'none';
+          button.style.left = `${Math.round(candidate.left)}px`;
+          button.style.top = `${Math.round(candidate.top)}px`;
+          button.style.right = 'auto';
+          button.style.bottom = 'auto';
+          rect = button.getBoundingClientRect();
+        }
+      }
+      occupied.push(rect);
+    });
+  }
+
+  function suiteScheduleViewportRefresh() {
+    if(suiteViewportFrame) cancelAnimationFrame(suiteViewportFrame);
+    suiteViewportFrame = requestAnimationFrame(suiteRefreshViewportItems);
+  }
+
+  function suiteKeepInViewport(element, options = {}) {
+    if(!element) return;
+    suiteViewportItems.set(element, options);
+    if(!suiteViewportListenersInstalled){
+      suiteViewportListenersInstalled = true;
+      window.addEventListener('resize', suiteScheduleViewportRefresh, {passive:true});
+      window.addEventListener('orientationchange', suiteScheduleViewportRefresh, {passive:true});
+      window.visualViewport?.addEventListener('resize', suiteScheduleViewportRefresh, {passive:true});
+      window.visualViewport?.addEventListener('scroll', suiteScheduleViewportRefresh, {passive:true});
+    }
+    requestAnimationFrame(() => suiteClampToViewport(element, options));
+  }
+
+  const suiteCollapsedPanelAnchors = new WeakMap();
+  function suiteApplyCollapsibleState(panel, collapsed, renderState) {
+    if(!panel) return;
+    if(!collapsed){
+      const rect = panel.getBoundingClientRect();
+      suiteCollapsedPanelAnchors.set(panel, {left:rect.left, top:rect.top});
+    }
+    renderState();
+    requestAnimationFrame(() => {
+      if(collapsed){
+        const anchor = suiteCollapsedPanelAnchors.get(panel);
+        if(anchor){
+          panel.style.transform = 'none';
+          panel.style.left = `${Math.round(anchor.left)}px`;
+          panel.style.top = `${Math.round(anchor.top)}px`;
+          panel.style.right = 'auto';
+          panel.style.bottom = 'auto';
+        }
+      }
+      suiteClampToViewport(panel, {margin:8, constrainSize:true});
+    });
+  }
+
   function makeDraggable(panel, handleSelectorOrEl, onDrop) {
     const handle = handleSelectorOrEl
       ? (typeof handleSelectorOrEl === 'string' ? panel.querySelector(handleSelectorOrEl) : handleSelectorOrEl)
       : panel;
     if (!handle) return;
+    suiteKeepInViewport(panel, {margin:8, constrainSize:true});
     handle.style.cursor = 'grab';
     handle.style.touchAction = 'none';
 
@@ -2279,8 +2468,11 @@
       if (!isDragging) return;
       const dx = e.clientX - startX;
       const dy = e.clientY - startY;
-      const newLeft = Math.max(0, Math.min(window.innerWidth  - panel.offsetWidth,  startLeft + dx));
-      const newTop  = Math.max(0, Math.min(window.innerHeight - panel.offsetHeight, startTop  + dy));
+      const viewport = suiteGetVisibleViewport();
+      const maxLeft = Math.max(viewport.left, viewport.right - panel.offsetWidth);
+      const maxTop = Math.max(viewport.top, viewport.bottom - panel.offsetHeight);
+      const newLeft = Math.max(viewport.left, Math.min(maxLeft, startLeft + dx));
+      const newTop  = Math.max(viewport.top, Math.min(maxTop, startTop + dy));
       panel.style.left = newLeft + 'px';
       panel.style.top  = newTop  + 'px';
     });
@@ -2291,8 +2483,11 @@
       const point = getPoint(e);
       const dx = point.clientX - startX;
       const dy = point.clientY - startY;
-      const newLeft = Math.max(0, Math.min(window.innerWidth  - panel.offsetWidth,  startLeft + dx));
-      const newTop  = Math.max(0, Math.min(window.innerHeight - panel.offsetHeight, startTop  + dy));
+      const viewport = suiteGetVisibleViewport();
+      const maxLeft = Math.max(viewport.left, viewport.right - panel.offsetWidth);
+      const maxTop = Math.max(viewport.top, viewport.bottom - panel.offsetHeight);
+      const newLeft = Math.max(viewport.left, Math.min(maxLeft, startLeft + dx));
+      const newTop  = Math.max(viewport.top, Math.min(maxTop, startTop + dy));
       panel.style.left = newLeft + 'px';
       panel.style.top  = newTop  + 'px';
     }, { passive:false });
@@ -2301,6 +2496,7 @@
       if (!isDragging) return;
       isDragging = false;
       handle.style.cursor = 'grab';
+      suiteClampToViewport(panel, {margin:8, constrainSize:true});
       // Вызываем callback с финальными координатами (если передан)
       if (onDrop) onDrop(parseFloat(panel.style.left)||0, parseFloat(panel.style.top)||0);
     });
@@ -2308,12 +2504,14 @@
       if (!isDragging) return;
       isDragging = false;
       handle.style.cursor = 'grab';
+      suiteClampToViewport(panel, {margin:8, constrainSize:true});
       if (onDrop) onDrop(parseFloat(panel.style.left)||0, parseFloat(panel.style.top)||0);
     });
     document.addEventListener('touchcancel', function() {
       if (!isDragging) return;
       isDragging = false;
       handle.style.cursor = 'grab';
+      suiteClampToViewport(panel, {margin:8, constrainSize:true});
       if (onDrop) onDrop(parseFloat(panel.style.left)||0, parseFloat(panel.style.top)||0);
     });
   }
@@ -2475,7 +2673,10 @@
     createStatsPanel();
     btn.addEventListener('click',()=>{
       const p=document.getElementById('cv-stats-panel');
-      if(p.style.display==='none'){ p.style.display='block'; renderStatsTab(); } else p.style.display='none';
+      if(p.style.display==='none'){
+        p.style.display='block'; renderStatsTab();
+        requestAnimationFrame(()=>suiteClampToViewport(p,{margin:8,constrainSize:true}));
+      } else p.style.display='none';
     });
   }
 
@@ -2678,7 +2879,15 @@
     if(menuVideo.classList.contains('tm-menu-profilebg')&&wrapper.classList.contains('tm-fullbg-ready'))return;
     if(menuVideo.parentElement!==wrapper)wrapper.prepend(menuVideo);
     menuVideo.classList.add('tm-menu-profilebg'); modal.classList.add('tm-fullbg-host'); wrapper.classList.add('tm-fullbg-ready');
-    try{ menuVideo.muted=true; menuVideo.autoplay=true; menuVideo.loop=true; const p=menuVideo.play(); if(p&&p.catch)p.catch(()=>{}); }catch(e){}
+    const mediaSource = menuVideo.currentSrc
+      || menuVideo.getAttribute('src')
+      || menuVideo.querySelector('source[src]')?.getAttribute('src')
+      || '';
+    const isPlaceholder = /^data:video\/(?:mp4|webm);base64,/i.test(mediaSource)
+      && String(mediaSource).length <= 256;
+    if((mediaSource || menuVideo.srcObject) && !isPlaceholder){
+      try{ menuVideo.muted=true; menuVideo.autoplay=true; menuVideo.loop=true; const p=menuVideo.play(); if(p&&p.catch)p.catch(()=>{}); }catch(e){}
+    }
   }
 
   function cleanupMenuBackground(){
@@ -3033,6 +3242,7 @@
     {s:'Эти координаты уже отзывались в резонансе. Выбери другую комнату.', icon:'warn', title:'Резонанс', theme:'neon-amber'},
     {s:'Ты уже бывал в этой комнате. Резонанс требует незнакомые координаты.', icon:'warn', title:'Резонанс', theme:'neon-amber'},
     {s:'Резонанс не смог зацепиться за эту комнату',                icon:'warn',   title:'Резонанс',    theme:'rose'      },
+    {s:'В этой комнате сейчас никого нет. Резонанс может зацепиться только за комнату, где находится другой игрок.', icon:'warn', title:'Резонанс', theme:'neon-amber'},
     {s:'Время вышло',                                              icon:'clock',  title:'Время',       theme:'rose'      },
     {s:'Следующий шаг ещё недоступен',                             icon:'clock',  title:'Лабиринт',    theme:'neon-amber'},
     {s:'Купить ход можно только когда доступных ходов не осталось', icon:'coin',   title:'Лабиринт',    theme:'neon-amber'},
@@ -3040,6 +3250,8 @@
     {s:'Щит активирован',                                          icon:'shield', title:'Щит',         theme:'neon-blue' },
     {s:'Алтарь наградил тебя',                                     icon:'star',   title:'Награда',     theme:'neon-green'},
     {s:'Сундук открыт',                                            icon:'star',   title:'Сундук',      theme:'neon-green'},
+    {s:'Сначала открой сундук или откажись',                       icon:'warn',   title:'Сундук',      theme:'neon-amber'},
+    {s:'Погоня за кобольдом началась',                             icon:'bolt',   title:'Погоня',      theme:'neon-blue' },
     {s:'Карта-задание изменена',                                   icon:'save',   title:'Задание',     theme:'indigo'    },
     {s:'Участник принят в клуб',                                   icon:'user',   title:'Клуб',        theme:'emerald'   },
     {s:'Участник исключён из клуба',                               icon:'user',   title:'Клуб',        theme:'rose'      },
@@ -3063,10 +3275,12 @@
     {s:'Открытие паков карточек отключено',                        icon:'clock',  title:'Внимание',    theme:'neon-amber'},
     {s:'Карты не существует',                                      icon:'warn',   title:'Внимание',    theme:'neon-amber'},
     {s:'Данной карты не сущетсвует',                               icon:'warn',   title:'Внимание',    theme:'neon-amber'},
+    {s:'У вас нет такой карты',                                    icon:'card',   title:'Карта',        theme:'rose'      },
     // ── Порция 7 ─────────────────────────────────────────
     {s:'Данная карта уже добавлена',                               icon:'warn',   title:'Внимание',    theme:'neon-amber'},
     {r:/Вы должны выбрать от одной до \d+ карт/i,                 icon:'warn',   title:'Внимание',    theme:'neon-amber'},
     {s:'Ошибка запроса',                                           icon:'err',    title:'Ошибка',      theme:'neon-amber'},
+    {s:'Произошла ошибка при отправке карточки',                   icon:'err',    title:'Карточка',     theme:'rose'      },
     // ── Порция 8 ─────────────────────────────────────────
     {s:'Режим берсерка активирован',                               icon:'bolt',   title:'Берсерк',     theme:'neon-pink' },
     {r:/Куплено \+\d+ небесного кирпича/i,                        icon:'bolt',   title:'Покупка',     theme:'neon-green'},
@@ -3113,10 +3327,13 @@
     {s:'Ты отказался от отголоска',                                icon:'warn',   title:'Отголосок',   theme:'rose'      },
     {s:'Всевидящее око показало соседние комнаты',                 icon:'bolt',   title:'Лабиринт',    theme:'neon-blue' },
     {s:'Нельзя использовать Всевидящее око: следующий ход ещё недоступен', icon:'clock', title:'Лабиринт', theme:'neon-amber'},
+    {s:'Нельзя использовать Всевидящее око: на сегодня ходы закончились', icon:'clock', title:'Лимит ходов', theme:'rose'},
     {s:'Ты открыл золотые врата и обрёл карту ранга S!',           icon:'star',   title:'Награда',     theme:'neon-green'},
     {s:'Штурм провален',                                           icon:'warn',   title:'Штурм',       theme:'rose'      },
     {s:'Ты прошёл по уже открытому пути. Лабиринт не засчитал этот шаг в общий прогресс.', icon:'warn', title:'Лабиринт', theme:'neon-amber'},
     {s:'Вы не выбрали карту',                                      icon:'warn',   title:'Внимание',    theme:'neon-amber'},
+    {s:'Нельзя одновременно выбирать карты ранга S и +',           icon:'warn',   title:'Выбор карт',   theme:'neon-amber'},
+    {s:'Уже выбран дубль этой карты. С ним нельзя добавлять другие карты.', icon:'warn', title:'Выбор карт', theme:'neon-amber'},
     {s:'Максимум 70 карточек',                                     icon:'warn',   title:'Лимит',       theme:'rose'      },
     {s:'Награда получена',                                         icon:'coin',   title:'Награда',     theme:'neon-green'},
     {s:'Сегодня вы уже ставили реакцию на комментарий данного пользователя', icon:'clock', title:'Лимит', theme:'rose'},
@@ -3140,6 +3357,7 @@
     {s:'Ты уже захватывал комнату для клуба', icon:'shield', title:'Клуб', theme:'neon-amber'},
     {s:'Вы уже получали карту с этого пака', icon:'warn', title:'Пак', theme:'neon-amber'},
     {s:'Публикация успешно убрана из ваших закладок на сайте', icon:'save', title:'Закладки', theme:'emerald'},
+    {s:'Публикация успешно добавлена в ваши закладки на сайте', icon:'save', title:'Закладки', theme:'emerald'},
     {
       r:/(?:с момента вашего отсутствия на сайте вам было прислано|у вас(?: сейчас)?)\s+\d+\s+(?:(?:нов(?:ое|ых)|непрочитанн(?:ое|ых))\s+)*сообщени(?:е|я|й)/i,
       icon:'bell',
@@ -3218,7 +3436,11 @@
 
   function cptApplyScale(){
     if(!cptRoot||!document.contains(cptRoot)) return;
-    cptRoot.style.transform=`scale(${cptGetScale()})`;
+    const viewport=suiteGetVisibleViewport();
+    const maxWidthScale=Math.max(.45,(viewport.width-36)/230);
+    const scale=Math.min(cptGetScale(),maxWidthScale);
+    cptRoot.style.maxHeight=`${Math.max(80,(viewport.height-36)/scale)}px`;
+    cptRoot.style.transform=`scale(${scale})`;
   }
 
   function cptAnimBar(bar){
@@ -3833,6 +4055,13 @@
           box-shadow:0 24px 90px rgba(0,0,0,.72),0 0 28px rgba(14,165,233,.14);
           color:#e0f2fe;overflow:hidden;overscroll-behavior:contain;font-family:"Segoe UI",Arial,sans-serif;
         }
+        @media(max-width:640px){
+          .suite-suggestion-modal{inset:8px;border-radius:12px;}
+          .suite-suggestion-topbar{grid-template-columns:minmax(0,1fr);gap:8px;padding:10px;}
+          .suite-suggestion-actions{display:flex;gap:6px;flex-wrap:wrap;}
+          .suite-suggestion-actions button{flex:1 1 auto;min-height:36px;}
+          .suite-suggestion-button{max-width:calc(100vw - 16px);}
+        }
         .suite-suggestion-modal.is-open{display:flex}
         .suite-suggestion-topbar{
           display:grid;grid-template-columns:1fr auto;align-items:center;gap:12px;
@@ -3892,53 +4121,68 @@
         button.style.right = 'auto';
         button.style.top = 'auto';
       }
+      suiteKeepInViewport(button, {margin:8, constrainSize:false});
 
       let dragging = false;
       let moved = false;
       let startX = 0;
       let startY = 0;
       let startLeft = 0;
-      let startBottom = 0;
-      on(button, 'mousedown', event => {
-        if(event.button !== 0) return;
+      let startTop = 0;
+      const startDrag = (event, point) => {
         const rect = button.getBoundingClientRect();
         dragging = true;
         moved = false;
-        startX = event.clientX;
-        startY = event.clientY;
+        startX = point.clientX;
+        startY = point.clientY;
         startLeft = rect.left;
-        startBottom = window.innerHeight - rect.bottom;
+        startTop = rect.top;
         button.style.left = startLeft + 'px';
-        button.style.bottom = startBottom + 'px';
+        button.style.top = startTop + 'px';
         button.style.right = 'auto';
-        button.style.top = 'auto';
+        button.style.bottom = 'auto';
         button.style.transition = 'none';
         event.preventDefault();
-      });
-      on(document, 'mousemove', event => {
+      };
+      const moveDrag = (event, point) => {
         if(!dragging) return;
-        const dx = event.clientX - startX;
-        const dy = event.clientY - startY;
+        const dx = point.clientX - startX;
+        const dy = point.clientY - startY;
         if(Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
-        const newLeft = Math.max(0, Math.min(window.innerWidth - button.offsetWidth, startLeft + dx));
-        const newBottom = Math.max(0, Math.min(window.innerHeight - button.offsetHeight, startBottom - dy));
+        const viewport = suiteGetVisibleViewport();
+        const newLeft = Math.max(viewport.left, Math.min(viewport.right - button.offsetWidth, startLeft + dx));
+        const newTop = Math.max(viewport.top, Math.min(viewport.bottom - button.offsetHeight, startTop + dy));
         button.style.left = newLeft + 'px';
-        button.style.bottom = newBottom + 'px';
-        button.style.right = 'auto';
-        button.style.top = 'auto';
+        button.style.top = newTop + 'px';
         event.preventDefault();
-      });
-      on(document, 'mouseup', () => {
+      };
+      const finishDrag = () => {
         if(!dragging) return;
         dragging = false;
         button.style.transition = '';
+        suiteClampToViewport(button, {margin:8, constrainSize:false});
+        const rect = button.getBoundingClientRect();
         const nextCache = loadCache();
         nextCache.suggestionButtonPosition = {
-          x:parseFloat(button.style.left) || 18,
-          bottom:parseFloat(button.style.bottom) || 18
+          x:rect.left,
+          bottom:Math.max(0, window.innerHeight - rect.bottom)
         };
         saveCache(nextCache);
+      };
+      on(button, 'mousedown', event => {
+        if(event.button !== 0) return;
+        startDrag(event,event);
       });
+      on(document, 'mousemove', event => {
+        moveDrag(event,event);
+      });
+      on(document, 'mouseup', finishDrag);
+      on(button, 'touchstart', event => startDrag(event,event.touches[0]), {passive:false});
+      on(document, 'touchmove', event => {
+        if(dragging) moveDrag(event,event.touches[0]);
+      }, {passive:false});
+      on(document, 'touchend', finishDrag);
+      on(document, 'touchcancel', finishDrag);
       on(button, 'click', event => {
         if(moved){
           moved = false;
@@ -4651,15 +4895,16 @@
         .suite-gacha-settings-btn:hover{filter:brightness(1.08);border-color:rgba(125,211,252,.55);}
         .suite-gacha-modal{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(2,6,23,.66);font-family:"Segoe UI",Arial,sans-serif;}
         .suite-gacha-dialog{
-          width:min(380px,100%);border:1px solid rgba(56,189,248,.34);border-radius:14px;padding:0;overflow:hidden;
+          width:min(380px,100%);max-height:calc(100dvh - 40px);border:1px solid rgba(56,189,248,.34);border-radius:14px;padding:0;overflow:hidden;
           color:#e0f2fe;background:linear-gradient(180deg,rgba(8,20,38,.98),rgba(7,16,30,.96));
           box-shadow:0 24px 80px rgba(0,0,0,.58),0 0 28px rgba(14,165,233,.14);
+          display:flex;flex-direction:column;
         }
         .suite-gacha-dialog__head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 15px;background:linear-gradient(135deg,rgba(14,116,144,.42),rgba(15,23,42,.92));border-bottom:1px solid rgba(56,189,248,.22);}
         .suite-gacha-dialog__title{font-size:16px;font-weight:950;color:#f8fafc;}
         .suite-gacha-close{width:32px;height:32px;border-radius:9px;border:1px solid rgba(56,189,248,.24);color:#dbeafe;background:rgba(15,23,42,.72);cursor:pointer;font-size:20px;line-height:1;}
         .suite-gacha-close:hover{background:rgba(30,64,175,.38);border-color:rgba(125,211,252,.46);}
-        .suite-gacha-reward-list{display:grid;gap:7px;padding:13px 15px 15px;}
+        .suite-gacha-reward-list{display:grid;gap:7px;padding:13px 15px 15px;overflow-y:auto;overscroll-behavior:contain;}
         .suite-gacha-reward-row{
           display:flex;align-items:center;justify-content:space-between;gap:12px;border-radius:10px;padding:9px 10px;
           border:1px solid rgba(56,189,248,.13);background:rgba(8,47,73,.28);cursor:pointer;color:#dbeafe;font-size:13px;font-weight:750;
@@ -5155,6 +5400,7 @@
       }));
 
       document.body.appendChild(refreshBtn);
+      suiteKeepInViewport(refreshBtn, {margin:8, constrainSize:false});
 
       showStonesProgress(progressBox, 'ИДЕТ ПОДСЧЕТ КАМНЕЙ');
       const maxPages = await getMaxPageCount();
@@ -6382,7 +6628,13 @@
       header.append(headerTitle,toggleBtn);
       const body=document.createElement('div');body.id='stone-brick-body';body.style.cssText='padding:12px 14px;display:flex;flex-direction:column;gap:10px;';
       panel.append(header,body);document.body.appendChild(panel);
-      let collapsed=false;toggleBtn.addEventListener('click',()=>{collapsed=!collapsed;body.style.display=collapsed?'none':'flex';toggleBtn.textContent=collapsed?'+':'−';});
+      let collapsed=false;toggleBtn.addEventListener('click',()=>{
+        collapsed=!collapsed;
+        suiteApplyCollapsibleState(panel,collapsed,()=>{
+          body.style.display=collapsed?'none':'flex';
+          toggleBtn.textContent=collapsed?'+':'−';
+        });
+      });
       makeBrickPanelDraggable(panel,header);applyBrickPanelPos(panel);renderBrickBody(body);
       brickOn(document,'click',e=>{
         if(e.target.closest('.stone__rank-item')) setTimeout(()=>renderBrickBody(body),500);
@@ -6817,7 +7069,13 @@
       header.append(title,toggle);
       const body=document.createElement('div');body.id='remelt-panel-body';body.style.cssText='padding:12px 14px;display:flex;flex-direction:column;gap:10px;';
       panel.append(header,body);document.body.appendChild(panel);
-      let collapsed=false;toggle.addEventListener('click',()=>{collapsed=!collapsed;body.style.display=collapsed?'none':'flex';toggle.textContent=collapsed?'+':'−';});
+      let collapsed=false;toggle.addEventListener('click',()=>{
+        collapsed=!collapsed;
+        suiteApplyCollapsibleState(panel,collapsed,()=>{
+          body.style.display=collapsed?'none':'flex';
+          toggle.textContent=collapsed?'+':'−';
+        });
+      });
       makeRemeltPanelDraggable(panel,header);
       const pos=loadRemeltPanelPos();if(pos){const margin=8;const left=Math.min(Math.max(margin,pos.left),Math.max(margin,window.innerWidth-panel.offsetWidth-margin));const top=Math.min(Math.max(margin,pos.top),Math.max(margin,window.innerHeight-panel.offsetHeight-margin));panel.style.right='auto';panel.style.left=left+'px';panel.style.top=top+'px';}
       renderRemeltBody(body);
@@ -6935,7 +7193,7 @@
     if(!t){
       t=document.createElement('div');
       t.id='cv-toast';
-      t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:999;font-family:\'Segoe UI\',Arial,sans-serif;pointer-events:none;';
+      t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:999;max-width:calc(100vw - 16px);box-sizing:border-box;font-family:\'Segoe UI\',Arial,sans-serif;pointer-events:none;';
       const head=document.createElement('div'); head.className='cpt-head';
       const titleEl=document.createElement('span'); titleEl.className='cv-toast-title';
       head.appendChild(titleEl);
@@ -6982,7 +7240,14 @@
   }
   function cancelKeyCapture(){ if(!captureState)return; captureState.input.value=codeToLabel(cfg[captureState.settingKey]); captureState.input.style.borderColor='#1e293b'; captureState=null; }
   function refreshHkSummary(){ if(!hkSummary)return; hkSummary.innerHTML=`Купить: <b style="color:#e2e8f0">${codeToLabel(cfg.buyKey)}</b><br>← <b style="color:#e2e8f0">${codeToLabel(cfg.leftKey)}</b> &nbsp;↕ <b style="color:#e2e8f0">${codeToLabel(cfg.middleKey)}</b> &nbsp;→ <b style="color:#e2e8f0">${codeToLabel(cfg.rightKey)}</b><br>Защитное окно: <b style="color:#e2e8f0">${codeToLabel(cfg.guardConfirmKey)}</b> выбрать &nbsp; <b style="color:#e2e8f0">${codeToLabel(cfg.guardCancelKey)}</b> отмена`; }
-  function setHkPanelCollapsed(c){ cfg.panelCollapsed=!!c; saveCfg(); if(!hkExpanded||!hkCollapsedBtn)return; hkExpanded.style.display=c?'none':'block'; hkCollapsedBtn.style.display=c?'flex':'none'; }
+  function setHkPanelCollapsed(c){
+    cfg.panelCollapsed=!!c; saveCfg();
+    if(!hkExpanded||!hkCollapsedBtn||!hkPanel)return;
+    suiteApplyCollapsibleState(hkPanel,!!c,()=>{
+      hkExpanded.style.display=c?'none':'block';
+      hkCollapsedBtn.style.display=c?'flex':'none';
+    });
+  }
 
   function createHotkeyPanel(){
     if(!cfg.modHotkeys||!location.pathname.includes('/cards/pack'))return;
@@ -6993,7 +7258,7 @@
     const title=document.createElement('div'); title.textContent='⌨ Горячие клавиши'; title.style.cssText='font-size:13px;font-weight:700';
     const colBtn=document.createElement('button'); colBtn.textContent='—'; colBtn.type='button'; colBtn.style.cssText='width:26px;height:26px;border:none;border-radius:7px;background:#1e293b;color:#94a3b8;cursor:pointer;font-size:14px;line-height:1';
     colBtn.addEventListener('click',()=>setHkPanelCollapsed(true)); hdr.append(title,colBtn);
-    const body=document.createElement('div'); body.style.cssText='padding:12px';
+    const body=document.createElement('div'); body.style.cssText='padding:12px;max-height:calc(100dvh - 70px);overflow-y:auto;overscroll-behavior:contain';
     const info=document.createElement('div'); info.textContent='Кликни поле и нажми клавишу'; info.style.cssText='font-size:11px;color:#334155;margin-bottom:10px';
     const buyF=makeHkField('Купить пак','buyKey'), leftF=makeHkField('Левая карта','leftKey'), midF=makeHkField('Средняя карта','middleKey'), rightF=makeHkField('Правая карта','rightKey');
     const guardOkF=makeHkField('Защитное окно: да','guardConfirmKey'), guardCancelF=makeHkField('Защитное окно: отмена','guardCancelKey');
@@ -7354,7 +7619,10 @@
       'padding:12px 14px',
       'display:flex',
       'flex-direction:column',
-      'gap:10px'
+      'gap:10px',
+      'max-height:calc(100dvh - 70px)',
+      'overflow-y:auto',
+      'overscroll-behavior:contain'
     ].join(';');
     const runRow=document.createElement('div');
     runRow.style.cssText=[
@@ -7447,6 +7715,7 @@
     if(autoRunInput) autoRunInput.checked=!!cfg.autoOpenEnabled;
     setAutoStatus(cfg.autoOpenEnabled?'Работает':(autoPausedAfterReload?'Пауза после перезагрузки':'Остановлено'));
     updateAutoCount();
+    if(autoPanel.style.display!=='none') requestAnimationFrame(()=>suiteClampToViewport(autoPanel,{margin:8,constrainSize:true}));
   }
 
   // ============================================================
@@ -7867,30 +8136,11 @@
 
     const keepSettingsPanelInViewport = () => {
       const margin = 12;
-      const maxHeight = Math.max(260, window.innerHeight - margin * 2);
+      const viewport = suiteGetVisibleViewport();
+      const maxHeight = Math.max(160, viewport.height - margin * 2);
       panel.style.maxHeight = maxHeight + 'px';
       if (panel.style.display === 'none') return;
-
-      if (panel.style.transform && panel.style.transform !== 'none') return;
-
-      const rect = panel.getBoundingClientRect();
-      let top = rect.top;
-      let left = rect.left;
-
-      if (rect.bottom > window.innerHeight - margin) {
-        top -= rect.bottom - (window.innerHeight - margin);
-      }
-      if (top < margin) top = margin;
-      if (rect.right > window.innerWidth - margin) {
-        left -= rect.right - (window.innerWidth - margin);
-      }
-      if (left < margin) left = margin;
-
-      panel.style.transform = 'none';
-      panel.style.top = Math.round(top) + 'px';
-      panel.style.left = Math.round(left) + 'px';
-      panel.style.right = 'auto';
-      panel.style.bottom = 'auto';
+      suiteClampToViewport(panel, {margin, constrainSize:true});
     };
     panel._suiteKeepInViewport = keepSettingsPanelInViewport;
 
@@ -7974,7 +8224,8 @@
       }
     });
 
-    const body=document.createElement('div'); body.style.cssText='padding:0';
+    const body=document.createElement('div');
+    body.style.cssText='padding:0;max-height:calc(100dvh - 100px);overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;';
 
     cfg.settingsSections = { ...DEFAULT_SETTINGS.settingsSections, ...(cfg.settingsSections||{}) };
     const sectionNav=document.createElement('div');
@@ -8377,40 +8628,61 @@
       btn.style.right='auto';
     }
     document.body.appendChild(btn);
+    suiteKeepInViewport(btn, {margin:8, constrainSize:false});
     const panel=createSettingsPanel();
     subscribeSuiteUpdateState(state=>applySuiteSettingsButtonUpdateState(btn, state));
     startSuiteVersionChecker();
 
     // Перетаскивание кнопки настроек
-    let btnDragging=false, btnMoved=false, bx, by, bLeft, bBottom;
-    btn.addEventListener('mousedown', function(e){
+    let btnDragging=false, btnMoved=false, bx, by, bLeft, bTop;
+    const startButtonDrag=(e,point)=>{
       btnDragging=true; btnMoved=false;
-      bx=e.clientX; by=e.clientY;
+      bx=point.clientX; by=point.clientY;
       const rect=btn.getBoundingClientRect();
       bLeft=rect.left;
-      bBottom=window.innerHeight-rect.bottom;
+      bTop=rect.top;
+      btn.style.left=bLeft+'px';
+      btn.style.top=bTop+'px';
+      btn.style.right='auto';
+      btn.style.bottom='auto';
       btn.style.transition='none';
       e.preventDefault();
-    });
-    document.addEventListener('mousemove', function(e){
+    };
+    const moveButtonDrag=(e,point)=>{
       if(!btnDragging)return;
-      const dx=e.clientX-bx, dy=e.clientY-by;
+      const dx=point.clientX-bx, dy=point.clientY-by;
       if(Math.abs(dx)>3||Math.abs(dy)>3) btnMoved=true;
-      const newLeft=Math.max(0,Math.min(window.innerWidth-btn.offsetWidth,  bLeft+dx));
-      const newBottom=Math.max(0,Math.min(window.innerHeight-btn.offsetHeight, bBottom-dy));
+      const viewport=suiteGetVisibleViewport();
+      const newLeft=Math.max(viewport.left,Math.min(viewport.right-btn.offsetWidth,bLeft+dx));
+      const newTop=Math.max(viewport.top,Math.min(viewport.bottom-btn.offsetHeight,bTop+dy));
       btn.style.left=newLeft+'px';
-      btn.style.bottom=newBottom+'px';
-      btn.style.right='auto';
-    });
-    document.addEventListener('mouseup', function(){
+      btn.style.top=newTop+'px';
+      e.preventDefault();
+    };
+    const finishButtonDrag=()=>{
       if(!btnDragging)return;
       btnDragging=false;
       btn.style.transition='';
-      // Сохраняем позицию кнопки
-      cfg.settingsBtnLeft=parseFloat(btn.style.left)||20;
-      cfg.settingsBtnBottom=parseFloat(btn.style.bottom)||20;
+      suiteClampToViewport(btn,{margin:8,constrainSize:false});
+      const rect=btn.getBoundingClientRect();
+      cfg.settingsBtnLeft=rect.left;
+      cfg.settingsBtnBottom=Math.max(0,window.innerHeight-rect.bottom);
       saveCfg();
+    };
+    btn.addEventListener('mousedown', function(e){
+      if(e.button!==0)return;
+      startButtonDrag(e,e);
     });
+    document.addEventListener('mousemove', function(e){
+      moveButtonDrag(e,e);
+    });
+    document.addEventListener('mouseup',finishButtonDrag);
+    btn.addEventListener('touchstart',e=>startButtonDrag(e,e.touches[0]),{passive:false});
+    document.addEventListener('touchmove',e=>{
+      if(btnDragging) moveButtonDrag(e,e.touches[0]);
+    },{passive:false});
+    document.addEventListener('touchend',finishButtonDrag);
+    document.addEventListener('touchcancel',finishButtonDrag);
     btn.addEventListener('click',()=>{
       if(btnMoved)return; // не открываем если тащили
       panel.style.display=panel.style.display==='none'?'block':'none';
@@ -8649,19 +8921,26 @@
     let routeCheckTimer=null;
     const check=()=>{
       const isLabyrinth=isLabyrinthRoute();
-      if(isLabyrinth===wasLabyrinth) return;
-      wasLabyrinth=isLabyrinth;
-      if(isLabyrinth){
-        if(cfg.modLabyrinthQuiz) initLabyrinthQuiz();
-        if(cfg.modLabyrinthEmission) initLabyrinthEmission();
-        if(cfg.modLabyrinthFatigue) initLabyrinthFatigue();
-        if(cfg.modLabyrinthClubWar) initClubWarRelations();
+      if(!isLabyrinth){
+        const hasActiveModule = wasLabyrinth
+          || window.__suiteLabyrinthQuizInstalled
+          || window.__suiteLabyrinthEmissionInstalled
+          || window.__suiteLabyrinthFatigueInstalled
+          || window.__suiteClubWarRelationsInstalled;
+        wasLabyrinth=false;
+        if(!hasActiveModule) return;
+        cleanupLabyrinthQuiz();
+        cleanupLabyrinthEmission();
+        cleanupLabyrinthFatigue();
+        cleanupClubWarRelations();
         return;
       }
-      cleanupLabyrinthQuiz();
-      cleanupLabyrinthEmission();
-      cleanupLabyrinthFatigue();
-      cleanupClubWarRelations();
+      if(wasLabyrinth) return;
+      wasLabyrinth=true;
+      if(cfg.modLabyrinthQuiz) initLabyrinthQuiz();
+      if(cfg.modLabyrinthEmission) initLabyrinthEmission();
+      if(cfg.modLabyrinthFatigue) initLabyrinthFatigue();
+      if(cfg.modLabyrinthClubWar) initClubWarRelations();
     };
     const scheduleCheck=()=>{
       clearTimeout(routeCheckTimer);
@@ -8677,6 +8956,8 @@
       };
     });
     window.addEventListener('popstate',scheduleCheck);
+    window.addEventListener('hashchange',scheduleCheck);
+    window.addEventListener('pageshow',scheduleCheck);
   }
 
   async function init(){
@@ -9221,7 +9502,7 @@
         .missing-del-btn:hover { background:#9f1239; }
         #missing-panel-actions { flex-shrink:0; padding:8px 12px 12px; display:flex; flex-direction:column; gap:6px; }
         .script-indicator {
-          position:fixed !important; right:10px; width:300px;
+          position:fixed !important; right:10px; width:300px; max-width:calc(100vw - 20px);
           z-index:999; pointer-events:none !important;
           font-family:'Segoe UI',Arial,sans-serif;
           text-align:left;
@@ -9486,6 +9767,7 @@
       stopScanButton.disabled=!show;
       stopScanButton.style.opacity=show?'1':'0';
       stopScanButton.style.cursor=show?'pointer':'default';
+      positionCircleButtons();
     }
     function requestStop() {
       if(!enabled||!isScanning) return;
@@ -9563,7 +9845,14 @@
       const title=document.createElement('span'); title.id='missing-panel-title'; title.textContent=`Список ID (${missingIds.size})`;
       const colBtn=document.createElement('button'); colBtn.id='missing-panel-collapse-btn';
       colBtn.textContent=panelCollapsed?'▲':'▼'; colBtn.title=panelCollapsed?'Развернуть':'Свернуть';
-      colBtn.onclick=()=>{ panelCollapsed=!panelCollapsed; panel.classList.toggle('collapsed',panelCollapsed); colBtn.textContent=panelCollapsed?'▲':'▼'; colBtn.title=panelCollapsed?'Развернуть':'Свернуть'; };
+      colBtn.onclick=()=>{
+        panelCollapsed=!panelCollapsed;
+        suiteApplyCollapsibleState(panel,panelCollapsed,()=>{
+          panel.classList.toggle('collapsed',panelCollapsed);
+          colBtn.textContent=panelCollapsed?'▲':'▼';
+          colBtn.title=panelCollapsed?'Развернуть':'Свернуть';
+        });
+      };
       hdr.append(title,colBtn); panel.appendChild(hdr);
       const pos=loadPanelPos();
       if(pos&&Number.isFinite(pos.left)&&Number.isFinite(pos.top)){
@@ -9728,6 +10017,21 @@
       btn.onclick=action; if(tip) btn.setAttribute('data-tooltip',tip);
       document.body.appendChild(btn); return btn;
     }
+    function positionCircleButtons() {
+      const buttons=[refreshButton,scanButton,stopScanButton].filter(btn=>btn&&getComputedStyle(btn).display!=='none');
+      if(!buttons.length)return;
+      const viewport=suiteGetVisibleViewport();
+      const gap=12;
+      const heights=buttons.map(btn=>btn.offsetHeight||48);
+      const total=heights.reduce((sum,height)=>sum+height,0)+gap*(buttons.length-1);
+      let top=Math.max(viewport.top+8,Math.min(viewport.top+viewport.height/2,viewport.bottom-total-8));
+      buttons.forEach((btn,index)=>{
+        btn.style.top=Math.round(top)+'px';
+        btn.style.bottom='auto';
+        top+=heights[index]+gap;
+      });
+      suiteResolveFloatingButtonOverlaps();
+    }
     function updateBtnState() {
       [scanButton,refreshButton].forEach(b=>{
         if(!b) return;
@@ -9744,7 +10048,11 @@
       stopScanButton=makeCircleBtn('🛑','#d9534f','calc(50% + 120px)',()=>{ requestStop(); },'Остановить сканирование и отправить буфер');
       applyNoNeedButtonMode();
       updateBtnState();
+      requestAnimationFrame(positionCircleButtons);
     }
+
+    window.addEventListener('resize',positionCircleButtons,{passive:true});
+    window.visualViewport?.addEventListener('resize',positionCircleButtons,{passive:true});
 
     let obsTimer=null;
     new MutationObserver(mutations=>{
@@ -9767,6 +10075,8 @@
         delete el.dataset.nnHoverBound;
       });
       hideNoNeedRow();
+      window.removeEventListener('resize',positionCircleButtons);
+      window.visualViewport?.removeEventListener('resize',positionCircleButtons);
       window.__suiteNoNeedCardsInstalled = false;
     };
   }
@@ -9803,6 +10113,7 @@
         const MAX_FAILED_ATTEMPTS_KEY = 'aw_active_tab_max_failed_attempts_v2';
         const KODIK_WARMUP_DONE_KEY = 'aw_active_tab_daily_watch_quest_sent_v2';
         const KODIK_WARMUP_NOTICE_KEY = 'aw_active_tab_kodik_warmup_notice_v1';
+        const SERVER_DAY_CONFIRMED_KEY = 'aw_active_tab_server_day_confirmed_v1';
 
         const CARD_COUNT_CACHE_KEY = 'aw_active_tab_card_count_cache_v2';
         const CARD_COUNT_SYNC_KEY = 'aw_active_tab_card_count_sync_v2';
@@ -9838,7 +10149,6 @@
         const START_DELAY_MS = 1200;
         const RESUME_DELAY_MS = 300;
         const RECEIPTS_PER_EP_COMPLETE = 5;
-        const KODIK_WARMUP_MS = 60 * 1000;
 
         // =========================================================
         // STATE
@@ -10595,6 +10905,21 @@
             return Number.isFinite(Number(n)) ? Number(n) : null;
         }
 
+        async function confirmCurrentServerDay(source) {
+            const date = getMskDateKey();
+            const previous = await GM_getValue(SERVER_DAY_CONFIRMED_KEY, null);
+            if (previous?.date === date) return previous;
+            const confirmation = { date, source, at: Date.now() };
+            await GM_setValue(SERVER_DAY_CONFIRMED_KEY, confirmation);
+            saveDiagnosticLog('server_day_confirmed', confirmation);
+            return confirmation;
+        }
+
+        async function isCurrentServerDayConfirmed() {
+            const confirmation = await GM_getValue(SERVER_DAY_CONFIRMED_KEY, null);
+            return !!(confirmation && confirmation.date === getMskDateKey());
+        }
+
         async function parseAndStoreLimitFromReason(reason) {
             if (!reason) return null;
             const match = String(reason).match(/получил(?:а)?\s+свои\s+(\d+)\s+карт/i);
@@ -10676,6 +11001,7 @@
                 await setDailyProgress(current);
 
                 const isAtLimit = current >= limit;
+                if (!isAtLimit) await confirmCurrentServerDay('profile');
                 const payload = {
                     text: `${current} / ${limit}`,
                     className: isAtLimit ? 'limit-reached' : 'in-progress',
@@ -11131,24 +11457,6 @@
             }
         }
 
-        function buildKodikWarmupUrl(translationLink, season, episode) {
-            const target = normalizeKodikUrl(translationLink);
-            if (!target) return '';
-
-            try {
-                const url = new URL(target, location.href);
-                url.searchParams.set('season', String(season || 1));
-                url.searchParams.set('episode', String(episode || 1));
-                url.searchParams.set('autoplay', '1');
-                url.searchParams.set('auto_play', '1');
-                url.searchParams.set('muted', '1');
-                return url.toString();
-            } catch (e) {
-                const joiner = target.includes('?') ? '&' : '?';
-                return `${target}${joiner}season=${encodeURIComponent(season || 1)}&episode=${encodeURIComponent(episode || 1)}&autoplay=1&auto_play=1&muted=1`;
-            }
-        }
-
         async function isKodikWarmupDoneForCurrentCardDay() {
             const progress = await ensureDailyProgressState();
             const data = await GM_getValue(KODIK_WARMUP_DONE_KEY, null);
@@ -11176,70 +11484,12 @@
             safePush('info', 'Не хватает данных для квеста просмотра. Добавьте это аниме в базу заново со страницы аниме.');
         }
 
-        function removeKodikWarmupPlayer() {
-            document.getElementById('aw-kodik-warmup-player')?.remove();
-        }
-
-        function createKodikWarmupPlayer(url, entry, episode) {
-            removeKodikWarmupPlayer();
-
-            const holder = document.createElement('div');
-            holder.id = 'aw-kodik-warmup-player';
-            holder.style.cssText = [
-                'position:fixed',
-                'right:16px',
-                'bottom:16px',
-                'z-index:2147483647',
-                'width:min(360px,calc(100vw - 32px))',
-                'background:#111827',
-                'border:1px solid rgba(255,255,255,.22)',
-                'box-shadow:0 18px 42px rgba(0,0,0,.45)',
-                'border-radius:8px',
-                'overflow:hidden',
-                'color:#e5e7eb',
-                'font:12px/1.35 Arial,sans-serif'
-            ].join(';');
-
-            const header = document.createElement('div');
-            header.style.cssText = [
-                'display:flex',
-                'align-items:center',
-                'justify-content:space-between',
-                'gap:8px',
-                'padding:8px 10px',
-                'background:#0f172a',
-                'border-bottom:1px solid rgba(255,255,255,.12)'
-            ].join(';');
-
-            const title = document.createElement('div');
-            title.style.cssText = 'min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
-            title.textContent = `Kodik warmup: ${entry?.title || entry?.anime_id || 'anime'} / ep ${episode || 1}`;
-
-            const timer = document.createElement('div');
-            timer.className = 'aw-kodik-warmup-timer';
-            timer.style.cssText = 'flex:0 0 auto;color:#93c5fd;font-weight:700';
-            timer.textContent = formatMs(KODIK_WARMUP_MS);
-
-            const frame = document.createElement('iframe');
-            frame.src = url;
-            frame.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture';
-            frame.referrerPolicy = 'no-referrer-when-downgrade';
-            frame.style.cssText = [
-                'display:block',
-                'width:100%',
-                'height:205px',
-                'border:0',
-                'background:#000'
-            ].join(';');
-
-            header.append(title, timer);
-            holder.append(header, frame);
-            document.body.appendChild(holder);
-            return { holder, timer };
-        }
-
         async function ensureDailyKodikWarmup(entry, episode) {
             if (await isKodikWarmupDoneForCurrentCardDay()) return true;
+            if (!(await isCurrentServerDayConfirmed())) {
+                log('Запрос квеста просмотра ждёт подтверждения нового дня от сайта.');
+                return false;
+            }
             if (kodikWarmupPromise) return kodikWarmupPromise;
 
             kodikWarmupPromise = (async () => {
@@ -11808,9 +12058,12 @@
                     body: rawBody
                 }, 'response', false);
 
-                ensureDailyKodikWarmup(cur, targetEp).catch(e => {
-                    warn('Не удалось отправить запрос квеста просмотра:', e);
-                });
+                const serverDayConfirmed = await isCurrentServerDayConfirmed();
+                if (serverDayConfirmed) {
+                    ensureDailyKodikWarmup(cur, targetEp).catch(e => {
+                        warn('Не удалось отправить запрос квеста просмотра:', e);
+                    });
+                }
 
                 const data = await fetchData('/ajax/card_for_watch/', {
                     method: 'POST',
@@ -11819,6 +12072,12 @@
                 }, 'json');
 
                 if (data.cards) {
+                    if (!serverDayConfirmed) {
+                        await confirmCurrentServerDay('card_response');
+                        ensureDailyKodikWarmup(cur, targetEp).catch(e => {
+                            warn('Не удалось отправить запрос квеста просмотра:', e);
+                        });
+                    }
                     state.failed_attempts = 0;
                     await GM_setValue(SMART_PROGRESSION_KEY, state);
                     await processCardReward(data, rawBody, 'auto');
@@ -12051,6 +12310,7 @@
                 if (!message) return;
 
                 if (message.includes('за первый вход за сегодня')) {
+                    await confirmCurrentServerDay('site_notification');
                     const isPaused = await GM_getValue(COLLECTION_PAUSED_KEY, false);
                     if (isPaused) {
                         log('Поймано уведомление нового дня. Сбрасываю паузу.');
@@ -12583,22 +12843,13 @@
             const next = !current;
             await GM_setValue(PANEL_COLLAPSED_KEY, next);
 
-            if (!next) {
-                // Раскрываем: переключаемся на top, чтобы тело росло вниз
-                const rect = panel.getBoundingClientRect();
-                panel.style.top    = rect.top + 'px';
-                panel.style.bottom = 'auto';
-            }
-
-            body.style.display = next ? 'none' : 'block';
-            btn.textContent = next ? '▣' : '—';
+            suiteApplyCollapsibleState(panel, next, () => {
+                body.style.display = next ? 'none' : 'block';
+                btn.textContent = next ? '▣' : '—';
+            });
 
             if (!next) {
-                // Сохраняем новую позицию (top-based)
-                await GM_setValue(PANEL_POSITION_KEY, {
-                    left: panel.style.left,
-                    top:  panel.style.top
-                });
+                requestAnimationFrame(() => clampPanelToViewport(panel));
             }
 
             updateButtonState();
@@ -12661,6 +12912,11 @@
                     min-width: 0;
                     font-weight: 700;
                     color: #e2e8f0;
+                }
+                #aw-active-tab-panel-body {
+                    max-height: calc(100dvh - 90px);
+                    overflow-y: auto;
+                    overscroll-behavior: contain;
                 }
                 #aw-active-tab-panel .aw-icon-btn,
                 #aw-active-tab-panel .aw-btn {
@@ -13091,6 +13347,7 @@
                 </div>
             `;
             document.body.appendChild(panel);
+            suiteKeepInViewport(panel, {margin:8, constrainSize:true});
 
             panel.querySelector('#aw-active-tab-toggle').addEventListener('click', toggleWatch);
             panel.querySelector('#aw-open-anime-db').addEventListener('click', openAnimeDbModal);
@@ -13156,8 +13413,9 @@
                 if (!dragging) return;
                 const dx = e.clientX - startX;
                 const dy = e.clientY - startY;
-                const newLeft = Math.max(0, Math.min(window.innerWidth  - panel.offsetWidth,  origLeft + dx));
-                const newTop  = Math.max(0, Math.min(window.innerHeight - panel.offsetHeight, origTop  + dy));
+                const viewport = suiteGetVisibleViewport();
+                const newLeft = Math.max(viewport.left, Math.min(viewport.right - panel.offsetWidth, origLeft + dx));
+                const newTop  = Math.max(viewport.top, Math.min(viewport.bottom - panel.offsetHeight, origTop + dy));
                 panel.style.left  = newLeft + 'px';
                 panel.style.top   = newTop  + 'px';
                 panel.style.right  = 'auto';
@@ -13169,8 +13427,9 @@
                 const point = getPoint(e);
                 const dx = point.clientX - startX;
                 const dy = point.clientY - startY;
-                const newLeft = Math.max(0, Math.min(window.innerWidth  - panel.offsetWidth,  origLeft + dx));
-                const newTop  = Math.max(0, Math.min(window.innerHeight - panel.offsetHeight, origTop  + dy));
+                const viewport = suiteGetVisibleViewport();
+                const newLeft = Math.max(viewport.left, Math.min(viewport.right - panel.offsetWidth, origLeft + dx));
+                const newTop  = Math.max(viewport.top, Math.min(viewport.bottom - panel.offsetHeight, origTop + dy));
                 panel.style.left  = newLeft + 'px';
                 panel.style.top   = newTop  + 'px';
                 panel.style.right  = 'auto';
@@ -13225,16 +13484,7 @@
         }
 
         function clampPanelToViewport(panel) {
-            const margin = 8;
-            const rect = panel.getBoundingClientRect();
-            const maxLeft = Math.max(margin, window.innerWidth - rect.width - margin);
-            const maxTop = Math.max(margin, window.innerHeight - rect.height - margin);
-            const left = Math.min(Math.max(rect.left, margin), maxLeft);
-            const top = Math.min(Math.max(rect.top, margin), maxTop);
-            panel.style.left = `${Math.round(left)}px`;
-            panel.style.top = `${Math.round(top)}px`;
-            panel.style.right = 'auto';
-            panel.style.bottom = 'auto';
+            suiteClampToViewport(panel, {margin:8, constrainSize:true});
         }
 
         function startPanelTicker() {
@@ -13728,6 +13978,12 @@
         const startedAt = Date.now();
         let lastSignature = '';
         const timer = setInterval(() => {
+          if(!window.__suiteLabyrinthQuizInstalled || !/\/labyrinth(?:\/|$)/.test(location.pathname)){
+            clearInterval(timer);
+            quizResultTimers.delete(timer);
+            cleanupLabyrinthQuiz();
+            return;
+          }
           const resultText = document.getElementById('labyrinthEventText')?.textContent?.trim() || '';
           const eventTitle = document.getElementById('labyrinthEventTitle')?.textContent?.trim() || '';
           const accChange = document.getElementById('labyrinthEventAcc')?.textContent?.trim() || '';
@@ -13794,11 +14050,16 @@
       }
 
       function scheduleProcessQuiz(delay = 80) {
+        if(!window.__suiteLabyrinthQuizInstalled || !/\/labyrinth(?:\/|$)/.test(location.pathname)) return;
         clearTimeout(processTimer);
         processTimer = setTimeout(processQuiz, delay);
       }
 
       function processQuiz() {
+        if(!window.__suiteLabyrinthQuizInstalled || !/\/labyrinth(?:\/|$)/.test(location.pathname)){
+          cleanupLabyrinthQuiz();
+          return;
+        }
         if (!quizDbReady) return;
 
         const quiz = getQuizRoot();
@@ -13850,6 +14111,7 @@
         }, { once:true, capture:true }));
 
         const runSearch = () => {
+          if(!window.__suiteLabyrinthQuizInstalled || !/\/labyrinth(?:\/|$)/.test(location.pathname)) return;
           const found = findQuestion(cleanedQuestionText, db);
 
           if (found) {
@@ -13907,6 +14169,7 @@
       const startQuizSync = () => {
         syncAttempts += 1;
         checkSync().then(() => {
+          if(!window.__suiteLabyrinthQuizInstalled || !/\/labyrinth(?:\/|$)/.test(location.pathname)) return;
           quizDbReady = true;
           suiteTelemetryLog('quiz', 'database_ready', { syncAttempts, questionCount:getLocalDB().questions.length });
           scheduleProcessQuiz(0);
@@ -14395,6 +14658,7 @@
       startTimer:null,
       ticking:false,
       statsPage:0,
+      roomSequence:0,
       lastSnapshot:null,
       state: loadState()
     };
@@ -14556,6 +14820,51 @@
         snapshot,
         movesSinceFatigue:runtime.state.movesSinceFatigue,
         sessionMoves:runtime.state.sessionMoves
+      });
+    }
+
+    function roomLogSnapshot(snapshot){
+      if(!snapshot) return null;
+      return {
+        today:snapshot.today,
+        max:snapshot.max,
+        left:snapshot.left,
+        coord:snapshot.coord,
+        event:snapshot.event,
+        cellEvent:snapshot.cellEvent,
+        lastEvent:snapshot.lastEvent,
+        title:snapshot.title,
+        eventText:snapshot.eventText,
+        fatigueTitle:snapshot.fatigueTitle,
+        fatigueText:snapshot.fatigueText,
+        trigger:snapshot.trigger,
+      };
+    }
+
+    function recordRoomVisit(previousSnapshot, snapshot){
+      const initial = !previousSnapshot;
+      if(initial && snapshot.today === null && !snapshot.coord && !snapshot.event) return;
+      const todayChanged = !initial && snapshot.today !== previousSnapshot.today;
+      const coordinateChanged = !initial
+        && !!snapshot.coord
+        && !!previousSnapshot.coord
+        && snapshot.coord !== previousSnapshot.coord;
+      if(!initial && !todayChanged && !coordinateChanged) return;
+
+      const todayDelta = !initial
+        && Number.isFinite(snapshot.today)
+        && Number.isFinite(previousSnapshot.today)
+        ? snapshot.today - previousSnapshot.today
+        : null;
+      runtime.roomSequence += 1;
+      suiteTelemetryLog('fatigue', 'room_visited', {
+        sequence:runtime.roomSequence,
+        source:initial ? 'initial' : 'transition',
+        todayDelta,
+        coordinateChanged,
+        unobservedRooms:todayDelta > 1 ? todayDelta - 1 : 0,
+        previous:roomLogSnapshot(previousSnapshot),
+        current:roomLogSnapshot(snapshot),
       });
     }
 
@@ -14823,6 +15132,7 @@
 
         const snapshot = collectSnapshot();
         const previousSnapshot = runtime.lastSnapshot;
+        recordRoomVisit(previousSnapshot, snapshot);
         if(previousSnapshot && JSON.stringify(snapshot) !== JSON.stringify(previousSnapshot)){
           suiteTelemetryLog('fatigue', 'snapshot_changed', { previous:previousSnapshot, current:snapshot });
         }
@@ -14857,15 +15167,18 @@
     const fatigue = document.getElementById('suite-lab-fatigue-counter');
     if(!fatigue) return;
 
+    const emission = cfg.modLabyrinthEmission ? document.getElementById('suite-emission-timer') : null;
+    const hasEmission = !!(emission && emission.isConnected && getComputedStyle(emission).display !== 'none');
     const isMobile = typeof window.matchMedia === 'function' && window.matchMedia('(max-width:760px)').matches;
     if(isMobile){
-      fatigue.style.top = '104px';
+      const emissionHeight = hasEmission
+        ? Math.ceil(emission.getBoundingClientRect().height || emission.offsetHeight || 80)
+        : 0;
+      fatigue.style.top = hasEmission ? `${12 + emissionHeight + 12}px` : '12px';
       fatigue.style.right = '12px';
       return;
     }
 
-    const emission = cfg.modLabyrinthEmission ? document.getElementById('suite-emission-timer') : null;
-    const hasEmission = !!(emission && emission.isConnected && getComputedStyle(emission).display !== 'none');
     fatigue.style.top = '12px';
     if(!hasEmission){
       fatigue.style.right = '12px';
@@ -14873,7 +15186,16 @@
     }
 
     const emissionWidth = Math.ceil(emission.getBoundingClientRect().width || emission.offsetWidth || 172);
-    fatigue.style.right = `${12 + emissionWidth + 12}px`;
+    const fatigueWidth = Math.ceil(fatigue.getBoundingClientRect().width || fatigue.offsetWidth || 210);
+    const hostWidth = fatigue.parentElement?.getBoundingClientRect().width || window.innerWidth;
+    if(emissionWidth + fatigueWidth + 36 <= hostWidth){
+      fatigue.style.top = '12px';
+      fatigue.style.right = `${12 + emissionWidth + 12}px`;
+    }else{
+      const emissionHeight = Math.ceil(emission.getBoundingClientRect().height || emission.offsetHeight || 80);
+      fatigue.style.top = `${12 + emissionHeight + 12}px`;
+      fatigue.style.right = '12px';
+    }
   }
 
   function cleanupLabyrinthEmission(){
