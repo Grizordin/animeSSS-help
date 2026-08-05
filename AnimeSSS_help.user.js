@@ -2038,14 +2038,15 @@
     const wb=card.classList.contains('anime-cards__owned-by-user-want');
     const rank=getCardRank(card);
     const isTradeCard=!!card.closest('.trade__main');
+    const valueDup=isTradeCard?Math.max(0,dup-1):dup;
     const ru=rank?rank.toUpperCase():null;
     const isHigh=ru==='S'||ru==='S_PLUS'||ru==='ASS';
     const isGold=isGoldSCard(card);
     if(isGold) {
       return { value:666, total, want, trade, dup, rank, rankUpper:ru, isTradeCard, isHighRank:isHigh, isGold };
     }
-    let value=isTradeCard&&isHigh?calcTradeSValue(total,want,trade,dup,wb):calcCardValue(total,want,trade,dup,rank,wb);
-    if(value<BAD_BASE_MAX)value=calcBadCardValue(total,want,trade,dup);
+    let value=isTradeCard&&isHigh?calcTradeSValue(total,want,trade,valueDup,wb):calcCardValue(total,want,trade,valueDup,rank,wb);
+    if(value<BAD_BASE_MAX)value=calcBadCardValue(total,want,trade,valueDup);
     return { value, total, want, trade, dup, rank, rankUpper:ru, isTradeCard, isHighRank:isHigh, isGold };
   }
 
@@ -2324,8 +2325,24 @@
   // ============================================================
 
   const suiteViewportItems = new Map();
+  const suiteFloatingSelector = [
+    '#aw-active-tab-panel',
+    '#suite-settings-panel',
+    '#suite-settings-btn',
+    '#suite-suggestion-authors-button',
+    '.cv-stones-floating-btn',
+    '.circle-btn'
+  ].join(',');
+  const suiteKeyboardStyleProps = ['left','top','right','bottom','transform','maxWidth','maxHeight'];
+  const suiteKeyboardPositions = new Map();
   let suiteViewportListenersInstalled = false;
   let suiteViewportFrame = 0;
+  let suiteVirtualKeyboardOpen = false;
+  let suiteViewportSettleTimer = 0;
+  let suiteViewportBaselineHeight = Math.max(
+    1,
+    Number.isFinite(window.visualViewport?.height) ? window.visualViewport.height : (window.innerHeight || 0)
+  );
 
   function suiteGetVisibleViewport() {
     const vv = window.visualViewport;
@@ -2336,7 +2353,139 @@
     return { left, top, right:left + width, bottom:top + height, width, height };
   }
 
+  function suiteIsTouchViewport() {
+    return !!(navigator.maxTouchPoints > 0 || window.matchMedia?.('(pointer: coarse)').matches);
+  }
+
+  function suiteIsTextEntryElement(element) {
+    if(!(element instanceof Element)) return false;
+    if(element.isContentEditable || element.matches('textarea')) return true;
+    if(!element.matches('input')) return false;
+    return !['button','checkbox','radio','range','color','file','submit','reset','image','hidden'].includes((element.type || 'text').toLowerCase());
+  }
+
+  function suiteGetFloatingControls() {
+    return [...new Set([
+      ...suiteViewportItems.keys(),
+      ...document.querySelectorAll(suiteFloatingSelector)
+    ])].filter(element => element?.isConnected);
+  }
+
+  function suiteCaptureKeyboardPositions() {
+    suiteKeyboardPositions.clear();
+    suiteGetFloatingControls().forEach(element => {
+      const rect = element.getBoundingClientRect();
+      const styles = {};
+      suiteKeyboardStyleProps.forEach(prop => { styles[prop] = element.style[prop]; });
+      suiteKeyboardPositions.set(element, {
+        styles,
+        rect:{left:rect.left, top:rect.top, width:rect.width, height:rect.height}
+      });
+    });
+  }
+
+  function suiteFreezeKeyboardPositions() {
+    suiteKeyboardPositions.forEach((saved, element) => {
+      if(!element?.isConnected || saved.rect.width <= 0 || saved.rect.height <= 0) return;
+      element.style.transform = 'none';
+      element.style.left = `${Math.round(saved.rect.left)}px`;
+      element.style.top = `${Math.round(saved.rect.top)}px`;
+      element.style.right = 'auto';
+      element.style.bottom = 'auto';
+    });
+  }
+
+  function suiteRestoreKeyboardPositions() {
+    suiteKeyboardPositions.forEach((saved, element) => {
+      if(!element?.isConnected) return;
+      suiteKeyboardStyleProps.forEach(prop => { element.style[prop] = saved.styles[prop] || ''; });
+    });
+    suiteKeyboardPositions.clear();
+  }
+
+  function suiteLooksLikeVirtualKeyboard() {
+    const vv = window.visualViewport;
+    if(!vv || !suiteIsTouchViewport()) return false;
+    const currentHeight = Math.max(1, Number.isFinite(vv.height) ? vv.height : window.innerHeight);
+    const lostHeight = suiteViewportBaselineHeight - currentHeight;
+    const enoughHeightLost = lostHeight >= Math.max(120, suiteViewportBaselineHeight * 0.18);
+    return enoughHeightLost && (suiteVirtualKeyboardOpen || suiteIsTextEntryElement(document.activeElement));
+  }
+
+  function suiteEnterVirtualKeyboardMode() {
+    if(!suiteVirtualKeyboardOpen){
+      suiteVirtualKeyboardOpen = true;
+      if(suiteViewportFrame){
+        cancelAnimationFrame(suiteViewportFrame);
+        suiteViewportFrame = 0;
+      }
+      if(!suiteKeyboardPositions.size) suiteCaptureKeyboardPositions();
+    }
+    suiteFreezeKeyboardPositions();
+  }
+
+  function suiteLeaveVirtualKeyboardMode() {
+    if(!suiteVirtualKeyboardOpen) return;
+    suiteVirtualKeyboardOpen = false;
+    suiteRestoreKeyboardPositions();
+    clearTimeout(suiteViewportSettleTimer);
+    suiteViewportSettleTimer = setTimeout(() => {
+      const vv = window.visualViewport;
+      suiteViewportBaselineHeight = Math.max(1, Number.isFinite(vv?.height) ? vv.height : (window.innerHeight || 0));
+      suiteScheduleViewportRefresh();
+    }, 160);
+  }
+
+  function suiteShouldFreezeForVirtualKeyboard() {
+    if(suiteVirtualKeyboardOpen || suiteLooksLikeVirtualKeyboard()){
+      suiteEnterVirtualKeyboardMode();
+      return true;
+    }
+    return false;
+  }
+
+  function suiteHandleViewportChange() {
+    if(suiteLooksLikeVirtualKeyboard()){
+      suiteEnterVirtualKeyboardMode();
+      return;
+    }
+    if(suiteVirtualKeyboardOpen){
+      suiteLeaveVirtualKeyboardMode();
+      return;
+    }
+    if(!suiteIsTextEntryElement(document.activeElement)){
+      const vv = window.visualViewport;
+      suiteViewportBaselineHeight = Math.max(1, Number.isFinite(vv?.height) ? vv.height : (window.innerHeight || 0));
+    }
+    suiteScheduleViewportRefresh();
+  }
+
+  function suiteHandleViewportFocusIn(event) {
+    if(!suiteIsTouchViewport() || !suiteIsTextEntryElement(event.target)) return;
+    if(!suiteVirtualKeyboardOpen) suiteCaptureKeyboardPositions();
+    setTimeout(suiteHandleViewportChange, 0);
+  }
+
+  function suiteHandleViewportFocusOut() {
+    [0, 180, 420].forEach(delay => setTimeout(suiteHandleViewportChange, delay));
+  }
+
+  function suiteHandleOrientationChange() {
+    clearTimeout(suiteViewportSettleTimer);
+    suiteViewportSettleTimer = setTimeout(() => {
+      if(suiteLooksLikeVirtualKeyboard()){
+        suiteEnterVirtualKeyboardMode();
+        return;
+      }
+      if(suiteVirtualKeyboardOpen) suiteLeaveVirtualKeyboardMode();
+      const vv = window.visualViewport;
+      suiteViewportBaselineHeight = Math.max(1, Number.isFinite(vv?.height) ? vv.height : (window.innerHeight || 0));
+      suiteScheduleViewportRefresh();
+    }, 300);
+  }
+
   function suiteClampToViewport(element, options = {}) {
+    if(suiteShouldFreezeForVirtualKeyboard()) return;
     if(!element?.isConnected || getComputedStyle(element).display === 'none') return;
     const margin = Number.isFinite(options.margin) ? options.margin : 8;
     const viewport = suiteGetVisibleViewport();
@@ -2366,6 +2515,7 @@
 
   function suiteRefreshViewportItems() {
     suiteViewportFrame = 0;
+    if(suiteShouldFreezeForVirtualKeyboard()) return;
     for(const [element, options] of suiteViewportItems){
       if(!element?.isConnected){ suiteViewportItems.delete(element); continue; }
       suiteClampToViewport(element, options);
@@ -2375,19 +2525,12 @@
   }
 
   function suiteResolveFloatingButtonOverlaps(preferredElement = null) {
+    if(suiteShouldFreezeForVirtualKeyboard()) return;
     const viewport = suiteGetVisibleViewport();
     const gap = 8;
-    const selector = [
-      '#aw-active-tab-panel',
-      '#suite-settings-panel',
-      '#suite-settings-btn',
-      '#suite-suggestion-authors-button',
-      '.cv-stones-floating-btn',
-      '.circle-btn'
-    ].join(',');
     const controls = [...new Set([
       ...suiteViewportItems.keys(),
-      ...document.querySelectorAll(selector)
+      ...document.querySelectorAll(suiteFloatingSelector)
     ])].filter(control => {
       if(!control?.isConnected) return false;
       const style = getComputedStyle(control);
@@ -2475,6 +2618,7 @@
   }
 
   function suiteScheduleViewportRefresh() {
+    if(suiteShouldFreezeForVirtualKeyboard()) return;
     if(suiteViewportFrame) cancelAnimationFrame(suiteViewportFrame);
     suiteViewportFrame = requestAnimationFrame(suiteRefreshViewportItems);
   }
@@ -2484,10 +2628,12 @@
     suiteViewportItems.set(element, options);
     if(!suiteViewportListenersInstalled){
       suiteViewportListenersInstalled = true;
-      window.addEventListener('resize', suiteScheduleViewportRefresh, {passive:true});
-      window.addEventListener('orientationchange', suiteScheduleViewportRefresh, {passive:true});
-      window.visualViewport?.addEventListener('resize', suiteScheduleViewportRefresh, {passive:true});
-      window.visualViewport?.addEventListener('scroll', suiteScheduleViewportRefresh, {passive:true});
+      window.addEventListener('resize', suiteHandleViewportChange, {passive:true});
+      window.addEventListener('orientationchange', suiteHandleOrientationChange, {passive:true});
+      window.visualViewport?.addEventListener('resize', suiteHandleViewportChange, {passive:true});
+      window.visualViewport?.addEventListener('scroll', suiteHandleViewportChange, {passive:true});
+      document.addEventListener('focusin', suiteHandleViewportFocusIn, true);
+      document.addEventListener('focusout', suiteHandleViewportFocusOut, true);
     }
     suiteScheduleViewportRefresh();
   }
@@ -10190,6 +10336,7 @@
       document.body.appendChild(btn); return btn;
     }
     function positionCircleButtons() {
+      if(suiteShouldFreezeForVirtualKeyboard()) return;
       const buttons=[refreshButton,scanButton,stopScanButton].filter(btn=>btn&&getComputedStyle(btn).display!=='none');
       if(!buttons.length)return;
       const viewport=suiteGetVisibleViewport();
