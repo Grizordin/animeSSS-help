@@ -89,6 +89,7 @@
     modGachaAutoloot: true,   // автолут гачи клуба
     modWantCards:     true,   // кнопка добавления в желаемое
     wantButtonsAlways:true,   // кнопки желаемого видны постоянно
+    mobileFloatingUiHidden:false, // мобильные плавающие кнопки и окна визуально скрыты
     modNoNeedCards:   true,   // кнопка ненужных карт
     noNeedButtonsAlways:true, // кнопки ненужного видны постоянно
     modBrickFill:     true,   // наполнение кирпича
@@ -1184,6 +1185,111 @@
         0 0 34px rgba(14,165,233,.28) !important;
       animation:suite-update-pulse 1.4s ease-in-out infinite;
     }
+    #suite-settings-btn {
+      z-index:2147483647 !important;
+      display:flex !important;
+      visibility:visible !important;
+      opacity:1 !important;
+      pointer-events:auto !important;
+    }
+    #suite-mobile-helper-layer {
+      display:none;
+      position:fixed;
+      z-index:2147483646;
+      width:min(300px,calc(100vw - 16px));
+      padding:12px;
+      box-sizing:border-box;
+      border:1px solid rgba(103,232,249,.28);
+      border-radius:8px;
+      background:linear-gradient(145deg,#0b5063,#0f172a 68%);
+      color:#e2e8f0;
+      box-shadow:0 16px 42px rgba(0,0,0,.58),0 0 0 1px rgba(34,211,238,.1);
+      font-family:'Segoe UI',Arial,sans-serif;
+    }
+    #suite-mobile-helper-layer.is-open { display:block; }
+    .suite-mobile-helper-head {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+      margin-bottom:11px;
+    }
+    .suite-mobile-helper-title {
+      display:flex;
+      align-items:center;
+      min-width:0;
+      gap:7px;
+      font-size:15px;
+      font-weight:900;
+      color:#f8fafc;
+    }
+    .suite-mobile-helper-version {
+      display:inline-flex;
+      align-items:center;
+      height:20px;
+      padding:0 7px;
+      border:1px solid rgba(103,232,249,.2);
+      border-radius:999px;
+      background:#111c2f;
+      color:#93c5fd;
+      font-size:11px;
+      font-weight:800;
+      line-height:1;
+      white-space:nowrap;
+    }
+    .suite-mobile-helper-close {
+      width:30px;
+      height:30px;
+      flex:0 0 30px;
+      border:0;
+      border-radius:7px;
+      background:rgba(15,23,42,.78);
+      color:#94a3b8;
+      font-size:21px;
+      line-height:1;
+      cursor:pointer;
+    }
+    .suite-mobile-helper-open {
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      gap:8px;
+      width:100%;
+      min-height:40px;
+      padding:8px 12px;
+      border:1px solid rgba(125,211,252,.34);
+      border-radius:8px;
+      background:rgba(8,47,73,.82);
+      color:#e0f2fe;
+      font:850 13px/1.2 'Segoe UI',Arial,sans-serif;
+      cursor:pointer;
+    }
+    .suite-mobile-helper-open:active { transform:translateY(1px); }
+    .suite-mobile-helper-visibility {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      margin-top:10px;
+      padding:9px 10px;
+      border:1px solid rgba(103,232,249,.16);
+      border-radius:8px;
+      background:rgba(15,23,42,.7);
+    }
+    .suite-mobile-helper-visibility-copy {
+      min-width:0;
+      color:#e2e8f0;
+      font-size:12px;
+      font-weight:800;
+      line-height:1.25;
+    }
+    .suite-mobile-helper-visibility-state {
+      display:block;
+      margin-top:3px;
+      color:#94a3b8;
+      font-size:10px;
+      font-weight:700;
+    }
     @keyframes suite-update-pulse {
       0%,100% {
         transform:scale(1);
@@ -1859,6 +1965,16 @@
       to { opacity:1; transform:translateY(0); }
     }
     @media (max-width: 620px) {
+      html.suite-mobile-floating-hidden .suite-floating-ui {
+        display:none !important;
+      }
+      html.suite-mobile-floating-hidden #suite-settings-btn,
+      html.suite-mobile-floating-hidden #suite-settings-panel,
+      html.suite-mobile-floating-hidden #suite-mobile-helper-layer.is-open {
+        visibility:visible !important;
+        opacity:1 !important;
+        pointer-events:auto !important;
+      }
       .suite-section-nav {
         align-items:stretch;
         flex-direction:column;
@@ -1887,6 +2003,9 @@
         max-height:calc(100vh - 180px);
         overflow-y:auto;
       }
+    }
+    @media (min-width: 621px) {
+      #suite-mobile-helper-layer { display:none !important; }
     }
     /* Ценность карт — перенос на новую строку на узких экранах */
     @media (max-width: 600px) {
@@ -2357,6 +2476,16 @@
     return !!(navigator.maxTouchPoints > 0 || window.matchMedia?.('(pointer: coarse)').matches);
   }
 
+  function suiteUsesMobileSettingsLayer() {
+    return !!window.matchMedia?.('(max-width: 620px)').matches;
+  }
+
+  function suiteApplyMobileFloatingUiVisibility() {
+    const hidden = suiteUsesMobileSettingsLayer() && !!cfg.mobileFloatingUiHidden;
+    document.documentElement.classList.toggle('suite-mobile-floating-hidden', hidden);
+    return hidden;
+  }
+
   function suiteIsTextEntryElement(element) {
     if(!(element instanceof Element)) return false;
     if(element.isContentEditable || element.matches('textarea')) return true;
@@ -2625,6 +2754,9 @@
 
   function suiteKeepInViewport(element, options = {}) {
     if(!element) return;
+    if(!element.matches?.('#suite-settings-btn,#suite-settings-panel,#suite-mobile-helper-layer')){
+      element.classList.add('suite-floating-ui');
+    }
     suiteViewportItems.set(element, options);
     if(!suiteViewportListenersInstalled){
       suiteViewportListenersInstalled = true;
@@ -4520,7 +4652,7 @@
 
       const modal = document.createElement('div');
       modal.id = 'suite-suggestion-authors-modal';
-      modal.className = 'suite-suggestion-modal';
+      modal.className = 'suite-suggestion-modal suite-floating-ui';
       modal.innerHTML = `
         <div class="suite-suggestion-topbar">
           <div class="suite-suggestion-title">Предложка</div>
@@ -5601,7 +5733,7 @@
 
   function mountProgressBox() {
     const el = document.createElement('div');
-    el.className = 'cv-stones-progress';
+    el.className = 'cv-stones-progress suite-floating-ui';
     document.body.appendChild(el);
     return el;
   }
@@ -8937,6 +9069,104 @@
       saveCfg();
     };
     const panel=createSettingsPanel();
+
+    const mobileLayer=document.createElement('div');
+    mobileLayer.id='suite-mobile-helper-layer';
+    mobileLayer.setAttribute('role','dialog');
+    mobileLayer.setAttribute('aria-label','Помощник');
+
+    const mobileHead=document.createElement('div');
+    mobileHead.className='suite-mobile-helper-head';
+    const mobileTitle=document.createElement('div');
+    mobileTitle.className='suite-mobile-helper-title';
+    mobileTitle.innerHTML='<span aria-hidden="true">⚙️</span><span>Помощник</span>';
+    const mobileVersion=document.createElement('span');
+    mobileVersion.className='suite-mobile-helper-version';
+    mobileVersion.textContent=`v${SUITE_ACCESS_VERSION}`;
+    mobileTitle.appendChild(mobileVersion);
+    const mobileClose=document.createElement('button');
+    mobileClose.type='button';
+    mobileClose.className='suite-mobile-helper-close';
+    mobileClose.textContent='×';
+    mobileClose.setAttribute('aria-label','Закрыть');
+    mobileHead.append(mobileTitle,mobileClose);
+
+    const mobileOpenSettings=document.createElement('button');
+    mobileOpenSettings.type='button';
+    mobileOpenSettings.className='suite-mobile-helper-open';
+    mobileOpenSettings.innerHTML='<span aria-hidden="true">⚙️</span><span>Открыть настройки</span>';
+
+    const mobileVisibilityRow=document.createElement('div');
+    mobileVisibilityRow.className='suite-mobile-helper-visibility';
+    const mobileVisibilityCopy=document.createElement('div');
+    mobileVisibilityCopy.className='suite-mobile-helper-visibility-copy';
+    mobileVisibilityCopy.textContent='Плавающий интерфейс';
+    const mobileVisibilityState=document.createElement('span');
+    mobileVisibilityState.className='suite-mobile-helper-visibility-state';
+    mobileVisibilityCopy.appendChild(mobileVisibilityState);
+    const mobileVisibilityToggle=document.createElement('label');
+    mobileVisibilityToggle.className='suite-toggle';
+    mobileVisibilityToggle.title='Показывать плавающие кнопки и окна';
+    const mobileVisibilityInput=document.createElement('input');
+    mobileVisibilityInput.type='checkbox';
+    mobileVisibilityInput.setAttribute('aria-label','Показывать плавающие кнопки и окна');
+    const mobileVisibilitySlider=document.createElement('span');
+    mobileVisibilitySlider.className='suite-slider';
+    mobileVisibilityToggle.append(mobileVisibilityInput,mobileVisibilitySlider);
+    mobileVisibilityRow.append(mobileVisibilityCopy,mobileVisibilityToggle);
+    mobileLayer.append(mobileHead,mobileOpenSettings,mobileVisibilityRow);
+    document.body.appendChild(mobileLayer);
+
+    const syncMobileVisibilityControl=()=>{
+      const visible=!cfg.mobileFloatingUiHidden;
+      mobileVisibilityInput.checked=visible;
+      mobileVisibilityState.textContent=visible?'Кнопки и окна показаны':'Кнопки и окна скрыты';
+    };
+    const closeMobileLayer=()=>{
+      mobileLayer.classList.remove('is-open');
+      mobileLayer.setAttribute('aria-hidden','true');
+    };
+    const positionMobileLayer=()=>{
+      if(!suiteUsesMobileSettingsLayer()||!mobileLayer.classList.contains('is-open'))return;
+      const viewport=suiteGetVisibleViewport();
+      const margin=8, gap=10;
+      mobileLayer.style.left='0px';
+      mobileLayer.style.top='0px';
+      mobileLayer.style.right='auto';
+      mobileLayer.style.bottom='auto';
+      const layerRect=mobileLayer.getBoundingClientRect();
+      const btnRect=btn.getBoundingClientRect();
+      let left=Math.max(viewport.left+margin,Math.min(btnRect.left,viewport.right-margin-layerRect.width));
+      let top=btnRect.top-layerRect.height-gap;
+      if(top<viewport.top+margin) top=btnRect.bottom+gap;
+      top=Math.max(viewport.top+margin,Math.min(top,viewport.bottom-margin-layerRect.height));
+      mobileLayer.style.left=Math.round(left)+'px';
+      mobileLayer.style.top=Math.round(top)+'px';
+    };
+    const openMobileLayer=()=>{
+      syncMobileVisibilityControl();
+      mobileLayer.classList.add('is-open');
+      mobileLayer.setAttribute('aria-hidden','false');
+      positionMobileLayer();
+    };
+    const openFullSettings=()=>{
+      closeMobileLayer();
+      panel.style.display='block';
+      panel._suiteKeepInViewport?.();
+      suiteScheduleViewportRefresh();
+    };
+    mobileClose.addEventListener('click',closeMobileLayer);
+    mobileOpenSettings.addEventListener('click',openFullSettings);
+    mobileVisibilityInput.addEventListener('change',()=>{
+      cfg.mobileFloatingUiHidden=!mobileVisibilityInput.checked;
+      saveCfg();
+      suiteApplyMobileFloatingUiVisibility();
+      syncMobileVisibilityControl();
+      if(!cfg.mobileFloatingUiHidden) suiteScheduleViewportRefresh();
+      positionMobileLayer();
+    });
+    syncMobileVisibilityControl();
+
     subscribeSuiteUpdateState(state=>applySuiteSettingsButtonUpdateState(btn, state));
     startSuiteVersionChecker();
 
@@ -8964,12 +9194,24 @@
       const newTop=Math.max(viewport.top,Math.min(viewport.bottom-btn.offsetHeight,bTop+dy));
       btn.style.left=newLeft+'px';
       btn.style.top=newTop+'px';
+      positionMobileLayer();
       e.preventDefault();
     };
     let suppressButtonClickUntil=0;
     const toggleSettingsPanel=()=>{
       panel.style.display=panel.style.display==='none'?'block':'none';
       if(panel.style.display !== 'none') suiteScheduleViewportRefresh();
+    };
+    const activateSettingsControl=()=>{
+      if(!suiteUsesMobileSettingsLayer()){
+        closeMobileLayer();
+        toggleSettingsPanel();
+        return;
+      }
+      const panelWasOpen=panel.style.display!=='none';
+      if(panelWasOpen) panel.style.display='none';
+      if(panelWasOpen||!mobileLayer.classList.contains('is-open')) openMobileLayer();
+      else closeMobileLayer();
     };
     const finishButtonDrag=(activate=false)=>{
       if(!btnDragging)return;
@@ -8980,7 +9222,7 @@
       btn._suitePersistFloatingPosition();
       if(activate&&!btnMoved){
         suppressButtonClickUntil=Date.now()+700;
-        toggleSettingsPanel();
+        activateSettingsControl();
       }
     };
     btn.addEventListener('mousedown', function(e){
@@ -9004,8 +9246,13 @@
         return;
       }
       if(btnMoved)return; // не открываем если тащили
-      toggleSettingsPanel();
+      activateSettingsControl();
     });
+    window.addEventListener('resize',()=>{
+      suiteApplyMobileFloatingUiVisibility();
+      if(!suiteUsesMobileSettingsLayer()) closeMobileLayer();
+      else positionMobileLayer();
+    },{passive:true});
   }
 
   // ============================================================
@@ -9279,6 +9526,7 @@
   }
 
   async function init(){
+    suiteApplyMobileFloatingUiVisibility();
     await suiteAccessGate();
     insertNeonGradients();
     applyNeonAnimationSetting();
@@ -9461,6 +9709,21 @@
             padding .2s ease,
             visibility 0s linear .2s,
             filter .2s ease;
+        }
+        @media (max-width:620px) {
+          .want-card-btn {
+            box-sizing:border-box;
+            width:calc(100% - 8px) !important;
+            max-width:152px !important;
+            min-width:0 !important;
+            justify-self:center;
+            padding-left:3px;
+            padding-right:3px;
+            font-size:10px;
+            line-height:1.15;
+            white-space:normal;
+            overflow-wrap:anywhere;
+          }
         }
         .want-card-btn:hover:not(:disabled) { filter:brightness(1.1); transform:scale(1.03); }
         .want-card-btn:not(:disabled) { cursor: pointer; }
@@ -9855,7 +10118,7 @@
       if(!el){
         el=document.createElement('div');
         el.id=id;
-        el.className='script-indicator cpt-toast';
+        el.className='script-indicator suite-floating-ui cpt-toast';
         el.style.bottom=bottom;
         const head=document.createElement('div'); head.className='cpt-head';
         const titleEl=document.createElement('span'); titleEl.className='script-indicator-title';
@@ -9865,7 +10128,7 @@
         el.append(head,subEl,bar);
         document.body.appendChild(el);
       }
-      el.className=`script-indicator cpt-toast ${meta.themeCls}`;
+      el.className=`script-indicator suite-floating-ui cpt-toast ${meta.themeCls}`;
       const head=el.querySelector('.cpt-head');
       const titleEl=el.querySelector('.script-indicator-title');
       const subEl=el.querySelector('.script-indicator-sub');
@@ -10330,7 +10593,7 @@
       hideNoNeedRow();
     }
     function makeCircleBtn(icon,color,top,action,tip='') {
-      const btn=document.createElement('button'); btn.className='circle-btn';
+      const btn=document.createElement('button'); btn.className='circle-btn suite-floating-ui';
       btn.textContent=icon; btn.style.top=top; btn.style.setProperty('--nn-accent',color); btn.style.setProperty('--nn-accent-text','#e2e8f0');
       btn.onclick=action; if(tip) btn.setAttribute('data-tooltip',tip);
       document.body.appendChild(btn); return btn;
@@ -12698,7 +12961,7 @@
 
             const modal = document.createElement('div');
             modal.id = id;
-            modal.className = 'aw-modal-overlay';
+            modal.className = 'aw-modal-overlay suite-floating-ui';
             modal.innerHTML = `
                 <div class="aw-modal-box" style="max-width:${maxWidth}">
                     <div class="aw-modal-head">
@@ -15381,6 +15644,7 @@
       if(!runtime.box){
         const box = document.createElement('div');
         box.id = ROOT_ID;
+        box.className = 'suite-floating-ui';
         box.innerHTML = `
           <div class="suite-lab-fatigue-head">
             <span class="suite-lab-fatigue-icon">💤</span>
@@ -15425,6 +15689,7 @@
 
       const modal = document.createElement('div');
       modal.id = MODAL_ID;
+      modal.className = 'suite-floating-ui';
       modal.innerHTML = `
         <div class="suite-lab-fatigue-modal-box">
           <div class="suite-lab-fatigue-modal-head">
@@ -15682,6 +15947,7 @@
 
     const box = document.createElement('div');
     box.id = 'suite-emission-timer';
+    box.className = 'suite-floating-ui';
     box.innerHTML = `
       <div class="suite-emission-head">
         <span class="suite-emission-icon">☢</span>
