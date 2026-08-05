@@ -88,6 +88,7 @@
     modChatStoneAutoloot:true, // автолут небесного камня из чата
     modGachaAutoloot: true,   // автолут гачи клуба
     modWantCards:     true,   // кнопка добавления в желаемое
+    modQuickCardOwners:true,  // быстрые фильтры обладателей карты
     wantButtonsAlways:true,   // кнопки желаемого видны постоянно
     mobileFloatingUiHidden:false, // мобильные плавающие кнопки и окна визуально скрыты
     modNoNeedCards:   true,   // кнопка ненужных карт
@@ -119,6 +120,8 @@
     settingsBtnBottom: null,
     settingsPanelLeft: null,
     settingsPanelTop:  null,
+    mobileHelperLeft:  null,
+    mobileHelperTop:   null,
     hkPanelLeft:       null,
     hkPanelTop:        null,
     autoPanelLeft:     null,
@@ -2794,7 +2797,7 @@
     });
   }
 
-  function makeDraggable(panel, handleSelectorOrEl, onDrop) {
+  function makeDraggable(panel, handleSelectorOrEl, onDrop, options = {}) {
     const handle = handleSelectorOrEl
       ? (typeof handleSelectorOrEl === 'string' ? panel.querySelector(handleSelectorOrEl) : handleSelectorOrEl)
       : panel;
@@ -2804,7 +2807,7 @@
       const rect = panel.getBoundingClientRect();
       onDrop(rect.left, rect.top);
     };
-    suiteKeepInViewport(panel, {margin:8, constrainSize:true});
+    if(options.keepInViewport !== false) suiteKeepInViewport(panel, {margin:8, constrainSize:true});
     handle.style.cursor = 'grab';
     handle.style.touchAction = 'none';
 
@@ -2887,7 +2890,7 @@
       isDragging = false;
       handle.style.cursor = 'grab';
       suiteClampToViewport(panel, {margin:8, constrainSize:true});
-      suiteResolveFloatingButtonOverlaps(panel);
+      if(options.resolveOverlaps !== false) suiteResolveFloatingButtonOverlaps(panel);
       // Вызываем callback с финальными координатами (если передан)
       panel._suitePersistFloatingPosition();
     });
@@ -2896,7 +2899,7 @@
       isDragging = false;
       handle.style.cursor = 'grab';
       suiteClampToViewport(panel, {margin:8, constrainSize:true});
-      suiteResolveFloatingButtonOverlaps(panel);
+      if(options.resolveOverlaps !== false) suiteResolveFloatingButtonOverlaps(panel);
       panel._suitePersistFloatingPosition();
     });
     document.addEventListener('touchcancel', function() {
@@ -2904,7 +2907,7 @@
       isDragging = false;
       handle.style.cursor = 'grab';
       suiteClampToViewport(panel, {margin:8, constrainSize:true});
-      suiteResolveFloatingButtonOverlaps(panel);
+      if(options.resolveOverlaps !== false) suiteResolveFloatingButtonOverlaps(panel);
       panel._suitePersistFloatingPosition();
     });
   }
@@ -3467,12 +3470,19 @@
       theme:'neon-amber'
     },
     {
+      r:/Возможность массовой блокировки и разблокировки карт отключена с \d{1,2}:\d{2} до \d{1,2}:\d{2}/i,
+      icon:'clock',
+      title:'Обслуживание',
+      theme:'neon-amber'
+    },
+    {
       s:'Ваш лимит добавления карт S в список - 10 шт. Получите больше карточек S для увеличения лимита',
       icon:'clock',
       title:'Лимит',
       theme:'rose'
     },
     {s:'уже находится в очереди на обмен',                       icon:'trade',  title:'Внимание',    theme:'neon-amber'},
+    {s:'Данная карта находится в очереди на обмен',               icon:'trade',  title:'Обмен',       theme:'neon-amber'},
     {s:'Слишком большая разница в спросе',                       icon:'warn',   title:'Обмен',       theme:'neon-amber'},
     {s:'уже добавлена в обмен',                                  icon:'trade',  title:'Внимание',    theme:'neon-amber'},
     {s:'больше трёх карт',                                       icon:'shield', title:'Внимание',    theme:'neon-amber'},
@@ -3488,6 +3498,7 @@
     {s:'минимум три буквы для поиска',                           icon:'warn',   title:'Внимание',    theme:'neon-amber'},
     {s:'Ставить лайк могут только',                              icon:'user',   title:'Внимание',    theme:'indigo'    },
     {s:'Вы не авторизованы',                                      icon:'lock',   title:'Авторизация', theme:'rose'      },
+    {s:'Только для авторизованных пользователей',                 icon:'lock',   title:'Авторизация', theme:'rose'      },
     {s:'Ваша пользовательская сессия истекла, перезагрузите страницу в браузере и при необходимости войдите на сайт повторно.', icon:'lock', title:'Сессия', theme:'rose'},
     {s:'Доступно только авторизованным',                         icon:'lock',   title:'Внимание',    theme:'indigo'    },
     {s:'Коллекция доступна только',                              icon:'user',   title:'Внимание',    theme:'indigo'    },
@@ -3513,6 +3524,8 @@
     {s:'Ошибка при копировании',                                  icon:'err',    title:'Ошибка',      theme:'neon-amber'},
     {s:'Не корректный промо-код',                                 icon:'warn',   title:'Промокод',    theme:'rose'},
     {s:'Вы уже активировали этот промо-код',                      icon:'clock',  title:'Промокод',    theme:'rose'},
+    {s:'Данного промо-кода не существует',                        icon:'warn',   title:'Промокод',    theme:'rose'},
+    {s:'Достигнуто граничное количество активаций промо-кода, он не действителен', icon:'clock', title:'Промокод', theme:'rose'},
     {s:'Данный промо-код предназначен для участников клуба, вы не состоите в нём', icon:'lock', title:'Промокод', theme:'rose'},
     {
       s:'Вы уже вводили этот промо-код или он был использован на вашем IP но на другом аккаунте',
@@ -3554,7 +3567,7 @@
       theme:'neon-amber'
     },
     {r:/У вас нет \d+ дублей карт необходимых для повышения/i,   icon:'warn',   title:'Внимание',    theme:'neon-amber'},
-    {s:'Вы можете улучшать звёзды на картах ранга S не более 3 раз в день', icon:'clock', title:'Лимит', theme:'rose'},
+    {r:/Вы можете улучшать звёзды на картах ранга [A-Z+] не более \d+ раз в день/i, icon:'clock', title:'Лимит', theme:'rose'},
     {s:'Вы не выбрали карты ранга S или +',                       icon:'warn',   title:'Внимание',    theme:'neon-amber'},
     {s:'Для пробуждения карты нужно зарядить небесный кирпич на 1000 энергии', icon:'bolt', title:'Пробуждение', theme:'neon-amber'},
     {s:'Вы подзарядили кирпич',                                   icon:'bolt',   title:'Заряд',       theme:'neon-blue' },
@@ -3579,6 +3592,7 @@
     {s:'Ты сбежал от сложного босса',                              icon:'warn',   title:'Побег',       theme:'rose'},
     {s:'Подарок оставлен',                                        icon:'check',  title:'Готово',      theme:'emerald'   },
     {s:'В этой комнате нельзя оставить подарок',                   icon:'warn',   title:'Комната',     theme:'neon-amber'},
+    {s:'Ошибка установки подарка',                                icon:'err',    title:'Подарок',     theme:'rose'      },
     {s:'Правильный ответ',                                        icon:'check',  title:'Верно',       theme:'neon-green'},
     {s:'У тебя нет нужной карты для удара',                       icon:'warn',   title:'Внимание',    theme:'neon-amber'},
     {s:'Сначала победи сложного босса',                           icon:'warn',   title:'Внимание',    theme:'neon-amber'},
@@ -3636,6 +3650,7 @@
     {s:'Ты уже бывал в этой комнате. Резонанс требует незнакомые координаты.', icon:'warn', title:'Резонанс', theme:'neon-amber'},
     {s:'Резонанс не смог зацепиться за эту комнату',                icon:'warn',   title:'Резонанс',    theme:'rose'      },
     {s:'В этой комнате сейчас никого нет. Резонанс может зацепиться только за комнату, где находится другой игрок.', icon:'warn', title:'Резонанс', theme:'neon-amber'},
+    {r:/Укажи глубину от \d+ до \d+/i,                           icon:'warn',   title:'Резонанс',    theme:'neon-amber'},
     {s:'Время вышло',                                              icon:'clock',  title:'Время',       theme:'rose'      },
     {s:'Следующий шаг ещё недоступен',                             icon:'clock',  title:'Лабиринт',    theme:'neon-amber'},
     {s:'Купить ход можно только когда доступных ходов не осталось', icon:'coin',   title:'Лабиринт',    theme:'neon-amber'},
@@ -3645,11 +3660,15 @@
     {s:'Сундук открыт',                                            icon:'star',   title:'Сундук',      theme:'neon-green'},
     {s:'Сначала открой сундук или откажись',                       icon:'warn',   title:'Сундук',      theme:'neon-amber'},
     {s:'Погоня за кобольдом началась',                             icon:'bolt',   title:'Погоня',      theme:'neon-blue' },
+    {s:'Королевский кобольд повержен',                             icon:'star',   title:'Кобольд',     theme:'neon-green'},
+    {r:/Кобольд украл карту:\s*.+/i,                              icon:'card',   title:'Кобольд',     theme:'rose'      },
+    {s:'Здесь нет свежих следов кобольда',                         icon:'warn',   title:'Кобольд',     theme:'neon-amber'},
     {s:'Карта-задание изменена',                                   icon:'save',   title:'Задание',     theme:'indigo'    },
     {s:'Участник принят в клуб',                                   icon:'user',   title:'Клуб',        theme:'emerald'   },
     {s:'Участник исключён из клуба',                               icon:'user',   title:'Клуб',        theme:'rose'      },
     {s:'Статус изменён',                                           icon:'save',   title:'Статус',      theme:'indigo'    },
     {s:'Подписка на уведомления обновлена',                        icon:'bell',   title:'Уведомления', theme:'neon-blue' },
+    {s:'Вы отписались от обновлений к аниме',                      icon:'mute',   title:'Подписка',    theme:'neon-pink' },
     {s:'Чат временно закрыт на ежедневное обслуживание',           icon:'clock',  title:'Обслуживание',theme:'neon-amber'},
     {r:/Возможность создания карточек отключена с \d{1,2}:\d{2} до \d{1,2}:\d{2}/i, icon:'clock', title:'Обслуживание', theme:'neon-amber'},
     {r:/Обмены между пользователями отключены с \d{1,2}:\d{2} до \d{1,2}:\d{2}/i, icon:'clock', title:'Обслуживание', theme:'neon-amber'},
@@ -3663,6 +3682,7 @@
     {s:'данная карта добавлена в список ненужных, нельзя добавлять карты в оба списка', icon:'warn', title:'Внимание', theme:'neon-amber'},
     {s:'У вас данная карта добавлена в список хочу получить, нельзя добавлять карты в оба списка', icon:'warn', title:'Список', theme:'neon-amber'},
     {s:'Отголосок сорвался',                                       icon:'warn',   title:'Неудача',     theme:'rose'      },
+    {s:'Отголосок уже исчез',                                      icon:'clock',  title:'Отголосок',   theme:'rose'      },
     {s:'Кирпич полностью заряжен',                                 icon:'bolt',   title:'Кирпич',      theme:'neon-green'},
     {s:'Неудача. Ты не пройдешь',                                  icon:'warn',   title:'Неудача',     theme:'rose'      },
     {s:'Открытие паков карточек отключено',                        icon:'clock',  title:'Внимание',    theme:'neon-amber'},
@@ -3676,6 +3696,7 @@
     {s:'Произошла ошибка при отправке карточки',                   icon:'err',    title:'Карточка',     theme:'rose'      },
     // ── Порция 8 ─────────────────────────────────────────
     {s:'Режим берсерка активирован',                               icon:'bolt',   title:'Берсерк',     theme:'neon-pink' },
+    {s:'Режим берсерка можно активировать только в бою с боссом, мимиком или Королевским кобольдом', icon:'warn', title:'Берсерк', theme:'neon-amber'},
     {r:/Куплено \+\d+ небесного кирпича/i,                        icon:'bolt',   title:'Покупка',     theme:'neon-green'},
     {s:'Карта успешно куплена',                                    icon:'bag',    title:'Покупка',     theme:'neon-green'},
     {s:'Карта куплена',                                           icon:'bag',    title:'Покупка',     theme:'neon-green'},
@@ -3707,9 +3728,10 @@
     {s:'Этого стража ещё нельзя перезахватить. Сначала он должен получить хотя бы одну дань.', icon:'shield', title:'Страж', theme:'neon-amber'},
     {s:'Шахта пока ничего не накопила',                            icon:'warn',   title:'Шахта',       theme:'neon-amber'},
     {s:'Шахта ограблена',                                          icon:'warn',   title:'Шахта',       theme:'rose'      },
-    {r:/Шахта: собрано \d+ AСС(?: \+ \d+ карт)?/i,                 icon:'coin',   title:'Шахта',       theme:'neon-green'},
+    {s:'Шахта основана',                                           icon:'check',  title:'Шахта',       theme:'neon-green'},
+    {r:/⛏?\s*Шахта:\s*собрано \d+\s+[AА]СС(?:\s*\+\s*\d+\s+карт(?:а|ы)?)?/i, icon:'coin', title:'Шахта', theme:'neon-green'},
     {
-      r:/Ты улучшил персональную шахту до \d+ уровня.*Получено AСС: \+\d+(?:.*Получено карт: \d+)?/i,
+      r:/Ты улучшил персональную шахту до \d+ уровня/i,
       icon:'coin',
       title:'Шахта',
       theme:'neon-green'
@@ -3727,6 +3749,7 @@
     {s:'Вы не выбрали карту',                                      icon:'warn',   title:'Внимание',    theme:'neon-amber'},
     {s:'Нельзя одновременно выбирать карты ранга S и +',           icon:'warn',   title:'Выбор карт',   theme:'neon-amber'},
     {s:'Уже выбран дубль этой карты. С ним нельзя добавлять другие карты.', icon:'warn', title:'Выбор карт', theme:'neon-amber'},
+    {s:'Нельзя добавлять дубль этой карты, когда уже выбраны другие карты.', icon:'warn', title:'Выбор карт', theme:'neon-amber'},
     {s:'Максимум 70 карточек',                                     icon:'warn',   title:'Лимит',       theme:'rose'      },
     {s:'Награда получена',                                         icon:'coin',   title:'Награда',     theme:'neon-green'},
     {s:'Сегодня вы уже ставили реакцию на комментарий данного пользователя', icon:'clock', title:'Лимит', theme:'rose'},
@@ -8209,6 +8232,7 @@
     modGachaAutoloot: 'Автолут гачи клуба, если это не понятно, то я не знаю как еще объяснить. ах да, можете на странице клуба выбрать что лутать, а что нет',
     modAutoLootCards: 'Автоматически получает карты за просмотр аниме.',
     modWantCards: 'Добавляет инструменты для добавления в желаемое в библиотеке карт и на странице аниме.',
+    modQuickCardOwners: 'Позволяет быстро выбирать обладателей карты у которых она открыта, онлайн и соклуб/друг',
     wantButtonsAlways: 'Показывает кнопки всегда, а не только при наведении, если выключить функцию кнопки будут появляться только при наведения на ряд карт.',
     modNoNeedCards: 'Добавляет инструменты для работы с ненужными картами на странице ваших карт.',
     noNeedButtonsAlways: 'Показывает кнопки всегда, а не только при наведении, если выключить функцию кнопки будут появляться только при наведения на ряд карт.',
@@ -8509,6 +8533,7 @@
     if(key==='modChatStoneAutoloot'){ if(cfg.modChatStoneAutoloot) initChatStoneAutoloot(); else cleanupChatStoneAutoloot(); return; }
     if(key==='modGachaAutoloot'){ if(cfg.modGachaAutoloot) initGachaAutoloot(); else cleanupGachaAutoloot(); return; }
     if(key==='modSuggestionAuthors'){ if(cfg.modSuggestionAuthors) initSuggestionAuthors(); else cleanupSuggestionAuthors(); return; }
+    if(key==='modQuickCardOwners'){ if(cfg.modQuickCardOwners) initQuickCardOwners(); else cleanupQuickCardOwners(); return; }
     if(key==='modWantCards'){
       if(cfg.modWantCards) initWantCards();
       else if(typeof window.__suiteWantCardsCleanup==='function') window.__suiteWantCardsCleanup();
@@ -8965,6 +8990,8 @@
       else if(typeof window.__suiteAutoLootCardsCleanup==='function') window.__suiteAutoLootCardsCleanup();
     });
     cardsSection.appendChild(autoLootRow);
+    const quickOwnersRow = makeToggle('modQuickCardOwners', '⚡ Быстрые обладатели');
+    cardsSection.appendChild(quickOwnersRow);
     const wantRow = makeToggle('modWantCards', '💙 Работа с желаемым');
     cardsSection.appendChild(wantRow);
     const wantButtonsRow = makeToggle('wantButtonsAlways', '↳ Кнопки постоянно');
@@ -9136,12 +9163,22 @@
       mobileLayer.style.bottom='auto';
       const layerRect=mobileLayer.getBoundingClientRect();
       const btnRect=btn.getBoundingClientRect();
-      let left=Math.max(viewport.left+margin,Math.min(btnRect.left,viewport.right-margin-layerRect.width));
-      let top=btnRect.top-layerRect.height-gap;
-      if(top<viewport.top+margin) top=btnRect.bottom+gap;
+      const savedLeft=Number(cfg.mobileHelperLeft);
+      const savedTop=Number(cfg.mobileHelperTop);
+      const hasSavedPosition=cfg.mobileHelperLeft!==null&&cfg.mobileHelperTop!==null&&
+        Number.isFinite(savedLeft)&&Number.isFinite(savedTop);
+      let left=hasSavedPosition?savedLeft:btnRect.left;
+      let top=hasSavedPosition?savedTop:btnRect.top-layerRect.height-gap;
+      if(!hasSavedPosition&&top<viewport.top+margin) top=btnRect.bottom+gap;
+      left=Math.max(viewport.left+margin,Math.min(left,viewport.right-margin-layerRect.width));
       top=Math.max(viewport.top+margin,Math.min(top,viewport.bottom-margin-layerRect.height));
       mobileLayer.style.left=Math.round(left)+'px';
       mobileLayer.style.top=Math.round(top)+'px';
+      if(hasSavedPosition&&(Math.abs(left-savedLeft)>.5||Math.abs(top-savedTop)>.5)){
+        cfg.mobileHelperLeft=Math.round(left);
+        cfg.mobileHelperTop=Math.round(top);
+        saveCfg();
+      }
     };
     const openMobileLayer=()=>{
       syncMobileVisibilityControl();
@@ -9166,6 +9203,11 @@
       positionMobileLayer();
     });
     syncMobileVisibilityControl();
+    makeDraggable(mobileLayer,mobileHead,(left,top)=>{
+      cfg.mobileHelperLeft=Math.round(left);
+      cfg.mobileHelperTop=Math.round(top);
+      saveCfg();
+    },{keepInViewport:false,resolveOverlaps:false});
 
     subscribeSuiteUpdateState(state=>applySuiteSettingsButtonUpdateState(btn, state));
     startSuiteVersionChecker();
@@ -9253,6 +9295,111 @@
       if(!suiteUsesMobileSettingsLayer()) closeMobileLayer();
       else positionMobileLayer();
     },{passive:true});
+  }
+
+  // ============================================================
+  //  БЫСТРЫЕ ФИЛЬТРЫ ОБЛАДАТЕЛЕЙ КАРТЫ
+  // ============================================================
+
+  const QUICK_CARD_OWNER_FILTERS = ['unlocked','online','club','my_friends'];
+  const QUICK_CARD_OWNER_CHAINS = {
+    unlocked: ['unlocked'],
+    online: ['unlocked','online'],
+    club: ['unlocked','online','club'],
+    my_friends: ['unlocked','online','my_friends']
+  };
+  const QUICK_CARD_OWNER_TITLES = {
+    'Карта доступна к обмену': 'unlocked',
+    'Недавно были в сети': 'online',
+    'Из моего клуба': 'club',
+    'Мои друзья': 'my_friends'
+  };
+
+  function isQuickCardOwnersPage(){
+    return /^\/cards\/users\/?$/.test(location.pathname);
+  }
+
+  function getQuickCardOwnerFilter(link){
+    if(!link) return '';
+    if(link.dataset.suiteQuickOwnersFilter) return link.dataset.suiteQuickOwnersFilter;
+
+    const originalHref = link.dataset.suiteQuickOwnersOriginalHref || link.getAttribute('href') || '';
+    let filter = '';
+    try {
+      const url = new URL(originalHref, location.href);
+      filter = QUICK_CARD_OWNER_FILTERS.find(key=>url.searchParams.get(key)==='1') || '';
+    } catch(e) {}
+    if(!filter) filter = QUICK_CARD_OWNER_TITLES[(link.getAttribute('title') || '').trim()] || '';
+    if(filter) link.dataset.suiteQuickOwnersFilter = filter;
+    return filter;
+  }
+
+  function buildQuickCardOwnersHref(link, filter){
+    const chain = QUICK_CARD_OWNER_CHAINS[filter];
+    if(!chain) return '';
+
+    const current = new URL(location.href);
+    let source;
+    try {
+      source = new URL(link.dataset.suiteQuickOwnersOriginalHref || link.getAttribute('href') || '', current);
+    } catch(e) {
+      source = current;
+    }
+    const cardId = current.searchParams.get('id') || source.searchParams.get('id');
+    if(!cardId) return '';
+
+    const active = QUICK_CARD_OWNER_FILTERS.filter(key=>current.searchParams.get(key)==='1');
+    const isSameSelection = active.length===chain.length && chain.every(key=>active.includes(key));
+    const target = new URL('/cards/users/', current.origin);
+    target.searchParams.set('id', cardId);
+    if(!isSameSelection) chain.forEach(key=>target.searchParams.set(key,'1'));
+    return target.pathname + target.search;
+  }
+
+  function prepareQuickCardOwnerLink(link){
+    if(!cfg.modQuickCardOwners || !isQuickCardOwnersPage() || !link?.matches?.('a.tabs__item.tabs__navigate__unlocked')) return;
+    if(!link.dataset.suiteQuickOwnersOriginalHref){
+      link.dataset.suiteQuickOwnersOriginalHref = link.getAttribute('href') || '';
+    }
+    const filter = getQuickCardOwnerFilter(link);
+    const href = buildQuickCardOwnersHref(link, filter);
+    if(href) link.setAttribute('href', href);
+  }
+
+  function rewriteQuickCardOwnerLinks(){
+    if(!cfg.modQuickCardOwners || !isQuickCardOwnersPage()) return;
+    document.querySelectorAll('a.tabs__item.tabs__navigate__unlocked').forEach(prepareQuickCardOwnerLink);
+  }
+
+  function cleanupQuickCardOwners(){
+    const state = window.__suiteQuickCardOwnersState;
+    if(state){
+      state.events.forEach(type=>document.removeEventListener(type,state.prepare,true));
+      window.removeEventListener('popstate',state.rewrite);
+      window.removeEventListener('pageshow',state.rewrite);
+    }
+    document.querySelectorAll('[data-suite-quick-owners-original-href]').forEach(link=>{
+      link.setAttribute('href',link.dataset.suiteQuickOwnersOriginalHref || '');
+      delete link.dataset.suiteQuickOwnersOriginalHref;
+      delete link.dataset.suiteQuickOwnersFilter;
+    });
+    delete window.__suiteQuickCardOwnersState;
+    window.__suiteQuickCardOwnersInstalled = false;
+  }
+
+  function initQuickCardOwners(){
+    if(!cfg.modQuickCardOwners || window.__suiteQuickCardOwnersInstalled) return;
+    window.__suiteQuickCardOwnersInstalled = true;
+    const events = ['pointerdown','focusin','click'];
+    const prepare = event=>{
+      const target = event.target instanceof Element ? event.target : event.target?.parentElement;
+      prepareQuickCardOwnerLink(target?.closest?.('a.tabs__item.tabs__navigate__unlocked'));
+    };
+    events.forEach(type=>document.addEventListener(type,prepare,true));
+    window.addEventListener('popstate',rewriteQuickCardOwnerLinks);
+    window.addEventListener('pageshow',rewriteQuickCardOwnerLinks);
+    window.__suiteQuickCardOwnersState = {events,prepare,rewrite:rewriteQuickCardOwnerLinks};
+    rewriteQuickCardOwnerLinks();
   }
 
   // ============================================================
@@ -9551,6 +9698,7 @@
     if(cfg.modStones)      initStones();
     if(cfg.modChatStoneAutoloot) initChatStoneAutoloot();
     if(cfg.modGachaAutoloot) initGachaAutoloot();
+    if(cfg.modQuickCardOwners) initQuickCardOwners();
     if(cfg.modVoteCardsToggle) initVoteCardsToggle();
     if(cfg.modSuggestionAuthors) initSuggestionAuthors();
     if(cfg.modAutoLootCards) initAutoLootCards();
