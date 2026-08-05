@@ -1282,7 +1282,7 @@
     }
     #suite-lab-fatigue-counter {
       position:absolute;top:12px;right:12px;z-index:20;
-      min-width:210px;padding:10px 12px;border-radius:12px;
+      width:180px;min-width:180px;padding:9px 11px 10px;border-radius:12px;
       border:1px solid rgba(56,189,248,.34);
       background:linear-gradient(180deg,rgba(8,20,38,.97),rgba(7,16,30,.93));
       color:#e0f2fe;font-family:'Segoe UI',Arial,sans-serif;
@@ -1300,9 +1300,17 @@
     #suite-lab-fatigue-counter .suite-lab-fatigue-value {
       display:block;font-size:18px;font-weight:900;line-height:1.15;color:#f8fafc;text-shadow:0 0 14px rgba(14,165,233,.2);
     }
-    #suite-lab-fatigue-counter .suite-lab-fatigue-sub {
-      display:block;margin-top:4px;font-size:11px;font-weight:700;color:#93c5fd;
+    #suite-lab-fatigue-counter [data-lab-fatigue="approx"]{color:#fbbf24;margin-right:4px;}
+    #suite-lab-fatigue-counter .suite-lab-fatigue-progress{
+      display:block;width:100%;height:5px;margin-top:7px;overflow:hidden;border-radius:999px;
+      background:rgba(30,58,82,.9);box-shadow:inset 0 0 0 1px rgba(125,211,252,.13);
     }
+    #suite-lab-fatigue-counter .suite-lab-fatigue-progress > span{
+      display:block;width:0;height:100%;border-radius:inherit;background:linear-gradient(90deg,#0ea5e9,#38bdf8);
+      box-shadow:0 0 10px rgba(56,189,248,.55);transition:width .25s ease;
+    }
+    #suite-lab-fatigue-counter.is-ready .suite-lab-fatigue-progress > span{background:linear-gradient(90deg,#f59e0b,#ef4444);box-shadow:0 0 12px rgba(248,113,113,.65);}
+    #suite-lab-fatigue-counter.is-approximate .suite-lab-fatigue-progress{opacity:.72;}
     #suite-lab-fatigue-counter .suite-lab-fatigue-btn {
       position:absolute;right:8px;top:8px;width:28px;height:28px;border-radius:8px;
       border:1px solid rgba(125,211,252,.26);background:rgba(15,23,42,.68);
@@ -1361,7 +1369,7 @@
     }
     #suite-lab-fatigue-modal .suite-lab-fatigue-reset-btn{min-width:58px;border-color:rgba(248,113,113,.35);color:#fecaca;}
     @media(max-width:760px){
-      #suite-lab-fatigue-counter{top:104px;right:12px;min-width:172px;width:calc(100% - 24px);max-width:220px;}
+      #suite-lab-fatigue-counter{top:104px;right:12px;width:min(180px,calc(100% - 24px));min-width:0;max-width:180px;}
       #suite-lab-fatigue-modal .suite-lab-fatigue-pages{flex-wrap:wrap;}
       #suite-lab-fatigue-modal .suite-lab-fatigue-page-state{order:3;flex:1 0 100%;}
     }
@@ -5139,11 +5147,7 @@
     if(hasMoscowTimeReached() && !isTodayFinished()) runDailyCheck('schedule');
     if(isDefaultClubPage()) state.intervals.push(setInterval(injectControls, 2000));
     on(document, 'visibilitychange', () => {
-      if(document.hidden){
-        releaseTabLock();
-        return;
-      }
-      if(hasMoscowTimeReached() && !isTodayFinished()) runDailyCheck('visible-tab');
+      if(document.hidden) releaseTabLock();
     });
   }
 
@@ -5712,6 +5716,7 @@
       windowEvents:[],
       verifyTimer:null,
       snapshotInFlight:false,
+      onlinePingInFlight:false,
       originalFetch:null,
       hookedFetch:null,
       xhrPrototype:null,
@@ -6232,21 +6237,27 @@
 
     async function pingOnline(){
       if(!state.ready || !isEnabled()) return;
+      if(state.onlinePingInFlight) return;
       if(!state.isLeader) await acquireLeader();
       if(!state.isLeader) return;
       const lastPing = Number(getRaw(KEYS.lastOnlinePing, 0) || 0);
       if(Date.now() - lastPing < DEFAULTS.onlinePingMs) return;
       const userHash = getUserHash();
       if(!userHash) return;
+      state.onlinePingInFlight = true;
+      setRaw(KEYS.lastOnlinePing, Date.now());
       try{
-        await fetch(`${location.origin}/index.php?controller=ajax&mod=online_in_cinema&user_hash=${encodeURIComponent(userHash)}`, {
+        const response = await fetch(`${location.origin}/index.php?controller=ajax&mod=online_in_cinema&user_hash=${encodeURIComponent(userHash)}`, {
           method:'GET',
           credentials:'same-origin',
           headers:{ 'X-Requested-With':'XMLHttpRequest', 'Accept':'application/json, text/javascript, */*; q=0.01' }
         });
-        setRaw(KEYS.lastOnlinePing, Date.now());
+        if(!response.ok) suiteTelemetryLog('chat_stone', 'online_ping_http_error', { status:response.status }, 'error');
       }catch(error){
         log('Online ping failed:', error?.message || error);
+        suiteTelemetryLog('chat_stone', 'online_ping_failed', { error:error?.message || String(error) }, 'error');
+      }finally{
+        state.onlinePingInFlight = false;
       }
     }
 
@@ -6281,7 +6292,7 @@
           fetchChatSnapshot('watchdog');
         }
       }, DEFAULTS.watchdogMs));
-      state.timers.push(setInterval(pingOnline, 5000));
+      state.timers.push(setInterval(pingOnline, DEFAULTS.onlinePingMs));
       state.listeners.push(GM_addValueChangeListener(rawKey(KEYS.lastChatActivity), (_key, _oldValue, newValue, remote) => {
         if(remote) state.lastChatActivity = Math.max(state.lastChatActivity, Number(newValue || 0));
       }));
@@ -6292,6 +6303,7 @@
       state.windowEvents.push({ type:'visibilitychange', handler:acquireLeader });
       window.addEventListener('beforeunload', releaseLeader);
       state.windowEvents.push({ type:'beforeunload', handler:releaseLeader });
+      pingOnline();
       fetchChatSnapshot('startup');
       log(`Started for ${state.accountKey}`);
     }
@@ -14743,13 +14755,164 @@
     window.__suiteLabyrinthQuizInstalled = false;
   }
 
+  function suiteLabyrinthFatigueBodyText(body){
+    if(!body) return '';
+    if(typeof body === 'string') return body;
+    const tag = Object.prototype.toString.call(body);
+    if(tag === '[object URLSearchParams]' || body?.constructor?.name === 'URLSearchParams'){
+      try{ return body.toString(); }catch(e){ return ''; }
+    }
+    if(tag === '[object FormData]' || body?.constructor?.name === 'FormData'){
+      try{ return [...body.entries()].map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`).join('&'); }
+      catch(e){ return ''; }
+    }
+    try{ return String(body); }catch(e){ return ''; }
+  }
+
+  function suiteLabyrinthFatigueIsStepRequest(url, body){
+    if(!String(url || '').includes('mod=animesss_game')) return false;
+    try{ return new URLSearchParams(suiteLabyrinthFatigueBodyText(body)).get('action') === 'step'; }
+    catch(e){ return false; }
+  }
+
+  function suiteLabyrinthFatigueNumber(value){
+    if(value === null || value === '' || typeof value === 'undefined') return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+
+  function suiteLabyrinthFatigueResponseSummary(data){
+    if(!data || typeof data !== 'object') return null;
+    const counter = data.fatigue_counter && typeof data.fatigue_counter === 'object'
+      ? {
+          value:suiteLabyrinthFatigueNumber(data.fatigue_counter.value),
+          skipped:!!data.fatigue_counter.skipped,
+          title:String(data.fatigue_counter.title || '').slice(0, 500),
+          text:String(data.fatigue_counter.text || '').slice(0, 1000),
+        }
+      : null;
+    const fatigue = data.fatigue && typeof data.fatigue === 'object'
+      ? {
+          active:!!data.fatigue.active,
+          step_back:suiteLabyrinthFatigueNumber(data.fatigue.step_back),
+          title:String(data.fatigue.title || '').slice(0, 500),
+          text:String(data.fatigue.text || '').slice(0, 1000),
+        }
+      : null;
+    const current = data.mapData?.current;
+    const x = suiteLabyrinthFatigueNumber(current?.x);
+    const y = suiteLabyrinthFatigueNumber(current?.y);
+    return {
+      event:String(data.event || ''),
+      title:String(data.title || '').slice(0, 500),
+      text:String(data.text || '').slice(0, 1500),
+      status:String(data.status || ''),
+      error:data.error ? String(data.error).slice(0, 1000) : '',
+      fatigue_counter:counter,
+      fatigue,
+      step_back:suiteLabyrinthFatigueNumber(data.step_back),
+      step:suiteLabyrinthFatigueNumber(data.step),
+      next_step:suiteLabyrinthFatigueNumber(data.next_step),
+      max_steps:suiteLabyrinthFatigueNumber(data.max_steps),
+      today_steps:suiteLabyrinthFatigueNumber(data.today_steps),
+      total_steps:suiteLabyrinthFatigueNumber(data.total_steps),
+      remaining_steps:suiteLabyrinthFatigueNumber(data.remaining_steps),
+      next_step_time:suiteLabyrinthFatigueNumber(data.next_step_time),
+      current:Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null,
+    };
+  }
+
+  function installLabyrinthFatigueStepHook(){
+    const pageWindow = getPageWindow();
+    const dispatch = payload => {
+      setTimeout(() => {
+        const handler = window.__suiteLabyrinthFatigueStepHandler;
+        if(typeof handler === 'function') handler(payload);
+      }, 0);
+    };
+
+    const xhrPrototype = pageWindow.XMLHttpRequest?.prototype;
+    if(xhrPrototype && !xhrPrototype.__suiteLabyrinthFatigueHooked){
+      const originalOpen = xhrPrototype.open;
+      const originalSend = xhrPrototype.send;
+      xhrPrototype.open = function(method, url){
+        this.__suiteLabyrinthFatigueUrl = String(url || '');
+        return originalOpen.apply(this, arguments);
+      };
+      xhrPrototype.send = function(body){
+        const url = this.__suiteLabyrinthFatigueUrl || '';
+        if(suiteLabyrinthFatigueIsStepRequest(url, body)){
+          const startedAt = Date.now();
+          this.addEventListener('loadend', function(){
+            let data = null;
+            let rawText = '';
+            try{
+              if(this.responseType === 'json') data = this.response;
+              else if(!this.responseType || this.responseType === 'text') rawText = this.responseText || '';
+            }catch(e){}
+            if(!data && rawText){
+              try{ data = JSON.parse(rawText); }catch(e){}
+            }
+            dispatch({
+              transport:'xhr',
+              status:Number(this.status || 0),
+              durationMs:Date.now() - startedAt,
+              response:suiteLabyrinthFatigueResponseSummary(data),
+            });
+          }, { once:true });
+        }
+        return originalSend.apply(this, arguments);
+      };
+      try{ Object.defineProperty(xhrPrototype, '__suiteLabyrinthFatigueHooked', { value:true, configurable:true }); }
+      catch(e){ xhrPrototype.__suiteLabyrinthFatigueHooked = true; }
+    }
+
+    if(typeof pageWindow.fetch === 'function' && !pageWindow.fetch.__suiteLabyrinthFatigueHooked){
+      const originalFetch = pageWindow.fetch;
+      function hookedFetch(resource, init){
+        const url = typeof resource === 'string' ? resource : resource?.url || '';
+        const shouldCapture = suiteLabyrinthFatigueIsStepRequest(url, init?.body);
+        const startedAt = shouldCapture ? Date.now() : 0;
+        const request = originalFetch.apply(this, arguments);
+        if(shouldCapture){
+          request.then(response => {
+            response.clone().text().then(text => {
+              let data = null;
+              try{ data = JSON.parse(text); }catch(e){}
+              dispatch({
+                transport:'fetch',
+                status:Number(response.status || 0),
+                durationMs:Date.now() - startedAt,
+                response:suiteLabyrinthFatigueResponseSummary(data),
+              });
+            }).catch(()=>{});
+          }).catch(error => {
+            dispatch({ transport:'fetch', status:0, durationMs:Date.now() - startedAt, response:null, error:String(error) });
+          });
+        }
+        return request;
+      }
+      try{ Object.defineProperty(hookedFetch, '__suiteLabyrinthFatigueHooked', { value:true }); }catch(e){}
+      pageWindow.fetch = hookedFetch;
+    }
+  }
+
   function cleanupLabyrinthFatigue(){
     const state = window.__suiteLabyrinthFatigueState;
-    if(state) suiteTelemetryLog('fatigue', 'module_cleanup', { state:state.state, lastSnapshot:state.lastSnapshot });
     if(state){
-      try{ clearInterval(state.tickInterval); }catch(e){}
+      suiteTelemetryLog('fatigue', 'module_cleanup', {
+        value:state.state?.value ?? null,
+        coord:state.state?.coord || null,
+        movesSincePrevious:state.state?.movesSincePrevious || 0,
+        eventCount:state.state?.events?.length || 0,
+      });
+      try{ clearInterval(state.attachInterval); }catch(e){}
       try{ clearTimeout(state.startTimer); }catch(e){}
+      try{ state.storageListener && GM_removeValueChangeListener(state.storageListener); }catch(e){}
       try{ state.box?.remove(); }catch(e){}
+      if(window.__suiteLabyrinthFatigueStepHandler === state.handleStepResponse){
+        window.__suiteLabyrinthFatigueStepHandler = null;
+      }
     }
     document.getElementById('suite-lab-fatigue-modal')?.remove();
     window.__suiteLabyrinthFatigueState = null;
@@ -14768,312 +14931,299 @@
     if(window.__suiteLabyrinthFatigueInstalled) return;
     window.__suiteLabyrinthFatigueInstalled = true;
 
-    const STORAGE_KEY = 'suite_labyrinth_move_stats_v1';
+    const user = suiteGetCurrentUserName() || 'guest';
+    const STORAGE_KEY = `suite_labyrinth_fatigue_v2:${encodeURIComponent(user)}`;
     const ROOT_ID = 'suite-lab-fatigue-counter';
     const MODAL_ID = 'suite-lab-fatigue-modal';
     const EVENTS_PER_PAGE = 3;
-
-    const TRIGGER_DEFS = {
-      fatigue: {
-        historyText: 'Усталость',
-        label: 'усталость',
-        reason: 'последней усталости',
-      },
-      trap_back: {
-        historyText: 'Ловушка отката',
-        label: 'откат',
-        reason: 'последнего отката',
-        titles: ['Ловушка отката'],
-      },
-      mimic_chest_back: {
-        historyText: 'Мимик с откатом',
-        label: 'мимик',
-        reason: 'последнего мимика',
-        titles: ['Это был мимик!'],
-        titleNeedles: ['мимик'],
-        textNeedles: ['отбросил назад'],
-      },
-      shield_block: {
-        historyText: 'Щит сработал',
-        label: 'откат',
-        reason: 'последнего отката',
-        titleNeedles: ['щит сработал'],
-        textNeedles: ['ловушки отката'],
-      },
-    };
-
+    const MAX_EVENTS = 100;
+    const MAX_STEP_KEYS = 120;
     const EVENT_LABELS = {
-      fatigue: TRIGGER_DEFS.fatigue.historyText,
-      trap_back: TRIGGER_DEFS.trap_back.historyText,
-      mimic_chest: 'Мимик',
-      mimic_chest_back: TRIGGER_DEFS.mimic_chest_back.historyText,
-      shield_block: TRIGGER_DEFS.shield_block.historyText,
+      fatigue:'Усталость',
+      trap_back:'Ловушка отката',
+      mimic_chest_back:'Мимик с откатом',
+      shield_block:'Щит сработал',
     };
 
     const runtime = {
       box:null,
-      tickInterval:null,
+      attachInterval:null,
       startTimer:null,
-      ticking:false,
+      storageListener:null,
       statsPage:0,
-      roomSequence:0,
-      lastSnapshot:null,
-      state: loadState()
+      cacheExact:false,
+      localUpdateAt:0,
+      state:loadState(),
+      handleStepResponse:null,
     };
     window.__suiteLabyrinthFatigueState = runtime;
-    suiteTelemetryLog('fatigue', 'module_initialized', { savedState:runtime.state });
 
     function makeEmptyState(){
       return {
-        startedAt:new Date().toISOString(),
-        sessionMoves:0,
-        lastTodaySteps:null,
-        movesSinceFatigue:0,
-        fatigueCount:0,
-        trapsBack:0,
-        mimics:0,
-        mimicBacks:0,
-        eventKeys:{},
+        version:2,
+        user,
+        value:null,
+        skipped:false,
+        coord:null,
+        updatedAt:0,
+        movesSincePrevious:0,
         events:[],
-        history:[]
+        recentStepKeys:[],
       };
     }
 
-    function loadState(){
-      const data = gmGet(STORAGE_KEY, null);
-      return data && typeof data === 'object' ? data : makeEmptyState();
+    function normalizeCoord(coord){
+      const x = suiteLabyrinthFatigueNumber(coord?.x);
+      const y = suiteLabyrinthFatigueNumber(coord?.y);
+      return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
     }
 
-    function saveState(){
-      gmSet(STORAGE_KEY, runtime.state);
+    function normalizeState(data){
+      const empty = makeEmptyState();
+      if(!data || typeof data !== 'object' || Number(data.version) !== 2) return empty;
+      const value = suiteLabyrinthFatigueNumber(data.value);
+      return {
+        ...empty,
+        user:String(data.user || user),
+        value:Number.isFinite(value) ? Math.max(0, Math.min(10, value)) : null,
+        skipped:!!data.skipped,
+        coord:normalizeCoord(data.coord),
+        updatedAt:Number(data.updatedAt || 0),
+        movesSincePrevious:Math.max(0, Number(data.movesSincePrevious || 0)),
+        events:Array.isArray(data.events) ? data.events.filter(event => event && typeof event === 'object').slice(0, MAX_EVENTS) : [],
+        recentStepKeys:Array.isArray(data.recentStepKeys) ? data.recentStepKeys.map(String).slice(-MAX_STEP_KEYS) : [],
+      };
     }
 
-    function ensureState(){
-      if(!runtime.state || typeof runtime.state !== 'object') runtime.state = makeEmptyState();
-      runtime.state.eventKeys ||= {};
-      runtime.state.events ||= [];
-      runtime.state.history ||= [];
-      runtime.state.sessionMoves ??= 0;
-      runtime.state.lastTodaySteps ??= null;
-      runtime.state.movesSinceFatigue ??= 0;
+    function loadState(){ return normalizeState(gmGet(STORAGE_KEY, null)); }
+
+    function parseStoredState(value){
+      try{
+        const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+        return normalizeState(parsed);
+      }catch(e){ return null; }
     }
 
-    function readNumber(selector){
-      const el = document.querySelector(selector);
-      if(!el) return null;
-      const value = parseInt(el.textContent.replace(/[^\d-]/g, ''), 10);
-      return Number.isFinite(value) ? value : null;
+    function saveState(){ gmSet(STORAGE_KEY, runtime.state); }
+
+    function readCurrentCoord(){
+      return normalizeCoord(getPageWindow()?.labyrinthData?.mapData?.current);
     }
 
-    function getCurrentCell(){
-      return document.querySelector('.labyrinth-cell--current') ||
-        document.querySelector('.labyrinth-cell.labyrinth-cell--visited[data-event]:last-of-type');
+    function sameCoord(left, right){
+      return !!left && !!right && Number(left.x) === Number(right.x) && Number(left.y) === Number(right.y);
     }
 
-    function getCoord(){
-      const data = (unsafeWindow?.labyrinthData || window.labyrinthData)?.mapData?.current;
-      if(data && Number.isFinite(data.x) && Number.isFinite(data.y)) return `${data.x},${data.y}`;
+    function mergeEvents(left, right){
+      const merged = new Map();
+      [...(left || []), ...(right || [])].forEach(event => {
+        const key = String(event.key || `${event.type || ''}:${event.at || ''}`);
+        if(!merged.has(key) || Number(merged.get(key)?.at || 0) < Number(event.at || 0)) merged.set(key, event);
+      });
+      return [...merged.values()].sort((a, b) => Number(b.at || 0) - Number(a.at || 0)).slice(0, MAX_EVENTS);
+    }
 
-      const cell = getCurrentCell();
-      if(cell?.dataset?.x && cell?.dataset?.y) return `${cell.dataset.x},${cell.dataset.y}`;
+    function mergeWithStoredState(){
+      const stored = loadState();
+      if(Number(stored.updatedAt || 0) > Number(runtime.state.updatedAt || 0)){
+        stored.events = mergeEvents(stored.events, runtime.state.events);
+        stored.recentStepKeys = [...new Set([...(stored.recentStepKeys || []), ...(runtime.state.recentStepKeys || [])])].slice(-MAX_STEP_KEYS);
+        runtime.state = stored;
+      }else{
+        runtime.state.events = mergeEvents(runtime.state.events, stored.events);
+        runtime.state.recentStepKeys = [...new Set([...(stored.recentStepKeys || []), ...(runtime.state.recentStepKeys || [])])].slice(-MAX_STEP_KEYS);
+      }
+    }
+
+    function updateCacheAccuracy(){
+      if(!Number.isFinite(runtime.state.value)){
+        runtime.cacheExact = false;
+        return;
+      }
+      if(runtime.localUpdateAt && runtime.localUpdateAt === runtime.state.updatedAt){
+        runtime.cacheExact = true;
+        return;
+      }
+      runtime.cacheExact = sameCoord(runtime.state.coord, readCurrentCoord());
+    }
+
+    function successfulStep(payload){
+      const response = payload?.response;
+      const status = Number(payload?.status || 0);
+      if(!response || status < 200 || status >= 300 || response.error) return false;
+      return [response.step, response.today_steps, response.total_steps].some(Number.isFinite);
+    }
+
+    function stepKey(response, coord){
+      return [
+        response.today_steps ?? '',
+        response.total_steps ?? '',
+        response.step ?? '',
+        response.next_step_time ?? '',
+        response.event || '',
+        coord?.x ?? '',
+        coord?.y ?? '',
+      ].join(':');
+    }
+
+    function visibleEventText(){
+      return [
+        document.querySelector('#labyrinthEventTitle')?.textContent,
+        document.querySelector('#labyrinthEventText')?.textContent,
+        document.querySelector('#labyrinthFatigueTitle')?.textContent,
+        document.querySelector('#labyrinthFatigueText')?.textContent,
+      ].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+    }
+
+    function detectResetEvent(response, previousValue){
+      const responseText = [
+        response.title,
+        response.text,
+        response.fatigue?.title,
+        response.fatigue?.text,
+      ].filter(Boolean).join(' ').toLowerCase();
+      const pageText = visibleEventText().toLowerCase();
+      const responseCounter = suiteLabyrinthFatigueNumber(response.fatigue_counter?.value);
+      const counterReset = Number.isFinite(responseCounter) && responseCounter === 0 && Number(previousValue) > 0;
+      if(responseText.includes('щит сработал') || (counterReset && pageText.includes('щит сработал'))) return 'shield_block';
+      if(response.event === 'mimic_chest_back') return 'mimic_chest_back';
+      if(response.event === 'trap_back') return 'trap_back';
+      if(response.fatigue?.active) return 'fatigue';
       return '';
     }
 
-    function getCurrentEvent(){
-      const source = unsafeWindow?.labyrinthData || window.labyrinthData;
-      return getCurrentCell()?.dataset?.event || source?.lastEvent || '';
-    }
-
-    function getCellEvent(){
-      return getCurrentCell()?.dataset?.event || '';
-    }
-
-    function isRendered(el){
-      if(!el) return false;
-      const style = window.getComputedStyle(el);
-      return style.display !== 'none' &&
-        style.visibility !== 'hidden' &&
-        style.opacity !== '0' &&
-        el.getClientRects().length > 0;
-    }
-
-    function getVisibleText(selector){
-      const el = document.querySelector(selector);
-      if(!isRendered(el)) return '';
-      return el.textContent.trim();
-    }
-
-    function getTriggerDiagnostics(){
-      const source = unsafeWindow?.labyrinthData || window.labyrinthData;
-      return {
-        title:getVisibleText('#labyrinthEventTitle'),
-        eventText:getVisibleText('#labyrinthEventText'),
-        fatigueTitle:getVisibleText('#labyrinthFatigueTitle'),
-        fatigueText:getVisibleText('#labyrinthFatigueText'),
-        lastEvent:String(source?.lastEvent || ''),
-        cellEvent:String(getCellEvent() || ''),
-      };
-    }
-
-    function buildTrigger(type, source){
-      const def = TRIGGER_DEFS[type];
-      return { type, label:def.label, reason:def.reason, source };
-    }
-
-    function matchesVisibleTrigger(def, title, eventText){
-      if(!def.titles && !def.titleNeedles && !def.textNeedles) return false;
-      if(def.titles?.includes(title)) return true;
-
-      const lowerTitle = title.toLowerCase();
-      const lowerText = eventText.toLowerCase();
-      const hasTitle = !def.titleNeedles || def.titleNeedles.some(part => lowerTitle.includes(part));
-      const hasText = !def.textNeedles || def.textNeedles.some(part => lowerText.includes(part));
-      return Boolean(def.titleNeedles || def.textNeedles) && hasTitle && hasText;
-    }
-
-    function isFatigueTrigger(raw){
-      const title = raw.fatigueTitle.toLowerCase();
-      const text = raw.fatigueText.toLowerCase();
-      return title.includes('усталость') && text.includes('общий путь откатывается');
-    }
-
-    function getActiveTrigger(raw = getTriggerDiagnostics()){
-      if(isFatigueTrigger(raw)) return buildTrigger('fatigue', 'fatigueBlock');
-
-      for(const [type, def] of Object.entries(TRIGGER_DEFS)){
-        if(matchesVisibleTrigger(def, raw.title, raw.eventText)) return buildTrigger(type, 'visibleEvent');
-      }
-
-      return null;
-    }
-
-    function collectSnapshot(){
-      const raw = getTriggerDiagnostics();
-      return {
-        today:readNumber('#labyrinthTodaySteps'),
-        max:readNumber('#labyrinthMaxSteps'),
-        left:readNumber('#labyrinthRemainingSteps'),
-        coord:getCoord(),
-        event:getCurrentEvent(),
-        ...raw,
-        trigger:getActiveTrigger(raw),
-      };
-    }
-
-    function recordMove(delta, snapshot){
-      for(let i = 0; i < delta; i += 1){
-        runtime.state.sessionMoves += 1;
-        runtime.state.movesSinceFatigue += 1;
-      }
-      runtime.state.history.unshift({
-        type:'move',
-        at:Date.now(),
-        text:`Ход +${delta}`,
-        coord:snapshot.coord,
-        event:snapshot.event,
-        today:snapshot.today,
-      });
-      suiteTelemetryLog('fatigue', 'moves_recorded', {
-        delta,
-        snapshot,
-        movesSinceFatigue:runtime.state.movesSinceFatigue,
-        sessionMoves:runtime.state.sessionMoves
-      });
-    }
-
-    function roomLogSnapshot(snapshot){
-      if(!snapshot) return null;
-      return {
-        today:snapshot.today,
-        max:snapshot.max,
-        left:snapshot.left,
-        coord:snapshot.coord,
-        event:snapshot.event,
-        cellEvent:snapshot.cellEvent,
-        lastEvent:snapshot.lastEvent,
-        title:snapshot.title,
-        eventText:snapshot.eventText,
-        fatigueTitle:snapshot.fatigueTitle,
-        fatigueText:snapshot.fatigueText,
-        trigger:snapshot.trigger,
-      };
-    }
-
-    function recordRoomVisit(previousSnapshot, snapshot){
-      const initial = !previousSnapshot;
-      if(initial && snapshot.today === null && !snapshot.coord && !snapshot.event) return;
-      const todayChanged = !initial && snapshot.today !== previousSnapshot.today;
-      const coordinateChanged = !initial
-        && !!snapshot.coord
-        && !!previousSnapshot.coord
-        && snapshot.coord !== previousSnapshot.coord;
-      if(!initial && !todayChanged && !coordinateChanged) return;
-
-      const todayDelta = !initial
-        && Number.isFinite(snapshot.today)
-        && Number.isFinite(previousSnapshot.today)
-        ? snapshot.today - previousSnapshot.today
-        : null;
-      runtime.roomSequence += 1;
-      suiteTelemetryLog('fatigue', 'room_visited', {
-        sequence:runtime.roomSequence,
-        source:initial ? 'initial' : 'transition',
-        todayDelta,
-        coordinateChanged,
-        unobservedRooms:todayDelta > 1 ? todayDelta - 1 : 0,
-        previous:roomLogSnapshot(previousSnapshot),
-        current:roomLogSnapshot(snapshot),
-      });
-    }
-
-    function recordTrigger(snapshot, trigger){
-      if(!trigger) return false;
-
-      const key = `${snapshot.today}:${trigger.type}`;
-      if(runtime.state.lastTriggerKey === key) return false;
-
-      const movesBeforeReset = runtime.state.movesSinceFatigue || 0;
-      runtime.state.lastTriggerKey = key;
-      runtime.state.lastTriggerLabel = trigger.reason;
-      runtime.state.movesSinceFatigue = 0;
-
-      if(trigger.type === 'trap_back') runtime.state.trapsBack = (runtime.state.trapsBack || 0) + 1;
-      if(trigger.type === 'mimic_chest') runtime.state.mimics = (runtime.state.mimics || 0) + 1;
-      if(trigger.type === 'mimic_chest_back') runtime.state.mimicBacks = (runtime.state.mimicBacks || 0) + 1;
-      if(trigger.type === 'fatigue') runtime.state.fatigueCount = (runtime.state.fatigueCount || 0) + 1;
-
+    function addResetEvent(type, response, coord, movesSincePrevious){
+      const key = `${stepKey(response, coord)}:${type}`;
+      if(runtime.state.events.some(event => event.key === key)) return;
       runtime.state.events.unshift({
-        type:trigger.type,
-        label:trigger.label,
+        key,
+        type,
+        label:EVENT_LABELS[type] || type,
         at:Date.now(),
-        movesSincePrevious:movesBeforeReset,
-        today:snapshot.today,
+        movesSincePrevious,
+        today:response.today_steps,
       });
-      runtime.state.history.unshift({
-        type:'event',
-        at:Date.now(),
-        text:trigger.label,
-        movesBetween:movesBeforeReset,
-        today:snapshot.today,
-      });
+      runtime.state.events = runtime.state.events.slice(0, MAX_EVENTS);
       suiteTelemetryLog('fatigue', 'trigger_recorded', {
-        trigger,
-        snapshot,
-        movesBeforeReset,
-        counters:{
-          fatigueCount:runtime.state.fatigueCount,
-          trapsBack:runtime.state.trapsBack,
-          mimics:runtime.state.mimics,
-          mimicBacks:runtime.state.mimicBacks
-        }
+        type,
+        movesSincePrevious,
+        counter:response.fatigue_counter,
+        event:response.event,
+        coord,
+        todaySteps:response.today_steps,
+        totalSteps:response.total_steps,
+        stepBack:response.step_back ?? response.fatigue?.step_back ?? null,
       });
-      return true;
     }
 
-    function trimHistory(){
-      if(runtime.state.history.length > 150) runtime.state.history = runtime.state.history.slice(0, 150);
-      if(runtime.state.events.length > 100) runtime.state.events = runtime.state.events.slice(0, 100);
+    function handleStepResponse(payload){
+      const response = payload?.response;
+      if(!successfulStep(payload)){
+        suiteTelemetryLog('fatigue', 'step_rejected', {
+          transport:payload?.transport || '',
+          status:payload?.status || 0,
+          durationMs:payload?.durationMs || 0,
+          error:payload?.error || response?.error || '',
+          response,
+        }, 'error');
+        return;
+      }
+
+      mergeWithStoredState();
+      const coord = normalizeCoord(response.current) || readCurrentCoord() || runtime.state.coord;
+      const key = stepKey(response, coord);
+      if(runtime.state.recentStepKeys.includes(key)){
+        suiteTelemetryLog('fatigue', 'duplicate_step_ignored', { key, response });
+        return;
+      }
+
+      const previousValue = runtime.state.value;
+      runtime.state.movesSincePrevious = Math.max(0, Number(runtime.state.movesSincePrevious || 0)) + 1;
+      const counterValue = suiteLabyrinthFatigueNumber(response.fatigue_counter?.value);
+      if(Number.isFinite(counterValue)){
+        runtime.state.value = Math.max(0, Math.min(10, counterValue));
+        runtime.state.skipped = !!response.fatigue_counter.skipped;
+      }else{
+        runtime.state.skipped = false;
+      }
+
+      const resetType = detectResetEvent(response, previousValue);
+      const movesBeforeReset = runtime.state.movesSincePrevious;
+      if(resetType){
+        addResetEvent(resetType, response, coord, movesBeforeReset);
+        runtime.state.movesSincePrevious = 0;
+      }else if(Number(previousValue) > 0 && Number.isFinite(counterValue) && counterValue === 0){
+        suiteTelemetryLog('fatigue', 'unrecognized_counter_reset', {
+          previousValue,
+          response,
+          coord,
+          movesSincePrevious:movesBeforeReset,
+        }, 'error');
+      }
+
+      runtime.state.version = 2;
+      runtime.state.user = user;
+      runtime.state.coord = coord;
+      runtime.state.updatedAt = Date.now();
+      runtime.state.recentStepKeys.push(key);
+      runtime.state.recentStepKeys = [...new Set(runtime.state.recentStepKeys)].slice(-MAX_STEP_KEYS);
+      runtime.localUpdateAt = runtime.state.updatedAt;
+      runtime.cacheExact = true;
+      saveState();
+      renderBox();
+      if(document.querySelector(`#${MODAL_ID}.is-open`)) renderModal();
+
+      suiteTelemetryLog('fatigue', 'step_processed', {
+        transport:payload.transport,
+        status:payload.status,
+        durationMs:payload.durationMs,
+        coord,
+        event:response.event,
+        title:response.title,
+        text:response.text,
+        fatigueCounter:response.fatigue_counter,
+        fatigue:response.fatigue,
+        stepBack:response.step_back,
+        step:response.step,
+        nextStep:response.next_step,
+        maxSteps:response.max_steps,
+        todaySteps:response.today_steps,
+        totalSteps:response.total_steps,
+        remainingSteps:response.remaining_steps,
+        nextStepTime:response.next_step_time,
+        resetType:resetType || null,
+        movesSincePrevious:runtime.state.movesSincePrevious,
+      });
     }
+
+    runtime.handleStepResponse = handleStepResponse;
+    window.__suiteLabyrinthFatigueStepHandler = handleStepResponse;
+    installLabyrinthFatigueStepHook();
+
+    try{
+      runtime.storageListener = GM_addValueChangeListener(STORAGE_KEY, (_key, _oldValue, newValue, remote) => {
+        if(!remote) return;
+        const next = parseStoredState(newValue);
+        if(!next || Number(next.updatedAt || 0) < Number(runtime.state.updatedAt || 0)) return;
+        next.events = mergeEvents(next.events, runtime.state.events);
+        runtime.state = next;
+        runtime.localUpdateAt = 0;
+        updateCacheAccuracy();
+        renderBox();
+        if(document.querySelector(`#${MODAL_ID}.is-open`)) renderModal();
+      });
+    }catch(e){}
+
+    updateCacheAccuracy();
+    suiteTelemetryLog('fatigue', 'module_initialized', {
+      version:runtime.state.version,
+      value:runtime.state.value,
+      skipped:runtime.state.skipped,
+      coord:runtime.state.coord,
+      cacheExact:runtime.cacheExact,
+      movesSincePrevious:runtime.state.movesSincePrevious,
+      eventCount:runtime.state.events.length,
+    });
 
     function attachBox(){
       const arena = document.querySelector('.labyrinth__arena');
@@ -15089,8 +15239,8 @@
             <span class="suite-lab-fatigue-icon">💤</span>
             <span>Усталость</span>
           </div>
-          <span class="suite-lab-fatigue-value"><span data-lab-fatigue="moves">0</span> <span data-lab-fatigue="moves-word">ходов</span></span>
-          <span class="suite-lab-fatigue-sub">с начала отсчёта</span>
+          <span class="suite-lab-fatigue-value"><span data-lab-fatigue="approx" hidden>≈</span><span data-lab-fatigue="percent">—</span></span>
+          <span class="suite-lab-fatigue-progress" aria-hidden="true"><span data-lab-fatigue="fill"></span></span>
           <button class="suite-lab-fatigue-btn" type="button" title="Подробная статистика">≡</button>
         `;
         box.querySelector('.suite-lab-fatigue-btn')?.addEventListener('click', showModal);
@@ -15104,13 +15254,22 @@
 
     function renderBox(){
       if(!runtime.box) return;
-      const movesEl = runtime.box.querySelector('[data-lab-fatigue="moves"]');
-      const movesWordEl = runtime.box.querySelector('[data-lab-fatigue="moves-word"]');
-      const subEl = runtime.box.querySelector('.suite-lab-fatigue-sub');
-      const moves = runtime.state.movesSinceFatigue ?? 0;
-      if(movesEl) movesEl.textContent = String(moves);
-      if(movesWordEl) movesWordEl.textContent = suiteLabMoveWord(moves);
-      if(subEl) subEl.textContent = `с ${runtime.state.lastTriggerLabel || 'начала отсчёта'}`;
+      const percentEl = runtime.box.querySelector('[data-lab-fatigue="percent"]');
+      const approxEl = runtime.box.querySelector('[data-lab-fatigue="approx"]');
+      const fillEl = runtime.box.querySelector('[data-lab-fatigue="fill"]');
+      const value = suiteLabyrinthFatigueNumber(runtime.state.value);
+      const percent = Number.isFinite(value) ? Math.max(0, Math.min(100, value * 10)) : 0;
+      if(percentEl) percentEl.textContent = Number.isFinite(value) ? `${percent}%` : '—';
+      if(approxEl) approxEl.hidden = !Number.isFinite(value) || runtime.cacheExact;
+      if(fillEl) fillEl.style.width = `${percent}%`;
+      runtime.box.classList.toggle('is-ready', percent >= 100);
+      runtime.box.classList.toggle('is-approximate', Number.isFinite(value) && !runtime.cacheExact);
+      const hints = [];
+      if(!Number.isFinite(value)) hints.push('Счётчик появится после первого хода.');
+      if(Number.isFinite(value) && !runtime.cacheExact) hints.push('Сохранённое значение получено в другой комнате и может быть неточным.');
+      if(runtime.state.skipped) hints.push('Последний ход не добавил усталость.');
+      if(percent >= 100) hints.push('Следующий засчитанный ход вызовет усталость.');
+      runtime.box.title = hints.join('\n');
       suitePositionLabyrinthFatigueCounter();
     }
 
@@ -15213,7 +15372,7 @@
       if(!pageEvents.length) return '<div class="suite-lab-fatigue-empty">Событий пока нет</div>';
 
       const liveGap = showLiveGap
-        ? `<div class="suite-lab-fatigue-gap is-live"><span class="suite-lab-fatigue-arrow">↑</span><span>${suiteLabMovesText(runtime.state.movesSinceFatigue ?? 0)}</span></div>`
+        ? `<div class="suite-lab-fatigue-gap is-live"><span class="suite-lab-fatigue-arrow">↑</span><span>${suiteLabMovesText(runtime.state.movesSincePrevious ?? 0)}</span></div>`
         : '';
       const topPageGap = !showLiveGap && startIndex > 0 ? renderGap(allEvents[startIndex - 1]?.movesSincePrevious) : '';
       const bottomEvent = pageEvents[pageEvents.length - 1];
@@ -15272,53 +15431,33 @@
 
     function resetStats(){
       if(!confirm('Сбросить статистику ходов и событий?')) return;
-      const previousState = runtime.state;
-      runtime.state = makeEmptyState();
-      suiteTelemetryLog('fatigue', 'stats_reset', { previousState });
+      mergeWithStoredState();
+      const previousSummary = {
+        movesSincePrevious:runtime.state.movesSincePrevious,
+        eventCount:runtime.state.events.length,
+      };
+      runtime.state.movesSincePrevious = 0;
+      runtime.state.events = [];
+      runtime.state.recentStepKeys = [];
+      runtime.state.updatedAt = Date.now();
+      runtime.localUpdateAt = runtime.state.updatedAt;
+      suiteTelemetryLog('fatigue', 'stats_reset', { previousSummary });
       runtime.statsPage = 0;
       saveState();
       renderBox();
       renderModal();
     }
 
-    function tick(){
-      if(runtime.ticking) return;
-      runtime.ticking = true;
-      try{
-        ensureState();
-        attachBox();
-
-        const snapshot = collectSnapshot();
-        const previousSnapshot = runtime.lastSnapshot;
-        recordRoomVisit(previousSnapshot, snapshot);
-        if(previousSnapshot && JSON.stringify(snapshot) !== JSON.stringify(previousSnapshot)){
-          suiteTelemetryLog('fatigue', 'snapshot_changed', { previous:previousSnapshot, current:snapshot });
-        }
-        if(snapshot.today !== null){
-          if(runtime.state.lastTodaySteps === null){
-            runtime.state.lastTodaySteps = snapshot.today;
-          } else if(snapshot.today > runtime.state.lastTodaySteps){
-            recordMove(snapshot.today - runtime.state.lastTodaySteps, snapshot);
-            runtime.state.lastTodaySteps = snapshot.today;
-          } else if(snapshot.today < runtime.state.lastTodaySteps){
-            runtime.state.lastTodaySteps = snapshot.today;
-          }
-        }
-
-        if(snapshot.trigger) recordTrigger(snapshot, snapshot.trigger);
-
-        runtime.lastSnapshot = snapshot;
-        trimHistory();
-        saveState();
-        renderBox();
-        if(document.querySelector(`#${MODAL_ID}.is-open`)) renderModal();
-      } finally {
-        runtime.ticking = false;
-      }
-    }
-
-    runtime.startTimer = setTimeout(tick, 500);
-    runtime.tickInterval = setInterval(tick, 1000);
+    runtime.startTimer = setTimeout(() => {
+      updateCacheAccuracy();
+      attachBox();
+      renderBox();
+    }, 500);
+    runtime.attachInterval = setInterval(() => {
+      updateCacheAccuracy();
+      attachBox();
+      renderBox();
+    }, 1500);
   }
 
   function suitePositionLabyrinthFatigueCounter(){
@@ -15344,7 +15483,7 @@
     }
 
     const emissionWidth = Math.ceil(emission.getBoundingClientRect().width || emission.offsetWidth || 172);
-    const fatigueWidth = Math.ceil(fatigue.getBoundingClientRect().width || fatigue.offsetWidth || 210);
+    const fatigueWidth = Math.ceil(fatigue.getBoundingClientRect().width || fatigue.offsetWidth || 180);
     const hostWidth = fatigue.parentElement?.getBoundingClientRect().width || window.innerWidth;
     if(emissionWidth + fatigueWidth + 36 <= hostWidth){
       fatigue.style.top = '12px';
