@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.55
+// @version      3.56
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -9314,6 +9314,12 @@
     'Из моего клуба': 'club',
     'Мои друзья': 'my_friends'
   };
+  const QUICK_CARD_OWNER_ICONS = {
+    'fa-unlock': 'unlocked',
+    'fa-signal': 'online',
+    'fa-ufo': 'club',
+    'fa-user-friends': 'my_friends'
+  };
 
   function isQuickCardOwnersPage(){
     return /^\/cards\/users\/?$/.test(location.pathname);
@@ -9323,13 +9329,19 @@
     if(!link) return '';
     if(link.dataset.suiteQuickOwnersFilter) return link.dataset.suiteQuickOwnersFilter;
 
-    const originalHref = link.dataset.suiteQuickOwnersOriginalHref || link.getAttribute('href') || '';
-    let filter = '';
-    try {
-      const url = new URL(originalHref, location.href);
-      filter = QUICK_CARD_OWNER_FILTERS.find(key=>url.searchParams.get(key)==='1') || '';
-    } catch(e) {}
-    if(!filter) filter = QUICK_CARD_OWNER_TITLES[(link.getAttribute('title') || '').trim()] || '';
+    let filter = QUICK_CARD_OWNER_TITLES[(link.getAttribute('title') || '').trim()] || '';
+    if(!filter){
+      const icon = link.querySelector('i');
+      filter = Object.entries(QUICK_CARD_OWNER_ICONS)
+        .find(([className])=>icon?.classList.contains(className))?.[1] || '';
+    }
+    if(!filter){
+      const originalHref = link.dataset.suiteQuickOwnersOriginalHref || link.getAttribute('href') || '';
+      try {
+        const url = new URL(originalHref, location.href);
+        filter = QUICK_CARD_OWNER_FILTERS.find(key=>url.searchParams.get(key)==='1') || '';
+      } catch(e) {}
+    }
     if(filter) link.dataset.suiteQuickOwnersFilter = filter;
     return filter;
   }
