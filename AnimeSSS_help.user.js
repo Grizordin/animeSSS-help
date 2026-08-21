@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.58
+// @version      3.59
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -11789,6 +11789,11 @@
         let diagnosticRequestSequence = 0;
         let animeDbEmpty = null;
         let emptyDbLastReminderAt = 0;
+        let panelStateUpdatePromise = null;
+        let panelStateUpdateQueued = false;
+        let panelPaused = false;
+        let panelDragAbortController = null;
+        let panelStyleElement = null;
 
         const currentUser = getCurrentUser();
         const AW_GM_DB_PREFIX = `aw_active_tab_store_v1_${currentUser || 'guest'}_`;
@@ -12245,7 +12250,7 @@
                 } else {
                     removeTabLockIfMine();
                 }
-                updateButtonState();
+                renderPanelLiveState();
             }, TAB_LOCK_HEARTBEAT_MS);
         }
 
@@ -14457,7 +14462,43 @@
         // =========================================================
         // UI
         // =========================================================
-        async function updateButtonState() {
+        function setPanelText(element, value) {
+            const text = String(value);
+            if (element && element.textContent !== text) element.textContent = text;
+        }
+
+        function setPanelHidden(element, hidden) {
+            if (element && element.hidden !== hidden) element.hidden = hidden;
+        }
+
+        function getPanelCountdown(paused = panelPaused) {
+            let compact = '-';
+            let full = 'До попытки: —';
+            if (nextRunAt > Date.now()) {
+                const left = nextRunAt - Date.now();
+                compact = formatMs(left);
+                if (left > 60 * 60 * 1000) {
+                    const h = Math.floor(left / 3600000);
+                    const m = Math.floor((left % 3600000) / 60000);
+                    full = `До 00:00 МСК: ${h}ч ${m}м`;
+                } else {
+                    full = `До попытки: ${formatMs(left)}`;
+                }
+            } else if (paused) {
+                compact = 'limit';
+                full = 'До попытки: пауза (лимит карт)';
+            } else if (!scriptEnabledWatch) {
+                compact = 'off';
+                full = 'До попытки: модуль выкл.';
+            }
+            if (animeDbEmpty) {
+                compact = 'ждёт базу';
+                full = 'Проверка базы: раз в минуту';
+            }
+            return { compact, full };
+        }
+
+        function renderPanelLiveState() {
             window.__suiteAutoLootCardsHealthAt = Date.now();
             window.__suiteAutoLootCardsRuntimeState = {
                 enabled: !!scriptEnabledWatch,
@@ -14471,60 +14512,53 @@
             const btn = document.getElementById('aw-active-tab-toggle');
             const info = document.getElementById('aw-active-tab-info');
             const timer = document.getElementById('aw-active-tab-timer');
+            const holder = document.getElementById('aw-active-tab-holder');
+            const compactTimer = document.getElementById('aw-compact-time');
+            if (!btn || !info || !timer || !holder) return;
+
+            const visible = isTabVisible();
+            const leader = isThisTabLeader();
+            const active = scriptEnabledWatch && visible && leader && !panelPaused;
+
+            setPanelText(btn, active ? 'Автолут: ВКЛ' : 'Автолут: ВЫКЛ');
+            btn.style.background = active ? '#14532d' : '#7f1d1d';
+
+            if (!scriptEnabledWatch) {
+                setPanelText(info, 'Модуль выключен');
+            } else if (!visible) {
+                setPanelText(info, 'Вкладка скрыта');
+            } else if (!leader) {
+                setPanelText(info, 'Другая вкладка уже выполняет автолут');
+            } else {
+                setPanelText(info, 'Эта вкладка выполняет автолут');
+            }
+            if (animeDbEmpty) setPanelText(info, 'База аниме пуста — автолут ждёт заполнения');
+            setPanelText(holder, `Вкладка: ${leader ? 'ведущая' : 'ожидание'}`);
+            const countdown = getPanelCountdown();
+            setPanelText(timer, countdown.full);
+            setPanelText(compactTimer, countdown.compact);
+        }
+
+        function cleanCardNameForPanel(name, rankLabel) {
+            const value = String(name || '—').trim();
+            const escapedRank = String(rankLabel || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            if (!escapedRank) return value;
+            return value.replace(new RegExp(`\\s+(?:\\[${escapedRank}\\]|\\(${escapedRank}\\)|${escapedRank})$`, 'i'), '').trim() || value;
+        }
+
+        async function updateButtonStateNow() {
+            renderPanelLiveState();
             const daily = document.getElementById('aw-active-tab-daily');
             const pause = document.getElementById('aw-active-tab-pause');
-            const holder = document.getElementById('aw-active-tab-holder');
             const barFill = document.getElementById('aw-daily-bar-fill');
             const lastCardEl = document.getElementById('aw-active-tab-last-card');
             const dbButton = document.getElementById('aw-open-anime-db');
             const dbWarning = document.getElementById('aw-empty-db-warning');
             const panel = document.getElementById('aw-active-tab-panel');
-            const title = document.querySelector('#aw-active-tab-panel .aw-title');
-            if (!btn || !info || !timer || !daily || !pause || !holder) return;
+            if (!daily || !pause) return;
 
-            const visible = isTabVisible();
-            const leader = isThisTabLeader();
-            const paused = await GM_getValue(COLLECTION_PAUSED_KEY, false);
-            const active = scriptEnabledWatch && visible && leader && !paused;
-
-            btn.textContent = active ? 'Автолут: ВКЛ' : 'Автолут: ВЫКЛ';
-            btn.style.background = active ? '#14532d' : '#7f1d1d';
-
-            if (!scriptEnabledWatch) {
-                info.textContent = 'Модуль выключен';
-            } else if (!visible) {
-                info.textContent = 'Вкладка скрыта';
-            } else if (!leader) {
-                info.textContent = 'Другая вкладка уже выполняет автолут';
-            } else {
-                info.textContent = 'Эта вкладка выполняет автолут';
-            }
-            if (animeDbEmpty) info.textContent = 'База аниме пуста — автолут ждёт заполнения';
-
-            let compactTimerText = '-';
-            if (nextRunAt > Date.now()) {
-                const left = nextRunAt - Date.now();
-                compactTimerText = formatMs(left);
-                if (left > 60 * 60 * 1000) {
-                    const h = Math.floor(left / 3600000);
-                    const m = Math.floor((left % 3600000) / 60000);
-                    timer.textContent = `До 00:00 МСК: ${h}ч ${m}м`;
-                } else {
-                    timer.textContent = `До попытки: ${formatMs(left)}`;
-                }
-            } else if (paused) {
-                compactTimerText = 'limit';
-                timer.textContent = 'До попытки: пауза (лимит карт)';
-            } else if (!scriptEnabledWatch) {
-                compactTimerText = 'off';
-                timer.textContent = 'До попытки: модуль выкл.';
-            } else {
-                timer.textContent = 'До попытки: —';
-            }
-            if (animeDbEmpty) {
-                compactTimerText = 'ждёт базу';
-                timer.textContent = 'Проверка базы: раз в минуту';
-            }
+            panelPaused = await GM_getValue(COLLECTION_PAUSED_KEY, false);
+            renderPanelLiveState();
 
             // прогресс-бар
             const progressState = await GM_getValue(DAILY_PROGRESS_KEY, null);
@@ -14535,30 +14569,20 @@
                 barFill.style.width = pct + '%';
                 barFill.style.background = pct >= 100 ? '#8b3a3a' : '#2e8b57';
             }
-            if (title) {
-                const collapsed = await GM_getValue(PANEL_COLLAPSED_KEY, false);
-                const dailyCompact = limit ? `${current}/${limit}` : (current > 0 ? `${current}/?` : '?');
-                if (collapsed) {
-                    title.innerHTML =
-                        '<span class="aw-compact-name">АВТОЛУТ</span>' +
-                        (animeDbEmpty ? '<span class="aw-compact-badge aw-compact-db-empty">⚠ БАЗА ПУСТА</span>' : '') +
-                        `<span class="aw-compact-badge aw-compact-limit">${dailyCompact}</span>` +
-                        `<span class="aw-compact-badge aw-compact-time">${compactTimerText}</span>`;
-                } else {
-                    title.textContent = 'Автолут';
-                }
-            }
+            const dailyCompact = limit ? `${current}/${limit}` : (current > 0 ? `${current}/?` : '?');
+            setPanelText(document.getElementById('aw-compact-limit'), dailyCompact);
+            const panelCollapsed = document.getElementById('aw-active-tab-panel-body')?.style.display === 'none';
+            setPanelHidden(document.getElementById('aw-compact-db-empty'), !panelCollapsed || animeDbEmpty !== true);
             panel?.classList.toggle('aw-db-is-empty', animeDbEmpty === true);
             if (dbButton) {
                 dbButton.classList.toggle('aw-db-empty-btn', animeDbEmpty === true);
-                dbButton.textContent = animeDbEmpty ? '⚠ База пуста' : 'База аниме';
+                setPanelText(dbButton, animeDbEmpty ? '⚠ База пуста' : 'База аниме');
                 dbButton.title = animeDbEmpty ? 'Добавьте хотя бы одно аниме — автолут сейчас ожидает' : 'Открыть базу аниме';
             }
-            if (dbWarning) dbWarning.hidden = !animeDbEmpty;
-            daily.textContent = `Сегодня: ${limit ? `${current} / ${limit}` : (current > 0 ? current : '?')}`;
+            setPanelHidden(dbWarning, !animeDbEmpty);
+            setPanelText(daily, `Сегодня: ${limit ? `${current} / ${limit}` : (current > 0 ? current : '?')}`);
 
-            pause.textContent = `Пауза: ${paused ? 'да' : 'нет'}`;
-            holder.textContent = `Вкладка: ${leader ? 'ведущая' : 'ожидание'}`;
+            setPanelText(pause, `Пауза: ${panelPaused ? 'да' : 'нет'}`);
 
             // последняя полученная карта
             if (lastCardEl) {
@@ -14569,9 +14593,11 @@
                         const rank = String(last.rank || last.cardRank || 'e').toLowerCase();
                         const rc = RANK_CONFIG.find(r => r.key === rank) || RANK_CONFIG[RANK_CONFIG.length - 1];
                         lastCardEl.style.display = '';
-                        lastCardEl.innerHTML =
+                        const cardName = cleanCardNameForPanel(last.cardName, rc.label);
+                        const cardHtml =
                             `<span class="aw-last-card" style="background:${rc.bg};color:${rc.color}">${rc.label}</span>` +
-                            `${escapeHtml(last.cardName || '—')}`;
+                            `${escapeHtml(cardName)}`;
+                        if (lastCardEl.innerHTML !== cardHtml) lastCardEl.innerHTML = cardHtml;
                     } else {
                         lastCardEl.style.display = 'none';
                     }
@@ -14579,6 +14605,21 @@
                     lastCardEl.style.display = 'none';
                 }
             }
+        }
+
+        function updateButtonState() {
+            panelStateUpdateQueued = true;
+            if (panelStateUpdatePromise) return panelStateUpdatePromise;
+            panelStateUpdatePromise = (async () => {
+                while (panelStateUpdateQueued) {
+                    panelStateUpdateQueued = false;
+                    await updateButtonStateNow();
+                }
+            })().catch(e => warn('Ошибка обновления панели Auto-Watch:', e)).finally(() => {
+                panelStateUpdatePromise = null;
+                if (panelStateUpdateQueued) updateButtonState();
+            });
+            return panelStateUpdatePromise;
         }
 
         async function toggleWatch() {
@@ -14604,6 +14645,19 @@
             updateButtonState();
         }
 
+        function renderPanelCollapsedState(panel, body, btn, collapsed) {
+            panel.classList.toggle('aw-is-collapsed', collapsed);
+            body.style.display = collapsed ? 'none' : 'block';
+            btn.textContent = collapsed ? '▣' : '—';
+            btn.title = collapsed ? 'Развернуть' : 'Свернуть';
+            panel.querySelector('.aw-expanded-name')?.toggleAttribute('hidden', collapsed);
+            panel.querySelector('.aw-compact-name')?.toggleAttribute('hidden', !collapsed);
+            panel.querySelector('#aw-compact-limit')?.toggleAttribute('hidden', !collapsed);
+            panel.querySelector('#aw-compact-time')?.toggleAttribute('hidden', !collapsed);
+            const emptyBadge = panel.querySelector('#aw-compact-db-empty');
+            if (emptyBadge) emptyBadge.hidden = !collapsed || animeDbEmpty !== true;
+        }
+
         async function togglePanelCollapsed() {
             const panel = document.getElementById('aw-active-tab-panel');
             const body = document.getElementById('aw-active-tab-panel-body');
@@ -14614,33 +14668,36 @@
             const next = !current;
             await GM_setValue(PANEL_COLLAPSED_KEY, next);
 
-            suiteApplyCollapsibleState(panel, next, () => {
-                body.style.display = next ? 'none' : 'block';
-                btn.textContent = next ? '▣' : '—';
+            const anchor = panel.getBoundingClientRect();
+            renderPanelCollapsedState(panel, body, btn, next);
+            requestAnimationFrame(() => {
+                panel.style.transform = 'none';
+                panel.style.left = `${Math.round(anchor.left)}px`;
+                panel.style.top = `${Math.round(anchor.top)}px`;
+                panel.style.right = 'auto';
+                panel.style.bottom = 'auto';
+                clampPanelToViewport(panel);
+                suiteResolveFloatingButtonOverlaps(panel);
             });
-
-            if (!next) {
-                requestAnimationFrame(() => clampPanelToViewport(panel));
-            }
 
             updateButtonState();
         }
 
         async function applyPanelCollapsedState() {
+            const panel = document.getElementById('aw-active-tab-panel');
             const body = document.getElementById('aw-active-tab-panel-body');
             const btn = document.getElementById('aw-active-tab-collapse');
-            if (!body || !btn) return;
+            if (!body || !btn || !panel) return;
 
             const collapsed = await GM_getValue(PANEL_COLLAPSED_KEY, false);
-            body.style.display = collapsed ? 'none' : 'block';
-            btn.textContent = collapsed ? '▣' : '—';
-            updateButtonState();
+            renderPanelCollapsedState(panel, body, btn, collapsed);
+            await updateButtonState();
         }
 
         async function createPanel() {
             if (document.getElementById('aw-active-tab-panel')) return;
 
-            GM_addStyle(`
+            panelStyleElement = GM_addStyle(`
                 #aw-active-tab-panel {
                     position: fixed;
                     left: 12px;
@@ -14656,6 +14713,19 @@
                     user-select: none;
                     min-width: 280px;
                     font-family: 'Segoe UI', Arial, sans-serif;
+                    contain: layout paint;
+                    isolation: isolate;
+                    overflow: hidden;
+                }
+                #aw-active-tab-panel [hidden] {
+                    display: none !important;
+                }
+                #aw-active-tab-panel.aw-is-collapsed {
+                    width: max-content;
+                    min-width: 0;
+                }
+                #aw-active-tab-panel.aw-is-collapsed .aw-head {
+                    margin-bottom: 0;
                 }
                 @media (max-width: 520px) {
                     #aw-active-tab-panel {
@@ -15122,7 +15192,13 @@
             panel.id = 'aw-active-tab-panel';
             panel.innerHTML = `
                 <div class="aw-head">
-                    <div class="aw-title">Автолут</div>
+                    <div class="aw-title">
+                        <span class="aw-expanded-name">Автолут</span>
+                        <span class="aw-compact-name" hidden>АВТОЛУТ</span>
+                        <span id="aw-compact-db-empty" class="aw-compact-badge aw-compact-db-empty" hidden>⚠ БАЗА ПУСТА</span>
+                        <span id="aw-compact-limit" class="aw-compact-badge aw-compact-limit" hidden>?</span>
+                        <span id="aw-compact-time" class="aw-compact-badge aw-compact-time" hidden>-</span>
+                    </div>
                     <button id="aw-active-tab-collapse" class="aw-icon-btn" title="Свернуть">—</button>
                 </div>
                 <div id="aw-active-tab-panel-body">
@@ -15161,15 +15237,16 @@
             panel.querySelector('#aw-active-tab-collapse').addEventListener('click', togglePanelCollapsed);
 
             installPanelDrag(panel);
+            await applyPanelCollapsedState();
             await applyPanelPosition(panel);
-
-            applyPanelCollapsedState();
-            updateButtonState();
         }
 
         function installPanelDrag(panel) {
             const head = panel.querySelector('.aw-head');
             if (!head) return;
+            panelDragAbortController?.abort();
+            panelDragAbortController = new AbortController();
+            const signal = panelDragAbortController.signal;
 
             head.style.cursor = 'grab';
             head.style.touchAction = 'none';
@@ -15178,7 +15255,7 @@
             const getPoint = (e) => e.touches?.[0] || e.changedTouches?.[0] || e;
 
             head.addEventListener('mousedown', (e) => {
-                if (e.button !== 0) return;
+                if (e.button !== 0 || e.target.closest('button')) return;
                 dragging = true;
                 startX = e.clientX;
                 startY = e.clientY;
@@ -15192,7 +15269,7 @@
                 panel.style.bottom = 'auto';
                 head.style.cursor = 'grabbing';
                 e.preventDefault();
-            });
+            }, { signal });
 
             head.addEventListener('touchstart', (e) => {
                 if (e.target.closest('button')) return;
@@ -15209,7 +15286,7 @@
                 panel.style.bottom = 'auto';
                 head.style.cursor = 'grabbing';
                 e.preventDefault();
-            }, { passive:false });
+            }, { passive:false, signal });
 
             document.addEventListener('mousemove', (e) => {
                 if (!dragging) return;
@@ -15222,7 +15299,7 @@
                 panel.style.top   = newTop  + 'px';
                 panel.style.right  = 'auto';
                 panel.style.bottom = 'auto';
-            });
+            }, { signal });
 
             document.addEventListener('touchmove', (e) => {
                 if (!dragging) return;
@@ -15237,7 +15314,7 @@
                 panel.style.right  = 'auto';
                 panel.style.bottom = 'auto';
                 e.preventDefault();
-            }, { passive:false });
+            }, { passive:false, signal });
 
             document.addEventListener('mouseup', async () => {
                 if (!dragging) return;
@@ -15246,7 +15323,7 @@
                 clampPanelToViewport(panel);
                 suiteResolveFloatingButtonOverlaps(panel);
                 await panel._suitePersistFloatingPosition();
-            });
+            }, { signal });
             document.addEventListener('touchend', async () => {
                 if (!dragging) return;
                 dragging = false;
@@ -15254,7 +15331,7 @@
                 clampPanelToViewport(panel);
                 suiteResolveFloatingButtonOverlaps(panel);
                 await panel._suitePersistFloatingPosition();
-            });
+            }, { signal });
             document.addEventListener('touchcancel', async () => {
                 if (!dragging) return;
                 dragging = false;
@@ -15262,8 +15339,8 @@
                 clampPanelToViewport(panel);
                 suiteResolveFloatingButtonOverlaps(panel);
                 await panel._suitePersistFloatingPosition();
-            });
-            window.addEventListener('resize', () => clampPanelToViewport(panel));
+            }, { signal });
+            window.addEventListener('resize', () => clampPanelToViewport(panel), { passive:true, signal });
         }
 
         async function applyPanelPosition(panel) {
@@ -15286,7 +15363,7 @@
         function startPanelTicker() {
             stopPanelTicker();
             panelTickerIntervalId = setInterval(() => {
-                updateButtonState();
+                renderPanelLiveState();
                 if (animeDbEmpty && Date.now() - emptyDbLastReminderAt >= EMPTY_DB_REMINDER_MS) {
                     void markAnimeDbEmpty();
                 }
@@ -15336,7 +15413,7 @@
             if (storageHandler || storageListenerId) return;
 
             const onTabLockChange = (event) => {
-                updateButtonState();
+                renderPanelLiveState();
                 const lock = event?.newValue ? (()=>{try{return JSON.parse(event.newValue);}catch(e){return null;}})() : readTabLock();
                 if (lock?.tabId === TAB_ID) return;
 
@@ -15407,7 +15484,7 @@
             await syncFinishedArchiveWithDb();
             await refreshAnimeDbEmptyState();
 
-            createPanel();
+            await createPanel();
             installFetchInterceptor();
             installSiteNotificationInterceptor();
             installStorageListener();
@@ -15462,6 +15539,8 @@
             try { stopTabLockHeartbeat(); } catch (e) {}
             try { stopPanelTicker(); } catch (e) {}
             try { removeStorageListener(); } catch (e) {}
+            try { panelDragAbortController?.abort(); panelDragAbortController = null; } catch (e) {}
+            try { panelStyleElement?.remove?.(); panelStyleElement = null; } catch (e) {}
             try { document.removeEventListener('visibilitychange', handleTabActivityChange); } catch (e) {}
             try { window.removeEventListener('focus', handleTabFocus); } catch (e) {}
             try { document.removeEventListener('pointerdown', handleTabFocus, true); } catch (e) {}
