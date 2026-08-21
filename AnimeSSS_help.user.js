@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.56
+// @version      3.58
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -660,6 +660,9 @@
   const SUITE_TELEMETRY_MAX_QUEUE_CHARS = 1000000;
   const SUITE_TELEMETRY_MAX_BATCH_CHARS = 350000;
   const SUITE_TELEMETRY_MAX_AGE_MS = 2 * 24 * 60 * 60 * 1000;
+  const SUITE_SELF_DIAGNOSTIC_COOLDOWN_KEY = 'suite_self_diagnostic_cooldowns_v1';
+  const SUITE_SELF_DIAGNOSTIC_COOLDOWN_MS = 6 * 60 * 60 * 1000;
+  const SUITE_SELF_DIAGNOSTIC_MAX_RECENT = 40;
   const suiteTelemetrySessionId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const suiteTelemetryInstallId = (() => {
     let value = String(gmGet(SUITE_TELEMETRY_INSTALL_KEY, '') || '').trim();
@@ -672,6 +675,7 @@
   let suiteTelemetryPendingRecords = [];
   let suiteTelemetryPersistTimer = null;
   let suiteTelemetryPersistPromise = Promise.resolve();
+  const suiteSelfDiagnosticRecent = [];
 
   const suiteTelemetryDelay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -816,9 +820,72 @@
     suiteTelemetryPersistTimer = setTimeout(suiteTelemetryPersistPending, 500);
   }
 
+  function suiteSelfDiagnosticTrace(module, event, data, level) {
+    try {
+      let summary = data;
+      const serialized = JSON.stringify(data);
+      if(serialized.length > 2500) summary = `${serialized.slice(0, 2499)}...`;
+      suiteSelfDiagnosticRecent.push({
+        at:Date.now(),
+        module:String(module || 'suite'),
+        event:String(event || 'event'),
+        level:String(level || 'debug'),
+        summary
+      });
+      if(suiteSelfDiagnosticRecent.length > SUITE_SELF_DIAGNOSTIC_MAX_RECENT){
+        suiteSelfDiagnosticRecent.splice(0, suiteSelfDiagnosticRecent.length - SUITE_SELF_DIAGNOSTIC_MAX_RECENT);
+      }
+    } catch(e) {}
+  }
+
+  function suiteSelfDiagnosticIssue(module, code, details = {}) {
+    try {
+      const now = Date.now();
+      const normalizedModule = String(module || 'suite');
+      const normalizedCode = String(code || 'unknown_issue');
+      const fingerprint = `${normalizedModule}:${normalizedCode}`;
+      const stored = gmGet(SUITE_SELF_DIAGNOSTIC_COOLDOWN_KEY, {});
+      const cooldowns = stored && typeof stored === 'object' ? stored : {};
+      const lastSentAt = Number(cooldowns[fingerprint] || 0);
+      if(lastSentAt && now - lastSentAt < SUITE_SELF_DIAGNOSTIC_COOLDOWN_MS) return false;
+
+      const freshCooldowns = {};
+      for(const [key, timestamp] of Object.entries(cooldowns)){
+        if(now - Number(timestamp || 0) < 24 * 60 * 60 * 1000) freshCooldowns[key] = Number(timestamp);
+      }
+      freshCooldowns[fingerprint] = now;
+      gmSet(SUITE_SELF_DIAGNOSTIC_COOLDOWN_KEY, freshCooldowns);
+
+      const context = suiteSelfDiagnosticRecent
+        .filter(item => item.module === normalizedModule || item.module === 'suite')
+        .slice(-8);
+      suiteTelemetryLog(normalizedModule, 'self_diagnostic_incident', {
+        code:normalizedCode,
+        firstObservedAt:new Date(now).toISOString(),
+        cooldownHours:SUITE_SELF_DIAGNOSTIC_COOLDOWN_MS / (60 * 60 * 1000),
+        runtime:{
+          autoLootCardsInstalled:!!window.__suiteAutoLootCardsInstalled,
+          gachaInstalled:!!window.__suiteGachaAutolootInstalled,
+          fatigueInstalled:!!window.__suiteLabyrinthFatigueInstalled,
+          chatStoneInstalled:!!window.__suiteChatStoneAutolootInstalled,
+          path:location.pathname,
+          visibility:document.visibilityState
+        },
+        details:suiteTelemetrySanitize(details, '', 4),
+        context
+      }, 'error');
+      void suiteTelemetryFlush('self_diagnostic');
+      return true;
+    } catch(e) {
+      return false;
+    }
+  }
+
   function suiteTelemetryLog(module, event, data = {}, level = 'debug') {
     try {
       const now = Date.now();
+      const safeData = suiteTelemetrySanitize(data);
+      suiteSelfDiagnosticTrace(module, event, safeData, level);
       const record = {
         id: `${now.toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
         timestamp: now,
@@ -829,7 +896,7 @@
         sessionId: suiteTelemetrySessionId,
         path: location.pathname,
         visibility: document.visibilityState,
-        data: suiteTelemetrySanitize(data)
+        data: safeData
       };
       let recordChars = 0;
       try { recordChars = JSON.stringify(record).length; } catch(e) { recordChars = SUITE_TELEMETRY_MAX_EVENT_CHARS + 1; }
@@ -965,6 +1032,19 @@
   setInterval(() => { void suiteTelemetryFlush('timer'); }, SUITE_TELEMETRY_FLUSH_MS);
   window.addEventListener('pagehide', () => { void suiteTelemetryFlush('pagehide'); });
 
+  function suiteIsKnownTelemetryNoise(event, data) {
+    let text = '';
+    try { text = `${event} ${JSON.stringify(suiteTelemetrySanitize(data))}`; }
+    catch(e) { text = `${event} ${String(data || '')}`; }
+
+    const urbanVpnExtensionNoise = text.includes('chrome-extension://eppiocemhmnlbhjplcgkofciiegomcon')
+      && /\bM_ID\b/i.test(text);
+    if(urbanVpnExtensionNoise) return true;
+
+    const knownChromiumMediaNoise = /(?:DEMUXER_ERROR_(?:COULD_NOT_OPEN|NO_SUPPORTED_STREAMS)|FFmpegDemuxer:\s*open context failed|PIPELINE_ERROR_DECODE|Failed to load because no supported source was found)/i.test(text);
+    return knownChromiumMediaNoise;
+  }
+
   function installSuiteGlobalDiagnostics() {
     if(window.__suiteGlobalDiagnosticsInstalled) return;
     window.__suiteGlobalDiagnosticsInstalled = true;
@@ -973,6 +1053,7 @@
 
     const report = (event, data, level = 'error', dedupeMs = 5000) => {
       try {
+        if(suiteIsKnownTelemetryNoise(event, data)) return;
         const safe = suiteTelemetrySanitize(data);
         const fingerprint = `${event}:${JSON.stringify(safe).slice(0, 1200)}`;
         const now = Date.now();
@@ -1036,7 +1117,6 @@
       const reasonText = String(event.reason?.message || event.reason || '');
       if(/Failed to load because no supported source was found/i.test(reasonText)){
         if(Date.now() - lastIgnoredPlaceholderMediaAt < 5000) return;
-        report('media_playback_rejection', { message:reasonText }, 'warn', 60 * 60 * 1000);
         return;
       }
       report('unhandled_rejection', { reason:event.reason || 'unknown rejection' });
@@ -1118,6 +1198,288 @@
   } catch(error) {
     suiteTelemetryLog('suite', 'diagnostics_install_failed', { error }, 'error');
   }
+
+  function suiteFunctionChainHas(fn, marker) {
+    const seen = new Set();
+    let current = fn;
+    for(let depth = 0; typeof current === 'function' && depth < 12 && !seen.has(current); depth++){
+      if(current[marker]) return true;
+      seen.add(current);
+      current = current.__suiteLabyrinthFatigueOriginal
+        || current.__suiteChatStoneOriginal
+        || current.__suiteXhrOriginal
+        || current.__awVisibleTabOriginal
+        || current.__suiteCustomPushOriginal
+        || current.__suiteGlobalDiagnosticsOriginal
+        || null;
+    }
+    return false;
+  }
+
+  function suiteStartModule(module, setting, initializer) {
+    if(setting && !cfg[setting]) return;
+    const startedAt = Date.now();
+    try {
+      const result = initializer();
+      if(result && typeof result.then === 'function'){
+        result.catch(error => suiteSelfDiagnosticIssue(module, 'module_initialization_exception', {
+          setting,
+          startedAt,
+          elapsedMs:Date.now() - startedAt,
+          error
+        }));
+      }
+    } catch(error) {
+      suiteSelfDiagnosticIssue(module, 'module_initialization_exception', {
+        setting,
+        startedAt,
+        elapsedMs:Date.now() - startedAt,
+        error
+      });
+    }
+  }
+
+  function suiteRunLightweightHealthCheck() {
+    try {
+      const now = Date.now();
+      const route = location.pathname;
+      const report = (module, code, details = {}) => suiteSelfDiagnosticIssue(module, code, {
+        detectedBy:'health_contract',
+        route,
+        ...details
+      });
+      const expectInstalled = ({ setting, flag, module = 'suite', code, applies = true }) => {
+        const enabled = !!cfg[setting];
+        const installed = !!window[flag];
+        if(!enabled && installed){
+          report(module, `${code}_running_while_disabled`, { setting, flag, enabled, installed });
+          return false;
+        }
+        if(enabled && applies && !installed){
+          report(module, `${code}_not_initialized`, { setting, flag, enabled, installed });
+          return false;
+        }
+        return enabled && applies && installed;
+      };
+
+      if(!window.__suiteMainInitialized){
+        const startedAt = Number(window.__suiteMainInitStartedAt || 0);
+        if(startedAt && now - startedAt >= 30 * 1000){
+          report('suite', 'main_initialization_stalled', { startedAt, elapsedMs:now - startedAt });
+        }
+        return;
+      }
+
+      const isLabyrinth = /\/labyrinth(?:\/|$)/.test(route);
+      const isPackPage = route.startsWith('/cards/pack');
+      const isAnimePage = /\.html$/.test(route);
+      const isWantCardsPage = (isAnimePage || /^\/cards(?:\/|$)/.test(route))
+        && !/\/user\/|\/cards\/users\/(?:need|trade)\/|\/cards\/search_users\/|\/cards\/pack\/|\/cards\/[^/]+\/trade\//.test(route);
+      const currentNick = suiteGetCurrentUserName();
+      const requestedNick = suiteDecodeNickname(new URLSearchParams(location.search).get('name') || '');
+      const isOwnCardsPage = /\/user\/cards\//.test(route)
+        && !!currentNick
+        && !!requestedNick
+        && currentNick.toLowerCase() === requestedNick.toLowerCase();
+
+      const voteHealthy = expectInstalled({ setting:'modVoteCardsToggle', flag:'__suiteVoteCardsToggleInstalled', code:'vote_cards' });
+      const suggestionsHealthy = expectInstalled({ setting:'modSuggestionAuthors', flag:'__suiteSuggestionAuthorsInstalled', code:'suggestion_authors' });
+      const gachaHealthy = expectInstalled({ setting:'modGachaAutoloot', flag:'__suiteGachaAutolootInstalled', module:'gacha', code:'gacha' });
+      const stonesHealthy = expectInstalled({ setting:'modStones', flag:'__suiteStonesInstalled', code:'stones' });
+      const chatStoneHealthy = expectInstalled({ setting:'modChatStoneAutoloot', flag:'__suiteChatStoneAutolootInstalled', module:'chat_stone', code:'chat_stone' });
+      const quickOwnersHealthy = expectInstalled({ setting:'modQuickCardOwners', flag:'__suiteQuickCardOwnersInstalled', code:'quick_card_owners' });
+      const wantHealthy = expectInstalled({ setting:'modWantCards', flag:'__suiteWantCardsInstalled', code:'want_cards' });
+      const noNeedHealthy = expectInstalled({ setting:'modNoNeedCards', flag:'__suiteNoNeedCardsInstalled', code:'no_need_cards', applies:isOwnCardsPage });
+      const brickHealthy = expectInstalled({ setting:'modBrickFill', flag:'__suiteBrickFillInstalled', code:'brick_fill', applies:/\/celestial_stone\/?$/.test(route) && !isPremiumLockedSetting('modBrickFill') });
+      const remeltHealthy = expectInstalled({ setting:'modRemelt', flag:'__suiteRemeltInstalled', code:'remelt', applies:/\/cards_remelt\/?$/.test(route) && !isPremiumLockedSetting('modRemelt') });
+      const autoWatchHealthy = expectInstalled({ setting:'modAutoLootCards', flag:'__suiteAutoLootCardsInstalled', module:'autowatch', code:'autowatch' });
+      const quizHealthy = expectInstalled({ setting:'modLabyrinthQuiz', flag:'__suiteLabyrinthQuizInstalled', module:'quiz', code:'labyrinth_quiz', applies:isLabyrinth });
+      const fatigueHealthy = expectInstalled({ setting:'modLabyrinthFatigue', flag:'__suiteLabyrinthFatigueInstalled', module:'fatigue', code:'labyrinth_fatigue', applies:isLabyrinth });
+      const emissionHealthy = expectInstalled({ setting:'modLabyrinthEmission', flag:'__suiteLabyrinthEmissionInstalled', code:'labyrinth_emission', applies:isLabyrinth });
+      const clubWarHealthy = expectInstalled({ setting:'modLabyrinthClubWar', flag:'__suiteClubWarRelationsInstalled', code:'club_war', applies:CLUB_WAR_ROUTE_RE.test(route) });
+
+      if(!document.getElementById('suite-settings-btn')) report('suite', 'settings_button_missing');
+      if((cfg.modLabyrinthQuiz || cfg.modLabyrinthEmission || cfg.modLabyrinthFatigue || cfg.modLabyrinthClubWar)
+        && !labyrinthRouteWatcherInstalled) report('suite', 'labyrinth_route_watcher_missing');
+      if(cfg.modNeon && (!neonObserver || !neonMutationObserver)) report('suite', 'neon_observers_missing');
+      if(cfg.modNeon){
+        const animationClassPresent = document.body?.classList.contains('suite-neon-animation-off');
+        if(animationClassPresent === !!cfg.modNeonAnimation){
+          report('suite', 'neon_animation_setting_not_applied', { enabled:!!cfg.modNeonAnimation, animationClassPresent });
+        }
+      }
+      if(cfg.modCustomPush && !isClickerPage()){
+        if(!window.__cptDomObserverInstalled) report('suite', 'custom_push_observer_missing');
+        const push = window.DLEPush || (typeof DLEPush !== 'undefined' ? DLEPush : null);
+        if(push && !window.__cptHookInstalled){
+          report('suite', 'custom_push_hook_not_initialized');
+        } else if(push){
+          const brokenMethods = ['info','warning','error','success']
+            .filter(method => typeof push[method] === 'function' && !suiteFunctionChainHas(push[method], '__suiteCustomPushHook'));
+          if(brokenMethods.length) report('suite', 'custom_push_hooks_overwritten', { brokenMethods });
+        }
+      }
+
+      const valueCandidates = [...document.querySelectorAll('.lootbox__card,.trade__main-item')]
+        .filter(card => card.querySelector('.card-stats'));
+      if(cfg.modCardValue && valueCandidates.length && !valueCandidates.some(card => card.querySelector('.card-value'))){
+        report('suite', 'card_value_not_rendered', { candidateCount:valueCandidates.length });
+      }
+      const activePackRow = isPackPage ? getActiveRow() : null;
+      if(cfg.modCardValue && cfg.modBestCard && activePackRow?.querySelector('.lootbox__card .card-value')
+        && !activePackRow.querySelector('.lootbox__card.cv-best-card')){
+        report('suite', 'best_card_not_highlighted', { cardCount:activePackRow.querySelectorAll('.lootbox__card').length });
+      }
+      if(cfg.modHotkeys && isPackPage && (!hkPanel || !hkPanel.isConnected)) report('suite', 'hotkey_panel_missing');
+      if(cfg.modAutoOpen && cfg.modCardValue && cfg.modBestCard && isPackPage
+        && !isPremiumLockedSetting('modAutoOpen') && !document.getElementById('cv-auto-open-panel')){
+        report('suite', 'auto_open_panel_missing');
+      }
+      if(cfg.modGuard && cfg.modCardValue && isPackPage && !isPremiumLockedSetting('modGuard')
+        && !window.__suiteBuyButtonGuardInstalled) report('suite', 'pack_guard_listener_missing');
+      const statsAnchor = document.querySelector('label.checkbox input#packs_demand')?.closest('label.checkbox');
+      if(cfg.modStats && statsAnchor && (!document.getElementById('cv-stats-btn') || !document.getElementById('cv-stats-panel'))){
+        report('suite', 'pack_stats_ui_missing');
+      }
+      const profileHeader = document.querySelector('.usn-sect__header.d-flex.ai-center.c-gap-10.r-gap-10');
+      if(cfg.modProfileBtns && profileHeader?.querySelector('a.usn-sect__title[href*="/user/cards/?name="]')
+        && !profileHeader.querySelector('.open-s-button,.wish-button,.created-button,.replacements-button')){
+        report('suite', 'profile_buttons_missing');
+      }
+      const menuModal = document.querySelector('.lgn.is-active, .lgn.done, .lgn');
+      const menuVideo = menuModal?.querySelector('.lgn__ava-holder > video#profilebg, .lgn__inner > video#profilebg');
+      if(cfg.modMenuBg && menuModal && menuVideo && !menuModal.querySelector('.lgn__inner.tm-fullbg-ready')){
+        report('suite', 'menu_background_not_applied');
+      }
+      if(cfg.modOnlyPack20 && isPackPage){
+        const cheapPacks = [...document.querySelectorAll('.lootbox__middle-item[data-count="1"],.lootbox__middle-item[data-count="6"]')];
+        if(cheapPacks.some(item => getComputedStyle(item).display !== 'none')) report('suite', 'pack_filter_not_applied', { visibleCheapPacks:cheapPacks.length });
+      }
+      if(cfg.modGuarantee && isPackPage){
+        if(!window.__suiteGuaranteeObserver) report('suite', 'guarantee_observer_missing');
+        if(document.querySelector('.lootbox__counter__s') && !document.getElementById('cv-guarantee-stones-inline')){
+          report('suite', 'guarantee_counter_not_rendered');
+        }
+        if(document.querySelector('.lootbox__balance') && !document.getElementById('cv-guarantee-block')){
+          report('suite', 'guarantee_block_not_rendered');
+        }
+      }
+      const enlightenmentContainer = document.querySelector('.nclub__top-carou.nclub__sect');
+      if(cfg.modEnlightenment && enlightenmentContainer){
+        const counts = [...enlightenmentContainer.querySelectorAll('.club-top-list__count > div')];
+        if(counts.length && !counts.some(div => div.dataset.enlightenmentOriginalText)){
+          report('suite', 'enlightenment_not_applied', { count:counts.length });
+        }
+      }
+
+      if(wantHealthy && isWantCardsPage && !document.getElementById('want-btn-styles')) report('suite', 'want_cards_styles_missing');
+      if(noNeedHealthy && !document.getElementById('cv-nn-style')) report('suite', 'no_need_cards_ui_missing');
+      if(brickHealthy && !document.getElementById('stone-brick-panel')) report('suite', 'brick_fill_panel_missing');
+      if(remeltHealthy && !document.getElementById('remelt-panel')) report('suite', 'remelt_panel_missing');
+      if(quickOwnersHealthy && isQuickCardOwnersPage()){
+        const ownerLinks = [...document.querySelectorAll('a.tabs__item.tabs__navigate__unlocked')];
+        if(ownerLinks.length && !ownerLinks.some(link => link.dataset.suiteQuickOwnersOriginalHref)){
+          report('suite', 'quick_card_owner_links_not_prepared', { linkCount:ownerLinks.length });
+        }
+      }
+
+      if(voteHealthy && !voteCardsObserver) report('suite', 'vote_cards_observer_missing');
+      if(suggestionsHealthy && !window.__suiteSuggestionAuthorsState) report('suite', 'suggestion_authors_runtime_missing');
+      if(stonesHealthy && !document.getElementById('cv-stones-style')) report('suite', 'stones_styles_missing');
+      if(gachaHealthy){
+        const state = window.__suiteGachaAutolootState;
+        if(!state || !state.scheduleTimer) report('gacha', 'gacha_scheduler_missing', { hasState:!!state, hasScheduleTimer:!!state?.scheduleTimer });
+        const nextCheckAt = Number(state?.nextCheckAt || 0);
+        if(nextCheckAt && now - nextCheckAt > 2 * 60 * 1000){
+          report('gacha', 'gacha_scheduler_overdue', { nextCheckAt, overdueMs:now - nextCheckAt });
+        }
+      }
+      if(chatStoneHealthy){
+        const state = window.__suiteChatStoneAutolootState;
+        if(!state || !Array.isArray(state.timers) || state.timers.length < 3){
+          report('chat_stone', 'chat_stone_watchdog_missing', { hasState:!!state, timerCount:state?.timers?.length || 0 });
+        }
+        const healthAt = Number(state?.healthAt || 0);
+        if(document.visibilityState === 'visible' && state?.ready && (!healthAt || now - healthAt > 15 * 1000)){
+          report('chat_stone', 'chat_stone_watchdog_stalled', { healthAt, elapsedMs:healthAt ? now - healthAt : null });
+        }
+        const pageWindow = getPageWindow();
+        const fetchHookPresent = suiteFunctionChainHas(pageWindow.fetch, '__suiteChatStoneHooked');
+        const xhrPrototype = pageWindow.XMLHttpRequest?.prototype;
+        const xhrHookPresent = suiteFunctionChainHas(xhrPrototype?.open, '__suiteChatStoneHooked')
+          && suiteFunctionChainHas(xhrPrototype?.send, '__suiteChatStoneHooked');
+        if(state?.ready && (!fetchHookPresent || !xhrHookPresent)){
+          report('chat_stone', 'chat_stone_interceptors_overwritten', { fetchHookPresent, xhrHookPresent });
+        }
+      }
+      if(autoWatchHealthy){
+        const panel = document.getElementById('aw-active-tab-panel');
+        if(!panel) report('autowatch', 'autowatch_panel_missing');
+        const fetchHookPresent = suiteFunctionChainHas(window.fetch, '__awVisibleTabHook');
+        if(!window.__awVisibleTabFetchInstalled || !fetchHookPresent){
+          report('autowatch', 'autowatch_fetch_interceptor_missing', {
+            installedFlag:!!window.__awVisibleTabFetchInstalled,
+            fetchHookPresent
+          });
+        }
+        const healthAt = Number(window.__suiteAutoLootCardsHealthAt || 0);
+        if(document.visibilityState === 'visible' && (!healthAt || now - healthAt > 10 * 1000)){
+          report('autowatch', 'autowatch_ui_heartbeat_stalled', { healthAt, elapsedMs:healthAt ? now - healthAt : null });
+        }
+        const runtime = window.__suiteAutoLootCardsRuntimeState;
+        if(document.visibilityState === 'visible' && runtime?.enabled && runtime?.leader && !runtime?.loopRunning){
+          const nextRunAt = Number(runtime.nextRunAt || 0);
+          if(!nextRunAt || now - nextRunAt > 2 * 60 * 1000){
+            report('autowatch', 'autowatch_scheduler_stalled', {
+              nextRunAt,
+              overdueMs:nextRunAt ? now - nextRunAt : null,
+              timeoutPresent:!!runtime.timeoutPresent,
+              animeDbEmpty:!!runtime.animeDbEmpty
+            });
+          }
+        }
+      }
+
+      if(isLabyrinth && !document.querySelector('.labyrinth__arena')) report('suite', 'labyrinth_site_anchor_missing');
+      if(quizHealthy && (!document.getElementById('suite-labyrinth-quiz-style') || !window.__suiteLabyrinthQuizObserver)){
+        report('quiz', 'labyrinth_quiz_runtime_incomplete', {
+          stylePresent:!!document.getElementById('suite-labyrinth-quiz-style'),
+          observerPresent:!!window.__suiteLabyrinthQuizObserver
+        });
+      }
+      if(fatigueHealthy){
+        const pageWindow = getPageWindow();
+        const fetchHookPresent = suiteFunctionChainHas(pageWindow.fetch, '__suiteLabyrinthFatigueHooked');
+        const xhrPrototype = pageWindow.XMLHttpRequest?.prototype;
+        const xhrHookPresent = suiteFunctionChainHas(xhrPrototype?.open, '__suiteLabyrinthFatigueHooked')
+          && suiteFunctionChainHas(xhrPrototype?.send, '__suiteLabyrinthFatigueHooked');
+        const statePresent = !!window.__suiteLabyrinthFatigueState;
+        if(!fetchHookPresent || !xhrHookPresent || !statePresent){
+          report('fatigue', 'step_capture_runtime_incomplete', { fetchHookPresent, xhrHookPresent, statePresent });
+        }
+        if(document.querySelector('.labyrinth__arena') && !document.getElementById('suite-lab-fatigue-counter')){
+          report('fatigue', 'fatigue_counter_not_mounted');
+        }
+      }
+      if(emissionHealthy){
+        const state = window.__suiteLabyrinthEmissionState;
+        if(!state || !state.attachInterval || !state.syncInterval || !state.renderInterval){
+          report('suite', 'emission_runtime_incomplete', { hasState:!!state });
+        }
+        if(document.querySelector('.labyrinth__arena') && !document.getElementById('suite-emission-timer')){
+          report('suite', 'emission_timer_not_mounted');
+        }
+      }
+      if(clubWarHealthy && !clubWarObserver) report('suite', 'club_war_observer_missing');
+    } catch(error) {
+      suiteSelfDiagnosticIssue('suite', 'health_check_failed', { error });
+    }
+  }
+
+  setTimeout(() => {
+    suiteRunLightweightHealthCheck();
+    setInterval(suiteRunLightweightHealthCheck, 60 * 1000);
+  }, 30 * 1000);
 
   async function suiteSendAccessInfo(status, nick, clubId) {
     return suiteReportEvent('access_check', { status, nick, clubId });
@@ -3809,6 +4171,7 @@
     s.id='__cpt-styles';
     s.textContent=`
       #__cpt-root{position:fixed;top:18px;right:18px;z-index:999;display:flex;flex-direction:column;gap:8px;pointer-events:none;font-family:'Segoe UI',Arial,sans-serif;transform-origin:top right;}
+      @media (max-width:760px){#__cpt-root{top:calc(86px + env(safe-area-inset-top,0px));}}
       .cpt-toast{position:relative;width:230px;padding:8px 12px 10px;border-radius:12px;overflow:hidden;pointer-events:auto;transition:opacity .18s ease,transform .18s ease;animation:cpt-in .35s cubic-bezier(.34,1.56,.64,1);}
       .cpt-toast.hide{opacity:0;transform:translateX(18px);}
       @keyframes cpt-in{0%{opacity:0;transform:scale(.35)}60%{transform:scale(1.08)}80%{transform:scale(.97)}100%{opacity:1;transform:scale(1)}}
@@ -4008,8 +4371,9 @@
     cptInstallDomObserver();
     ['info','warning','error','success'].forEach(method=>{
       if(typeof dp[method]!=='function') return;
-      const orig=dp[method].bind(dp);
-      dp[method]=function(...args){
+      const originalMethod=dp[method];
+      const orig=originalMethod.bind(dp);
+      const wrapped=function(...args){
         if(!cfg.modCustomPush) {
           const dlePushEl=document.getElementById('DLEPush');
           if(dlePushEl) dlePushEl.style.display='';
@@ -4022,6 +4386,9 @@
         if(text) cptSendUnknown(text);
         return orig(...args);
       };
+      wrapped.__suiteCustomPushHook=true;
+      wrapped.__suiteCustomPushOriginal=originalMethod;
+      dp[method]=wrapped;
     });
   }
 
@@ -4918,22 +5285,23 @@
     const MOSCOW_TZ = 'Europe/Moscow';
     const CHECK_HOUR = 21;
     const CHECK_MINUTE = 6;
-    const RETRY_DELAY_MS = 5000;
-    const AFTER_POST_DELAY_MS = 2200;
+    const CHECK_SECOND = 10;
+    const WINDOW_END_HOUR = 21;
+    const RETRY_DELAY_MS = 60 * 1000;
     const DEFAULT_CLUB_PATH = '/clubs/2/';
     const LOCK_TTL_MS = 15000;
     const LOCK_RENEW_MS = 5000;
     const TAB_ID_KEY = 'suite_gacha_autoloot_tab_id';
     const REWARDS = [
-      { id:'Card_a', label:'Карта A' },
-      { id:'Card_b', label:'Карта B' },
-      { id:'Card_c', label:'Карта C' },
-      { id:'Card_d', label:'Карта D' },
-      { id:'Card_e', label:'Карта E' },
-      { id:'Coins', label:'Монеты' },
-      { id:'Exp', label:'Опыт' },
-      { id:'Stars', label:'Звезды' },
-      { id:'Stone', label:'Камень' },
+      { id:'Card_a', label:'Карта A', rank:'A' },
+      { id:'Card_b', label:'Карта B', rank:'B' },
+      { id:'Card_c', label:'Карта C', rank:'C' },
+      { id:'Card_d', label:'Карта D', rank:'D' },
+      { id:'Card_e', label:'Карта E', rank:'E' },
+      { id:'Coins', label:'Монеты', unit:'coins' },
+      { id:'Exp', label:'Опыт', unit:'exp' },
+      { id:'Stars', label:'Звезды', unit:'stars' },
+      { id:'Stone', label:'Камни', unit:'stones' },
     ];
     const state = {
       retryTimer:null,
@@ -4948,7 +5316,6 @@
     };
     window.__suiteGachaAutolootState = state;
 
-    const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
     const storageKey = name => `${STORAGE_PREFIX}${name}`;
     const on = (target, type, handler, options) => {
       target.addEventListener(type, handler, options);
@@ -4979,6 +5346,63 @@
       return settings;
     }
     function saveRewardSettings(settings){ setStoredJson('reward_settings', settings); }
+    function getRewardHistory(){
+      const saved = getStoredJson('reward_history', []);
+      return Array.isArray(saved) ? saved : [];
+    }
+    function saveRewardHistoryEntry(entry){
+      const dateKey = String(entry?.dateKey || getTodayKey());
+      const history = getRewardHistory().filter(item => item?.dateKey !== dateKey);
+      history.push({ ...entry, dateKey, savedAt:new Date().toISOString() });
+      history.sort((a,b) => String(b.dateKey || '').localeCompare(String(a.dateKey || '')));
+      setStoredJson('reward_history', history.slice(0, 35));
+    }
+    function normalizeRewardType(type){
+      const raw = String(type || '').trim();
+      return REWARDS.find(item => item.id.toLowerCase() === raw.toLowerCase())?.id || raw || null;
+    }
+    function extractRewardQuantity(response, rewardType, responseText){
+      const text = String(responseText || '');
+      const patterns = rewardType?.startsWith('Card_')
+        ? [/([\d\s]+)\s*(?:карт|карточ)/i]
+        : rewardType === 'Stone'
+          ? [/([\d\s]+)\s*(?:камн|💎)/i, /(?:камн|💎)[^\d]{0,20}([\d\s]+)/i]
+          : rewardType === 'Coins'
+            ? [/([\d\s]+)\s*(?:монет|coin)/i]
+            : rewardType === 'Stars'
+              ? [/([\d\s]+)\s*(?:зв[её]зд|star)/i]
+              : rewardType === 'Exp'
+                ? [/([\d\s]+)\s*(?:опыт|exp)/i]
+                : [];
+      for(const pattern of patterns){
+        const match = text.match(pattern);
+        const value = match ? Number(match[1].replace(/\s+/g,'')) : 0;
+        if(Number.isFinite(value) && value > 0) return value;
+      }
+      const candidates = [response?.reward_amount, response?.reward_count, response?.amount, response?.quantity, response?.count];
+      for(const candidate of candidates){
+        const value = Number(candidate);
+        if(Number.isFinite(value) && value > 0) return value;
+      }
+      return rewardType?.startsWith('Card_') ? 1 : null;
+    }
+    function formatRussianCount(value, one, few, many){
+      const number = Math.abs(Math.trunc(Number(value) || 0));
+      const mod100 = number % 100;
+      const mod10 = number % 10;
+      const word = mod100 >= 11 && mod100 <= 14 ? many : mod10 === 1 ? one : mod10 >= 2 && mod10 <= 4 ? few : many;
+      return `${number.toLocaleString('ru-RU')} ${word}`;
+    }
+    function formatRewardAmount(reward, quantity){
+      const value = Number(quantity);
+      if(!Number.isFinite(value) || value <= 0) return 'Нет информации';
+      if(reward.rank) return `${formatRussianCount(value,'карта','карты','карт')} ${reward.rank} ранга`;
+      if(reward.unit === 'stones') return formatRussianCount(value,'камень','камня','камней');
+      if(reward.unit === 'coins') return formatRussianCount(value,'монета','монеты','монет');
+      if(reward.unit === 'stars') return formatRussianCount(value,'звезда','звезды','звёзд');
+      if(reward.unit === 'exp') return `${value.toLocaleString('ru-RU')} опыта`;
+      return `${value.toLocaleString('ru-RU')} × ${reward.label}`;
+    }
 
     function getMoscowParts(date = new Date()){
       const parts = new Intl.DateTimeFormat('en-CA', {
@@ -4999,18 +5423,31 @@
         second:Number(data.second)
       };
     }
-    function hasMoscowTimeReached(){
-      const now = getMoscowParts();
-      return now.hour > CHECK_HOUR || (now.hour === CHECK_HOUR && now.minute >= CHECK_MINUTE);
+    function shiftDateKey(dateKey, days){
+      const date = new Date(`${dateKey}T12:00:00Z`);
+      date.setUTCDate(date.getUTCDate() + days);
+      return date.toISOString().slice(0, 10);
     }
-    function getMsUntilNextMoscowCheck(){
+    function getRewardCycleInfo(){
       const now = getMoscowParts();
       const nowSeconds = now.hour * 3600 + now.minute * 60 + now.second;
-      const targetSeconds = CHECK_HOUR * 3600 + CHECK_MINUTE * 60;
-      const secondsUntil = targetSeconds > nowSeconds ? targetSeconds - nowSeconds : 24 * 3600 - nowSeconds + targetSeconds;
+      const startSeconds = CHECK_HOUR * 3600 + CHECK_MINUTE * 60 + CHECK_SECOND;
+      const endSeconds = WINDOW_END_HOUR * 3600;
+      if(nowSeconds >= startSeconds) return { active:true, cycleKey:now.dateKey, nowSeconds, startSeconds };
+      if(nowSeconds < endSeconds) return { active:true, cycleKey:shiftDateKey(now.dateKey, -1), nowSeconds, startSeconds };
+      return { active:false, cycleKey:null, nowSeconds, startSeconds };
+    }
+    function hasMoscowTimeReached(){
+      return getRewardCycleInfo().active;
+    }
+    function getMsUntilNextMoscowCheck(){
+      const cycle = getRewardCycleInfo();
+      const secondsUntil = cycle.startSeconds > cycle.nowSeconds
+        ? cycle.startSeconds - cycle.nowSeconds
+        : 24 * 3600 - cycle.nowSeconds + cycle.startSeconds;
       return secondsUntil * 1000;
     }
-    function getTodayKey(){ return getMoscowParts().dateKey; }
+    function getTodayKey(){ return getRewardCycleInfo().cycleKey || getMoscowParts().dateKey; }
     function getDailyState(){ return getStoredJson('daily_state', {}); }
     function setDailyState(value){ setStoredJson('daily_state', value); }
     function getTabLock(){ return getStoredJson('tab_lock', null); }
@@ -5020,11 +5457,29 @@
       suiteTelemetryLog('gacha', 'status', { text });
     }
     function notify(type, message){
+      const text = String(message || '').trim();
+      if(!text) return false;
       try{
-        const push = getPageWindow().DLEPush;
-        if(push && typeof push[type] === 'function') push[type](message);
-        else if(typeof push === 'function') push(type, message);
+        const targets = [getPageWindow().DLEPush, window.DLEPush].filter((target,index,list) => target && list.indexOf(target) === index);
+        for(const push of targets){
+          if(typeof push[type] === 'function'){
+            push[type](text);
+            return true;
+          }
+          if(typeof push === 'function'){
+            push(type, text);
+            return true;
+          }
+        }
+      }catch(e){
+        suiteTelemetryLog('gacha', 'site_notification_failed', { type, message:text, error:e }, 'error');
+      }
+      try{
+        cptShow(`gacha-server:${Date.now()}`,'coin','Получено',text,CPT_CLS['neon-green']);
+        suiteTelemetryLog('gacha', 'site_notification_fallback', { type, message:text });
+        return true;
       }catch(e){}
+      return false;
     }
 
     function startLockRenewal(){
@@ -5070,7 +5525,7 @@
 
     function isTodayFinished(){
       const daily = getDailyState();
-      return daily.dateKey === getTodayKey() && ['looted', 'skipped'].includes(daily.status);
+      return daily.dateKey === getTodayKey() && ['looted', 'looted_external', 'skipped'].includes(daily.status);
     }
     function markToday(status, details = {}){
       setDailyState({ dateKey:getTodayKey(), status, savedAt:new Date().toISOString(), ...details });
@@ -5086,7 +5541,7 @@
     function getUserHash(){ return suiteGetUserHash(); }
     function getGachaResultText(data){
       if(!data) return 'empty_response';
-      return data.status || data.message || data.text || data.error || JSON.stringify(data);
+      return data.text || data.message || data.success || data.error || data.status || JSON.stringify(data);
     }
     function isSuccessfulGachaResponse(data){
       if(!data || typeof data !== 'object' || data.error) return false;
@@ -5165,14 +5620,27 @@
       const block = getGachaBlock(doc);
       const first = block?.querySelector('.club__rewards-item');
       if(!first) return null;
+      const stateText = `${first.className || ''} ${first.textContent || ''}`;
       return {
         item:first,
         type:getRewardType(first),
         step:parseNumber(first.dataset.step),
         need:parseNumber(first.dataset.need),
         isAvailable:first.classList.contains('is-available'),
+        isClaimed:/(?:is-(?:received|collected|taken|claimed)|награда\s+(?:уже\s+)?получена|уже\s+собрано)/i.test(stateText),
         button:first.querySelector('#get-gacha-reward, [onclick*="GetGachaReward"]')
       };
+    }
+    function isRewardAlreadyCollected(doc = document){
+      const block = getGachaBlock(doc);
+      if(!block) return false;
+      const first = block.querySelector('.club__rewards-item');
+      const firstState = `${first?.className || ''} ${first?.textContent || ''}`;
+      if(/(?:is-(?:received|collected|taken|claimed)|награда\s+(?:уже\s+)?получена|уже\s+собрано)/i.test(firstState)) return true;
+      const statusText = [...block.querySelectorAll('.club__rewards-status,.club__rewards-message,.club__notice,.alert')]
+        .map(node => node.textContent || '')
+        .join(' ');
+      return /(?:награда\s+(?:уже\s+)?получена|награда\s+собрана|уже\s+собрано)/i.test(statusText);
     }
     function stopRetrying(){
       if(state.retryTimer){
@@ -5182,7 +5650,7 @@
     }
     function startRetrying(){
       if(state.retryTimer || isTodayFinished()) return;
-      setStatus('Опыта пока не хватает, проверяю каждые 5 секунд.');
+      setStatus('Награда пока не собрана, проверяю раз в минуту до 21:00 МСК.');
       state.retryTimer = setInterval(() => runDailyCheck('retry'), RETRY_DELAY_MS);
     }
     function getFrameDocument(){
@@ -5198,49 +5666,52 @@
       state.gachaFrame.id = 'suite-gacha-hidden-club-frame';
       state.gachaFrame.title = 'AnimeSSS gacha background frame';
       state.gachaFrame.style.cssText = 'position:fixed;width:1px;height:1px;left:-9999px;top:-9999px;opacity:0;pointer-events:none;border:0;';
-      document.documentElement.append(state.gachaFrame);
     }
-    function loadGachaFrame(){
+    function loadGachaFrame(forceReload = false){
       createHiddenGachaFrame();
-      const targetUrl = `${location.origin}${getClubPath()}`;
+      const targetUrl = `${location.origin}${getClubPath()}${getClubPath().includes('?') ? '&' : '?'}suite_gacha_snapshot=${Date.now()}`;
       const currentFrameDocument = getFrameDocument();
-      if(state.gachaFrame.src === targetUrl && currentFrameDocument && getGachaBlock(currentFrameDocument)) {
+      if(!forceReload && currentFrameDocument && getGachaBlock(currentFrameDocument)) {
         return Promise.resolve(currentFrameDocument);
       }
       if(state.gachaFrameLoadPromise) return state.gachaFrameLoadPromise;
       state.gachaFrameLoadPromise = new Promise(resolve => {
+        let finished = false;
+        let timeout = null;
         const finish = () => {
+          if(finished) return;
+          finished = true;
+          clearTimeout(timeout);
           state.gachaFrameLoadPromise = null;
           resolve(getFrameDocument());
         };
         state.gachaFrame.addEventListener('load', finish, { once:true });
         state.gachaFrame.src = targetUrl;
-        setTimeout(finish, 12000);
+        if(!state.gachaFrame.isConnected) document.documentElement.append(state.gachaFrame);
+        timeout = setTimeout(finish, 12000);
       });
       return state.gachaFrameLoadPromise;
     }
-    async function fetchClubDocument(){
-      const response = await fetch(`${location.origin}${getClubPath()}`, { credentials:'include', cache:'no-store' });
-      if(!response.ok) throw new Error(`Club page HTTP ${response.status}`);
-      const html = await response.text();
-      if(/<form[^>]+(?:login|auth)|name=["']login["']/i.test(html)) throw new Error('Club page returned login form');
-      return new DOMParser().parseFromString(html, 'text/html');
-    }
     async function getSnapshotDocument(){
-      if(isDefaultClubPage() && getGachaBlock(document)) return document;
-      try{ return await fetchClubDocument(); }
-      catch(error){
-        console.warn('[Suite Gacha] Не удалось тихо прочитать страницу клуба, пробую iframe:', error);
-        const frameDoc = await loadGachaFrame();
-        if(frameDoc && getGachaBlock(frameDoc)) return frameDoc;
+      if(isDefaultClubPage() && isRewardAlreadyCollected(document)) return document;
+      const frameDoc = await loadGachaFrame(true);
+      const loginForm = frameDoc?.querySelector('form[action*="login"],form[id*="login"],form[class*="login"],input[name="login"]');
+      if(loginForm){
         if(isDefaultClubPage() && getGachaBlock(document)) return document;
-        throw new Error('Default club gacha page is unavailable');
+        throw new Error('Фоновая страница клуба открыла форму входа');
       }
+      if(frameDoc && getGachaBlock(frameDoc)) return frameDoc;
+      if(isDefaultClubPage() && getGachaBlock(document)) return document;
+      throw new Error('Default club gacha page is unavailable');
     }
 
     async function runDailyCheck(reason = 'schedule'){
       if(state.isRunning || isTodayFinished() || !cfg.modGachaAutoloot) return;
-      if(reason === 'schedule' && !hasMoscowTimeReached()) return;
+      if(!hasMoscowTimeReached()){
+        stopRetrying();
+        scheduleNextCheck();
+        return;
+      }
       if(!acquireTabLock()) return;
       state.isRunning = true;
       suiteTelemetryLog('gacha', 'check_started', { reason, today:getTodayKey(), page:location.pathname });
@@ -5253,9 +5724,24 @@
           reason,
           source:snapshotDoc === document ? 'current_page' : 'background',
           currentExp,
-          reward:reward ? { type:reward.type, step:reward.step, need:reward.need, isAvailable:reward.isAvailable } : null,
+          reward:reward ? { type:reward.type, step:reward.step, need:reward.need, isAvailable:reward.isAvailable, isClaimed:reward.isClaimed } : null,
           settings
         });
+        if(isRewardAlreadyCollected(snapshotDoc) || reward?.isClaimed){
+          stopRetrying();
+          saveRewardHistoryEntry({
+            dateKey:getTodayKey(),
+            status:'no_information',
+            reason:'collected_on_other_device_or_unknown_source'
+          });
+          markToday('looted_external', {
+            detectedOnPage:true,
+            rewardType:reward?.type || null,
+            step:reward?.step ?? null
+          });
+          setStatus('Награда уже собрана на странице, повторных запросов сегодня не будет.');
+          return;
+        }
         if(!reward){
           startRetrying();
           setStatus('Первая гача не найдена. Подожду обновления страницы.');
@@ -5273,6 +5759,13 @@
         }
         if(!reward.type || settings[reward.type] === false){
           stopRetrying();
+          saveRewardHistoryEntry({
+            dateKey:getTodayKey(),
+            status:'not_looted',
+            rewardType:reward.type || null,
+            rewardLabel,
+            reason:'disabled_in_reward_settings'
+          });
           markToday('skipped', { currentExp, need:reward.need, step:reward.step, rewardType:reward.type });
           setStatus(`Сегодня пропуск: ${rewardLabel} выключена в выборе наград.`);
           return;
@@ -5291,7 +5784,6 @@
           responseText,
           successful:isSuccessfulGachaResponse(response)
         });
-        await sleep(AFTER_POST_DELAY_MS);
         if(!isSuccessfulGachaResponse(response)){
           markToday('waiting', { currentExp, need:reward.need, step:reward.step, rewardType:reward.type, serverResponse:responseText });
           setStatus(`Сервер не выдал гачу: ${responseText}. Продолжаю проверять.`);
@@ -5299,6 +5791,19 @@
           return;
         }
         stopRetrying();
+        const receivedRewardType = normalizeRewardType(response.reward_type || reward.type);
+        const receivedReward = REWARDS.find(item => item.id === receivedRewardType) || null;
+        const receivedQuantity = extractRewardQuantity(response, receivedRewardType, responseText);
+        saveRewardHistoryEntry({
+          dateKey:getTodayKey(),
+          status:'looted',
+          rewardType:receivedRewardType,
+          rewardLabel:receivedReward?.label || rewardLabel,
+          quantity:receivedQuantity,
+          serverResponse:responseText,
+          requestedRewardType:reward.type,
+          step:response.step ?? reward.step ?? null
+        });
         markToday('looted', {
           lootedCount:1,
           currentExp,
@@ -5325,6 +5830,7 @@
     function scheduleNextCheck(){
       if(state.scheduleTimer) clearTimeout(state.scheduleTimer);
       const delay = getMsUntilNextMoscowCheck();
+      state.nextCheckAt = Date.now() + Math.max(1000, delay);
       state.scheduleTimer = setTimeout(() => {
         runDailyCheck('schedule');
         scheduleNextCheck();
@@ -5337,7 +5843,7 @@
       style.id = 'suite-gacha-autoloot-style';
       style.textContent = `
         .club__title:has(.suite-gacha-title-tools){display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;box-sizing:border-box;}
-        .suite-gacha-title-tools{display:inline-flex;align-items:center;gap:10px;margin-left:auto;vertical-align:middle;}
+        .suite-gacha-title-tools{display:inline-flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:8px;margin-left:auto;vertical-align:middle;}
         .suite-gacha-settings-btn{
           border:1px solid rgba(56,189,248,.36);border-radius:10px;padding:7px 11px;
           color:#e0f2fe;background:linear-gradient(135deg,rgba(8,47,73,.92),rgba(15,23,42,.92));
@@ -5345,6 +5851,7 @@
           box-shadow:0 0 0 1px rgba(14,165,233,.12),0 0 16px rgba(14,165,233,.14);
         }
         .suite-gacha-settings-btn:hover{filter:brightness(1.08);border-color:rgba(125,211,252,.55);}
+        .suite-gacha-history-btn{border-color:rgba(167,139,250,.42);background:linear-gradient(135deg,rgba(76,29,149,.72),rgba(15,23,42,.92));}
         .suite-gacha-modal{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(2,6,23,.66);font-family:"Segoe UI",Arial,sans-serif;}
         .suite-gacha-dialog{
           width:min(380px,100%);max-height:calc(100dvh - 40px);border:1px solid rgba(56,189,248,.34);border-radius:14px;padding:0;overflow:hidden;
@@ -5352,6 +5859,7 @@
           box-shadow:0 24px 80px rgba(0,0,0,.58),0 0 28px rgba(14,165,233,.14);
           display:flex;flex-direction:column;
         }
+        .suite-gacha-dialog--history{width:min(680px,100%);}
         .suite-gacha-dialog__head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 15px;background:linear-gradient(135deg,rgba(14,116,144,.42),rgba(15,23,42,.92));border-bottom:1px solid rgba(56,189,248,.22);}
         .suite-gacha-dialog__title{font-size:16px;font-weight:950;color:#f8fafc;}
         .suite-gacha-close{width:32px;height:32px;border-radius:9px;border:1px solid rgba(56,189,248,.24);color:#dbeafe;background:rgba(15,23,42,.72);cursor:pointer;font-size:20px;line-height:1;}
@@ -5362,6 +5870,24 @@
           border:1px solid rgba(56,189,248,.13);background:rgba(8,47,73,.28);cursor:pointer;color:#dbeafe;font-size:13px;font-weight:750;
         }
         .suite-gacha-reward-row:hover{background:rgba(14,116,144,.24);border-color:rgba(56,189,248,.26);}
+        .suite-gacha-history-body{padding:14px 15px 16px;overflow-y:auto;overscroll-behavior:contain;display:grid;gap:15px;}
+        .suite-gacha-history-section-title{font-size:13px;font-weight:900;color:#bae6fd;text-transform:uppercase;letter-spacing:.04em;}
+        .suite-gacha-history-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:8px;}
+        .suite-gacha-history-card{border:1px solid rgba(125,211,252,.16);border-radius:11px;padding:10px;background:rgba(8,47,73,.27);display:grid;gap:5px;}
+        .suite-gacha-history-card__label{font-size:12px;color:#94a3b8;font-weight:750;}
+        .suite-gacha-history-card__value{font-size:14px;color:#f8fafc;font-weight:900;line-height:1.3;}
+        .suite-gacha-history-card__value.is-off{color:#fda4af;}
+        .suite-gacha-history-card__value.is-unknown{color:#fcd34d;}
+        .suite-gacha-history-days{display:grid;gap:7px;}
+        .suite-gacha-history-day{display:grid;grid-template-columns:minmax(92px,auto) 1fr;gap:10px;border:1px solid rgba(148,163,184,.14);border-radius:10px;padding:9px 10px;background:rgba(15,23,42,.56);}
+        .suite-gacha-history-day__date{font-size:12px;color:#7dd3fc;font-weight:850;}
+        .suite-gacha-history-day__value{font-size:13px;color:#e2e8f0;font-weight:750;line-height:1.35;min-width:0;overflow-wrap:anywhere;}
+        .suite-gacha-history-day__note{display:block;margin-top:3px;color:#94a3b8;font-size:11px;font-weight:600;}
+        @media(max-width:560px){
+          .suite-gacha-title-tools{width:100%;margin-left:0;justify-content:flex-start;}
+          .suite-gacha-settings-btn{padding:7px 9px;font-size:11px;}
+          .suite-gacha-history-day{grid-template-columns:1fr;gap:4px;}
+        }
       `;
       document.head.append(style);
     }
@@ -5411,6 +5937,130 @@
       document.body.append(backdrop);
     }
 
+    function formatHistoryDate(dateKey){
+      try{
+        return new Date(`${dateKey}T12:00:00Z`).toLocaleDateString('ru-RU', {
+          timeZone:MOSCOW_TZ,
+          day:'2-digit',
+          month:'2-digit',
+          weekday:'short'
+        });
+      }catch(e){ return dateKey; }
+    }
+    function createRewardHistoryPanel(){
+      const existing = document.querySelector('.suite-gacha-modal');
+      if(existing){
+        existing.remove();
+        return;
+      }
+      const settings = getRewardSettings();
+      const dateKeys = Array.from({length:7}, (_,index) => shiftDateKey(getMoscowParts().dateKey, -index));
+      const dateSet = new Set(dateKeys);
+      const history = getRewardHistory().filter(item => dateSet.has(String(item?.dateKey || '')));
+      const byDate = new Map(history.map(item => [String(item.dateKey), item]));
+      const totals = new Map();
+      for(const item of history){
+        if(item?.status !== 'looted') continue;
+        const type = normalizeRewardType(item.rewardType);
+        const quantity = Number(item.quantity);
+        if(!type || !Number.isFinite(quantity) || quantity <= 0) continue;
+        totals.set(type, Number(totals.get(type) || 0) + quantity);
+      }
+
+      const backdrop = document.createElement('div');
+      backdrop.className = 'suite-gacha-modal';
+      const dialog = document.createElement('div');
+      dialog.className = 'suite-gacha-dialog suite-gacha-dialog--history';
+      dialog.setAttribute('role','dialog');
+      dialog.setAttribute('aria-modal','true');
+
+      const head = document.createElement('div');
+      head.className = 'suite-gacha-dialog__head';
+      const title = document.createElement('div');
+      title.className = 'suite-gacha-dialog__title';
+      title.textContent = 'Полученные награды за 7 дней';
+      const close = document.createElement('button');
+      close.type = 'button';
+      close.className = 'suite-gacha-close';
+      close.setAttribute('aria-label','Закрыть');
+      close.textContent = '×';
+      head.append(title,close);
+
+      const body = document.createElement('div');
+      body.className = 'suite-gacha-history-body';
+      const summaryTitle = document.createElement('div');
+      summaryTitle.className = 'suite-gacha-history-section-title';
+      summaryTitle.textContent = 'Итого';
+      const summary = document.createElement('div');
+      summary.className = 'suite-gacha-history-summary';
+      for(const reward of REWARDS){
+        const card = document.createElement('div');
+        card.className = 'suite-gacha-history-card';
+        const label = document.createElement('div');
+        label.className = 'suite-gacha-history-card__label';
+        label.textContent = reward.label;
+        const value = document.createElement('div');
+        value.className = 'suite-gacha-history-card__value';
+        if(settings[reward.id] === false){
+          value.textContent = 'Не лутается';
+          value.classList.add('is-off');
+        }else if(totals.has(reward.id)){
+          value.textContent = formatRewardAmount(reward, totals.get(reward.id));
+        }else{
+          value.textContent = 'Нет информации';
+          value.classList.add('is-unknown');
+        }
+        card.append(label,value);
+        summary.append(card);
+      }
+
+      const daysTitle = document.createElement('div');
+      daysTitle.className = 'suite-gacha-history-section-title';
+      daysTitle.textContent = 'По дням';
+      const days = document.createElement('div');
+      days.className = 'suite-gacha-history-days';
+      for(const dateKey of dateKeys){
+        const item = byDate.get(dateKey);
+        const row = document.createElement('div');
+        row.className = 'suite-gacha-history-day';
+        const date = document.createElement('div');
+        date.className = 'suite-gacha-history-day__date';
+        date.textContent = formatHistoryDate(dateKey);
+        const value = document.createElement('div');
+        value.className = 'suite-gacha-history-day__value';
+        if(!item || item.status === 'no_information'){
+          value.textContent = 'Нет информации';
+          if(item?.reason === 'collected_on_other_device_or_unknown_source'){
+            const note = document.createElement('span');
+            note.className = 'suite-gacha-history-day__note';
+            note.textContent = 'Награда была собрана вне этого устройства или определить её не удалось.';
+            value.append(note);
+          }
+        }else if(item.status === 'not_looted'){
+          const reward = REWARDS.find(entry => entry.id === normalizeRewardType(item.rewardType));
+          value.textContent = `${reward?.label || item.rewardLabel || 'Награда'} — не лутается`;
+        }else if(item.status === 'looted'){
+          const reward = REWARDS.find(entry => entry.id === normalizeRewardType(item.rewardType));
+          value.textContent = reward ? formatRewardAmount(reward,item.quantity) : 'Получена награда — нет информации о типе';
+          if(item.serverResponse){
+            const note = document.createElement('span');
+            note.className = 'suite-gacha-history-day__note';
+            note.textContent = String(item.serverResponse).slice(0,500);
+            value.append(note);
+          }
+        }else value.textContent = 'Нет информации';
+        row.append(date,value);
+        days.append(row);
+      }
+      body.append(summaryTitle,summary,daysTitle,days);
+      dialog.append(head,body);
+      backdrop.append(dialog);
+      on(backdrop,'click',event=>{
+        if(event.target===backdrop||event.target.closest('.suite-gacha-close'))backdrop.remove();
+      });
+      document.body.append(backdrop);
+    }
+
     function removeControls(){
       document.querySelectorAll('.suite-gacha-title-tools,.suite-gacha-modal').forEach(el => el.remove());
     }
@@ -5437,7 +6087,12 @@
       button.className = 'suite-gacha-settings-btn';
       button.textContent = 'Выбор награды';
       on(button, 'click', createRewardPanel);
-      tools.append(button);
+      const historyButton = document.createElement('button');
+      historyButton.type = 'button';
+      historyButton.className = 'suite-gacha-settings-btn suite-gacha-history-btn';
+      historyButton.textContent = 'Просмотр наград';
+      on(historyButton, 'click', createRewardHistoryPanel);
+      tools.append(button,historyButton);
       title.append(tools);
       return true;
     }
@@ -6096,11 +6751,29 @@
 
     function notify(type, message){
       log(message);
+      const text = String(message || '').trim();
+      if(!text) return false;
       try{
-        const push = uw.DLEPush;
-        if(push && typeof push[type] === 'function') push[type](message);
-        else if(typeof push === 'function') push(type, message);
+        const targets = [uw.DLEPush, window.DLEPush].filter((target,index,list) => target && list.indexOf(target) === index);
+        for(const push of targets){
+          if(typeof push[type] === 'function'){
+            push[type](text);
+            return true;
+          }
+          if(typeof push === 'function'){
+            push(type, text);
+            return true;
+          }
+        }
+      }catch(e){
+        suiteTelemetryLog('chat_stone', 'site_notification_failed', { type, message:text, error:e }, 'error');
+      }
+      try{
+        cptShow(`chat-stone-server:${Date.now()}`,'coin','Находка',text,CPT_CLS['neon-green']);
+        suiteTelemetryLog('chat_stone', 'site_notification_fallback', { type, message:text });
+        return true;
       }catch(e){}
+      return false;
     }
 
     async function acquireLeader(){
@@ -6304,7 +6977,7 @@
           markSeen(diamond, text, ok);
         }
         if(ok){
-          notify('success', `Камень собран: ${text}`);
+          notify('success', text);
           scheduleTransactionVerification();
         }
       }catch(error){
@@ -6426,6 +7099,7 @@
         });
       }
       hookedFetch.__suiteChatStoneHooked = true;
+      hookedFetch.__suiteChatStoneOriginal = originalFetch;
       state.originalFetch = originalFetch;
       state.hookedFetch = hookedFetch;
       uw.fetch = hookedFetch;
@@ -6453,6 +7127,10 @@
         });
         return originalSend.apply(this, arguments);
       };
+      hookedOpen.__suiteChatStoneHooked = true;
+      hookedOpen.__suiteXhrOriginal = originalOpen;
+      hookedSend.__suiteChatStoneHooked = true;
+      hookedSend.__suiteXhrOriginal = originalSend;
       XHR.prototype.open = hookedOpen;
       XHR.prototype.send = hookedSend;
       XHR.prototype.__suiteChatStoneHooked = true;
@@ -6588,6 +7266,7 @@
       installDomObserver();
       state.timers.push(setInterval(renewLeader, DEFAULTS.lockRenewMs));
       state.timers.push(setInterval(async () => {
+        state.healthAt = Date.now();
         if(!state.ready || !isEnabled()) return;
         if(Date.now() - state.lastChatActivity >= DEFAULTS.chatIdleMs && state.queueSize === 0){
           fetchChatSnapshot('watchdog');
@@ -7596,6 +8275,7 @@
   }
 
   function setupBuyButtonGuard() {
+    if(window.__suiteBuyButtonGuardInstalled) return;
     document.addEventListener('click', function(e) {
       const btn = e.target.closest('.lootbox__open-btn');
       if (!btn) return;
@@ -7610,6 +8290,7 @@
         });
       }
     }, true);
+    window.__suiteBuyButtonGuardInstalled = true;
   }
 
   function normalizeKeyCode(code){
@@ -7789,6 +8470,153 @@
   const AUTO_DELAY_WAIT_CLOSE=350;
   const AUTO_DELAY_BEFORE_BUY=180;
   const AUTO_DELAY_RARE_VIEW=3000;
+  const AUTO_DIAGNOSTIC_STALL_MS=10*1000;
+  const AUTO_DIAGNOSTIC_HISTORY_MAX=20;
+  let autoDiagnosticTimer=null, autoExpectation=null, autoSchedulerMissingSinceAt=0, autoBusySinceAt=0;
+  const autoDiagnosticActions=[];
+
+  function autoDiagnosticRecord(action,details={}) {
+    autoDiagnosticActions.push({ at:Date.now(), action, details:suiteTelemetrySanitize(details,'',2) });
+    if(autoDiagnosticActions.length>AUTO_DIAGNOSTIC_HISTORY_MAX){
+      autoDiagnosticActions.splice(0,autoDiagnosticActions.length-AUTO_DIAGNOSTIC_HISTORY_MAX);
+    }
+  }
+  function autoDiagnosticSnapshot(includeResources=false) {
+    const row=getActiveRow();
+    const cards=row?[...row.querySelectorAll('.lootbox__card')]:[];
+    const button=document.querySelector('.lootbox__open-btn');
+    const buttonStyle=button?getComputedStyle(button):null;
+    const loaders=[...document.querySelectorAll('.loading,.loader,[class*="loading"],[class*="spinner"]')]
+      .filter(el=>{
+        const style=getComputedStyle(el);
+        return style.display!=='none'&&style.visibility!=='hidden';
+      })
+      .slice(0,8)
+      .map(el=>({ id:el.id||'', className:String(el.className||'').slice(0,300) }));
+    const snapshot={
+      at:Date.now(), path:location.pathname, visibility:document.visibilityState,
+      readyState:document.readyState, online:navigator.onLine,
+      status:String(autoStatusEl?.textContent||''), autoBusy:!!autoBusy,
+      autoWaitingManual:!!autoWaitingManual, autoLoopTimerPresent:!!autoLoopTimer,
+      activePackId:row?.getAttribute('data-pack-id')||'', lastChosenPackId:autoLastChosenPackId,
+      cardCount:cards.length,
+      valuedCardCount:cards.filter(card=>card.querySelector('.card-value')).length,
+      bestCardCount:cards.filter(card=>card.classList.contains('cv-best-card')).length,
+      selectedPack20:!!isPack20Active(), stoneBalance:getCurrentStoneBalance(),
+      buyButton:button?{
+        present:true, disabled:!!button.disabled||button.classList.contains('disabled'),
+        display:buttonStyle?.display||'', visibility:buttonStyle?.visibility||'',
+        text:String(button.textContent||'').replace(/\s+/g,' ').trim().slice(0,300),
+        className:String(button.className||'').slice(0,300)
+      }:{ present:false },
+      visibleLoaders:loaders
+    };
+    if(includeResources&&performance?.getEntriesByType){
+      snapshot.recentPackResources=performance.getEntriesByType('resource')
+        .filter(entry=>/(?:ajax|lootbox|pack|cards)/i.test(String(entry.name||'')))
+        .slice(-15)
+        .map(entry=>{
+          let path='';
+          try{
+            const url=new URL(entry.name,location.href);
+            const keys=[...url.searchParams.keys()];
+            path=`${url.origin===location.origin?'':url.origin}${url.pathname}${keys.length?`?params=${keys.join(',')}`:''}`;
+          }catch(e){ path=String(entry.name||'').slice(0,500); }
+          return { path, initiatorType:String(entry.initiatorType||''),
+            duration:Math.round(Number(entry.duration||0)), transferSize:Number(entry.transferSize||0),
+            responseStatus:Number(entry.responseStatus||0) };
+        });
+    }
+    return snapshot;
+  }
+  function autoExpectationKey(kind,details={}) {
+    return `${kind}:${details.packId||details.packIdBefore||autoLastChosenPackId||''}`;
+  }
+  function autoStartExpectation(kind,details={}) {
+    const now=Date.now();
+    const key=autoExpectationKey(kind,details);
+    if(autoExpectation?.key===key){
+      autoExpectation.attempts++;
+      autoExpectation.lastAttemptAt=now;
+      autoExpectation.latestDetails=suiteTelemetrySanitize(details,'',2);
+      return;
+    }
+    autoExpectation={ kind,key,startedAt:now,lastAttemptAt:now,attempts:1,reported:false,
+      initial:suiteTelemetrySanitize(details,'',2), before:autoDiagnosticSnapshot(false) };
+    autoDiagnosticRecord('expectation_started',{kind,key,details});
+  }
+  function autoResolveExpectation(reason) {
+    if(!autoExpectation)return;
+    autoDiagnosticRecord('expectation_resolved',{ kind:autoExpectation.kind,
+      elapsedMs:Date.now()-autoExpectation.startedAt, attempts:autoExpectation.attempts, reason });
+    autoExpectation=null;
+  }
+  function autoDiagnosticLikelyCauses(snapshot,expectation) {
+    const causes=[];
+    if(!snapshot.online)causes.push('browser_offline');
+    if(!snapshot.buyButton.present)causes.push('buy_button_missing_or_site_markup_changed');
+    else{
+      if(snapshot.buyButton.disabled)causes.push('buy_button_disabled');
+      if(snapshot.buyButton.display==='none'||snapshot.buyButton.visibility==='hidden')causes.push('buy_button_hidden');
+    }
+    if(!snapshot.selectedPack20)causes.push('pack_20_not_selected');
+    if(snapshot.visibleLoaders.length)causes.push('site_loader_still_visible');
+    if(expectation?.kind==='cards_after_buy'&&snapshot.cardCount===0)causes.push('buy_click_did_not_produce_cards');
+    if(expectation?.kind==='best_card_highlight'&&snapshot.cardCount>0&&snapshot.valuedCardCount===0)causes.push('card_values_not_rendered');
+    if(expectation?.kind==='best_card_highlight'&&snapshot.valuedCardCount>0&&snapshot.bestCardCount===0)causes.push('best_card_not_selected');
+    if(expectation?.before?.stoneBalance!==null&&snapshot.stoneBalance!==null
+      &&expectation.before.stoneBalance===snapshot.stoneBalance&&expectation.kind==='cards_after_buy'){
+      causes.push('stone_balance_unchanged_after_buy_click');
+    }
+    return causes;
+  }
+  function autoReportDiagnosticStall(code,details={}) {
+    const snapshot=autoDiagnosticSnapshot(true);
+    suiteSelfDiagnosticIssue('auto_open',code,{
+      detectedBy:'auto_open_progress_watchdog', ...details,
+      likelyCauses:autoDiagnosticLikelyCauses(snapshot,autoExpectation), snapshot,
+      expectation:autoExpectation?{
+        kind:autoExpectation.kind, startedAt:autoExpectation.startedAt,
+        elapsedMs:Date.now()-autoExpectation.startedAt, attempts:autoExpectation.attempts,
+        initial:autoExpectation.initial, latestDetails:autoExpectation.latestDetails||null,
+        before:autoExpectation.before
+      }:null,
+      recentActions:autoDiagnosticActions.slice(-AUTO_DIAGNOSTIC_HISTORY_MAX)
+    });
+  }
+  function autoCheckDiagnosticProgress(source='loop') {
+    if(!cfg.autoOpenEnabled||!isAutoOpenAvailable()||autoWaitingManual){
+      autoSchedulerMissingSinceAt=0;
+      autoBusySinceAt=0;
+      return;
+    }
+    const now=Date.now();
+    if(autoBusy){
+      if(!autoBusySinceAt)autoBusySinceAt=now;
+      if(now-autoBusySinceAt>=AUTO_DIAGNOSTIC_STALL_MS){
+        autoReportDiagnosticStall('auto_open_busy_stalled',{source,busyForMs:now-autoBusySinceAt});
+        autoBusySinceAt=now;
+      }
+    }else autoBusySinceAt=0;
+    if(autoExpectation&&!autoExpectation.reported&&now-autoExpectation.startedAt>=AUTO_DIAGNOSTIC_STALL_MS){
+      autoExpectation.reported=true;
+      const code=autoExpectation.kind==='cards_after_buy'?'pack_cards_not_appeared'
+        :autoExpectation.kind==='pack_close_after_card'?'pack_did_not_close_after_card_pick'
+          :'best_card_highlight_stalled';
+      autoReportDiagnosticStall(code,{source});
+    }
+    if(!autoBusy&&!autoLoopTimer&&!autoExpectation){
+      if(!autoSchedulerMissingSinceAt)autoSchedulerMissingSinceAt=now;
+      if(now-autoSchedulerMissingSinceAt>=AUTO_DIAGNOSTIC_STALL_MS){
+        autoReportDiagnosticStall('auto_open_loop_stalled',{source,stalledForMs:now-autoSchedulerMissingSinceAt});
+        autoSchedulerMissingSinceAt=now;
+      }
+    }else autoSchedulerMissingSinceAt=0;
+  }
+  function ensureAutoDiagnosticTimer() {
+    if(autoDiagnosticTimer)return;
+    autoDiagnosticTimer=setInterval(()=>autoCheckDiagnosticProgress('watchdog'),5000);
+  }
 
   function isAutoOpenAvailable() {
     return !!(cfg.modCardValue && cfg.modBestCard && cfg.modAutoOpen && location.pathname.includes('/cards/pack'));
@@ -7825,6 +8653,7 @@
     updateAutoOpenPanel();
   }
   function stopAutoOpen(reason='Остановлено') {
+    autoResolveExpectation('auto_stopped');
     cfg.autoOpenEnabled=false; saveCfg();
     if(autoRunInput) autoRunInput.checked=false;
     clearTimeout(autoLoopTimer); autoLoopTimer=null;
@@ -7836,6 +8665,7 @@
     updateAutoCount();
   }
   function pauseAutoOpen(reason,packId='') {
+    autoResolveExpectation('manual_pause');
     cfg.autoOpenEnabled=true; saveCfg();
     if(autoRunInput) autoRunInput.checked=true;
     autoBusy=false; autoWaitingManual=true;
@@ -7851,6 +8681,7 @@
     const packId=row.getAttribute('data-pack-id')||'';
     if(autoManualPackId && packId && packId!==autoManualPackId) return;
     autoWaitingManual=false;
+    autoResolveExpectation('manual_card_pick');
     autoOpenSuppressGuard=false;
     autoManualPackId='';
     autoLastChosenPackId=packId;
@@ -7868,7 +8699,12 @@
   }
   function scheduleAutoLoop(delay=350) {
     clearTimeout(autoLoopTimer);
-    if(cfg.autoOpenEnabled && isAutoOpenAvailable()) autoLoopTimer=setTimeout(autoOpenStep,delay);
+    if(cfg.autoOpenEnabled && isAutoOpenAvailable()){
+      autoLoopTimer=setTimeout(()=>{
+        autoLoopTimer=null;
+        autoOpenStep();
+      },delay);
+    }
   }
   function getVisibleBestCards() {
     const row=getActiveRow();
@@ -7928,6 +8764,8 @@
       return;
     }
     cfg.autoOpenEnabled=true; saveCfg();
+    autoResolveExpectation('auto_restarted');
+    ensureAutoDiagnosticTimer();
     autoPausedAfterReload=false;
     autoWaitingManual=false;
     autoOpenSuppressGuard=false;
@@ -7944,6 +8782,12 @@
     setTimeout(()=>{
       if(!cfg.autoOpenEnabled){ autoBusy=false; return; }
       autoLastChosenPackId=getActiveRow()?.getAttribute('data-pack-id')||'';
+      autoStartExpectation('pack_close_after_card',{
+        packId:autoLastChosenPackId,
+        card:getAutoCardIdentity(card),
+        cardCount:getCardsFromActiveRow().length
+      });
+      autoDiagnosticRecord('card_click',{packId:autoLastChosenPackId,card:getAutoCardIdentity(card)});
       autoOpenSuppressGuard=true;
       try {
         card.click();
@@ -7974,6 +8818,17 @@
     selectPack20();
     setTimeout(()=>{
       if(!cfg.autoOpenEnabled){ autoBusy=false; return; }
+      const row=getActiveRow();
+      autoStartExpectation('cards_after_buy',{
+        packIdBefore:row?.getAttribute('data-pack-id')||'',
+        stoneBalance:getCurrentStoneBalance(),
+        selectedPack20:isPack20Active()
+      });
+      autoDiagnosticRecord('buy_click',{
+        packIdBefore:row?.getAttribute('data-pack-id')||'',
+        stoneBalance:getCurrentStoneBalance(),
+        selectedPack20:isPack20Active()
+      });
       clickBuyButton(true);
       autoBusy=false;
       setAutoStatus('Жду карты...');
@@ -7981,6 +8836,7 @@
     },AUTO_DELAY_BEFORE_BUY);
   }
   function autoOpenStep() {
+    autoCheckDiagnosticProgress('loop');
     if(autoBusy || !cfg.autoOpenEnabled) return;
     if(isPremiumLockedSetting('modAutoOpen')) {
       stopAutoOpen('Нужно возвышение');
@@ -7998,6 +8854,7 @@
 
     if(hasOpenCardsReady()) {
       const packId=getActiveRow()?.getAttribute('data-pack-id')||'';
+      if(autoExpectation?.kind==='cards_after_buy')autoResolveExpectation('cards_appeared');
       if(packId && packId===autoLastChosenPackId) {
         setAutoStatus('Жду закрытие пака...');
         scheduleAutoLoop(AUTO_DELAY_WAIT_CLOSE);
@@ -8005,14 +8862,17 @@
       }
       addCardValue();
       const best=getVisibleBestCards();
-      if(best.length===1) { autoClickBestCard(best[0]); return; }
-      if(best.length>1 && areSameAutoCards(best)) { autoClickBestCard(best[0]); return; }
+      if(best.length===1) { if(autoExpectation?.kind==='best_card_highlight')autoResolveExpectation('best_card_ready'); autoClickBestCard(best[0]); return; }
+      if(best.length>1 && areSameAutoCards(best)) { if(autoExpectation?.kind==='best_card_highlight')autoResolveExpectation('best_cards_ready'); autoClickBestCard(best[0]); return; }
       if(best.length>1) { pauseAutoOpen('Пауза: выбери одну из лучших',packId); return; }
+      autoStartExpectation('best_card_highlight',{packId,cardCount:getCardsFromActiveRow().length});
       setAutoStatus('Жду подсветку...');
       scheduleAutoLoop(AUTO_DELAY_WAIT_HIGHLIGHT);
       return;
     }
 
+    if(autoExpectation?.kind==='pack_close_after_card')autoResolveExpectation('pack_closed');
+    if(autoExpectation?.kind==='best_card_highlight')autoResolveExpectation('cards_disappeared');
     autoBuyPack();
   }
   function createAutoOpenPanel() {
@@ -8139,6 +8999,7 @@
     body.append(runRow,countWrap,autoStatusEl,autoCountEl);
     autoPanel.append(hdr,body);
     document.body.appendChild(autoPanel);
+    ensureAutoDiagnosticTimer();
 
     autoRunInput.addEventListener('change',()=>{
       if(autoRunInput.checked) startAutoOpen();
@@ -8475,13 +9336,22 @@
     slider.max='1.4';
     slider.step='0.05';
     slider.value=cptGetScale();
+    let previewArmed=false;
+    const armPreview=()=>{ previewArmed=true; };
+    slider.addEventListener('pointerdown',armPreview);
+    slider.addEventListener('touchstart',armPreview,{passive:true});
+    slider.addEventListener('keydown',armPreview);
+    slider.addEventListener('change',()=>{ previewArmed=false; });
+    slider.addEventListener('blur',()=>{ previewArmed=false; });
     const render=()=>{
       const scale=Number(slider.value);
       cfg.customPushScale=Number(scale.toFixed(2));
       val.textContent=cfg.customPushScale.toFixed(2).replace(/\.?0+$/,'')+'x';
       saveCfg();
       cptApplyScale();
-      cptShow('__cpt-scale-preview','bell','Пример уведомления',`Масштаб ${val.textContent}`,CPT_CLS['neon-blue']);
+      if(previewArmed){
+        cptShow('__cpt-scale-preview','bell','Пример уведомления',`Масштаб ${val.textContent}`,CPT_CLS['neon-blue']);
+      }
     };
     slider.addEventListener('input',render);
     val.textContent=cptGetScale().toFixed(2).replace(/\.?0+$/,'')+'x';
@@ -9619,6 +10489,7 @@
 
   function watchGuarantee() {
     if (!location.pathname.startsWith('/cards/pack')) return;
+    if(window.__suiteGuaranteeObserver) return;
     insertGuaranteeInfo();
     let guardBusy = false;
     const mo = new MutationObserver((mutations) => {
@@ -9634,6 +10505,7 @@
       requestAnimationFrame(() => { insertGuaranteeInfo(); checkGuaranteeS(); guardBusy = false; });
     });
     mo.observe(document.body, { childList: true, subtree: true });
+    window.__suiteGuaranteeObserver = mo;
   }
 
   let labyrinthRouteWatcherInstalled=false;
@@ -9685,43 +10557,50 @@
   }
 
   async function init(){
-    suiteApplyMobileFloatingUiVisibility();
+    window.__suiteMainInitStartedAt = window.__suiteMainInitStartedAt || Date.now();
+    suiteStartModule('mobile_ui', null, suiteApplyMobileFloatingUiVisibility);
     await suiteAccessGate();
-    insertNeonGradients();
-    applyNeonAnimationSetting();
-    setupNeonObservers();
-    initObservers();
-    observeContainer(document.querySelector('.lootbox__list'));
-    observeContainer(document.querySelector('.trade__main'));
-    debouncedAddCardValue();
-    insertStatsButton();
-    createHotkeyPanel();
-    createAutoOpenPanel();
-    createSettingsButton();
-    applyMenuBackground();
-    addProfileButtons();
-    applyEnlightenment();
+    suiteStartModule('neon', null, () => {
+      insertNeonGradients();
+      applyNeonAnimationSetting();
+      setupNeonObservers();
+    });
+    suiteStartModule('card_value', null, () => {
+      initObservers();
+      observeContainer(document.querySelector('.lootbox__list'));
+      observeContainer(document.querySelector('.trade__main'));
+      debouncedAddCardValue();
+    });
+    suiteStartModule('pack_stats', 'modStats', insertStatsButton);
+    suiteStartModule('hotkeys', 'modHotkeys', createHotkeyPanel);
+    suiteStartModule('auto_open', 'modAutoOpen', createAutoOpenPanel);
+    suiteStartModule('settings', null, createSettingsButton);
+    suiteStartModule('menu_background', 'modMenuBg', applyMenuBackground);
+    suiteStartModule('profile_buttons', 'modProfileBtns', addProfileButtons);
+    suiteStartModule('enlightenment', 'modEnlightenment', applyEnlightenment);
     // Небольшая задержка — DLEPush инициализируется чуть позже основных скриптов
-    setTimeout(()=>{ installCustomPush(); }, 300);
-    if(cfg.modWantCards)   initWantCards();
-    if(cfg.modNoNeedCards) initNoNeedCards();
-    if(cfg.modBrickFill)   initBrickFill();
-    if(cfg.modRemelt)      initRemelt();
-    if(cfg.modStones)      initStones();
-    if(cfg.modChatStoneAutoloot) initChatStoneAutoloot();
-    if(cfg.modGachaAutoloot) initGachaAutoloot();
-    if(cfg.modQuickCardOwners) initQuickCardOwners();
-    if(cfg.modVoteCardsToggle) initVoteCardsToggle();
-    if(cfg.modSuggestionAuthors) initSuggestionAuthors();
-    if(cfg.modAutoLootCards) initAutoLootCards();
-    if(cfg.modLabyrinthQuiz) initLabyrinthQuiz();
-    if(cfg.modLabyrinthEmission) initLabyrinthEmission();
-    if(cfg.modLabyrinthFatigue) initLabyrinthFatigue();
-    if(cfg.modLabyrinthClubWar) initClubWarRelations();
-    setupLabyrinthQuizRouteWatcher();
-    watchLootboxMiddle();
-    setupBuyButtonGuard();
-    watchGuarantee();
+    setTimeout(() => suiteStartModule('custom_push', 'modCustomPush', installCustomPush), 300);
+    suiteStartModule('want_cards', 'modWantCards', initWantCards);
+    suiteStartModule('no_need_cards', 'modNoNeedCards', initNoNeedCards);
+    suiteStartModule('brick_fill', 'modBrickFill', initBrickFill);
+    suiteStartModule('remelt', 'modRemelt', initRemelt);
+    suiteStartModule('stones', 'modStones', initStones);
+    suiteStartModule('chat_stone', 'modChatStoneAutoloot', initChatStoneAutoloot);
+    suiteStartModule('gacha', 'modGachaAutoloot', initGachaAutoloot);
+    suiteStartModule('quick_card_owners', 'modQuickCardOwners', initQuickCardOwners);
+    suiteStartModule('vote_cards', 'modVoteCardsToggle', initVoteCardsToggle);
+    suiteStartModule('suggestion_authors', 'modSuggestionAuthors', initSuggestionAuthors);
+    suiteStartModule('autowatch', 'modAutoLootCards', initAutoLootCards);
+    suiteStartModule('quiz', 'modLabyrinthQuiz', initLabyrinthQuiz);
+    suiteStartModule('emission', 'modLabyrinthEmission', initLabyrinthEmission);
+    suiteStartModule('fatigue', 'modLabyrinthFatigue', initLabyrinthFatigue);
+    suiteStartModule('club_war', 'modLabyrinthClubWar', initClubWarRelations);
+    suiteStartModule('labyrinth_route', null, setupLabyrinthQuizRouteWatcher);
+    suiteStartModule('pack_runtime', null, watchLootboxMiddle);
+    suiteStartModule('pack_guard', null, setupBuyButtonGuard);
+    suiteStartModule('guarantee', null, watchGuarantee);
+    window.__suiteMainInitialized = true;
+    window.__suiteMainInitializedAt = Date.now();
   }
 
   if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded',init); }
@@ -10885,9 +11764,10 @@
         const CHECK_NEW_CARD_INTERVAL = 177000;
         const CARD_COUNT_UPDATE_INTERVAL = 30 * 60 * 1000;
         const RETRY_NO_HASH_MS = 5000;
-        const RETRY_DISABLED_MS = 10000;
         const NEXT_LOOP_EXTRA_DELAY = 0;
         const NO_CARD_RETRY_DELAY_MS = 15000;
+        const EMPTY_DB_RECHECK_MS = 60 * 1000;
+        const EMPTY_DB_REMINDER_MS = 30 * 60 * 1000;
         const START_DELAY_MS = 1200;
         const RESUME_DELAY_MS = 300;
         const RECEIPTS_PER_EP_COMPLETE = 5;
@@ -10907,10 +11787,13 @@
         let profileFetchInProgress = false;
         let kodikWarmupPromise = null;
         let diagnosticRequestSequence = 0;
+        let animeDbEmpty = null;
+        let emptyDbLastReminderAt = 0;
 
         const currentUser = getCurrentUser();
         const AW_GM_DB_PREFIX = `aw_active_tab_store_v1_${currentUser || 'guest'}_`;
         const AW_GM_STORES = ['anime_history', 'card_receipts', 'skipped_episodes'];
+        const EMPTY_DB_STATE_KEY = `aw_active_tab_empty_db_state_v1_${currentUser || 'guest'}`;
 
         // =========================================================
         // UTIL
@@ -11802,11 +12685,67 @@
         }
 
         async function setAnimeDb(data) {
-            await GM_setValue(ANIME_DB_KEY, Array.isArray(data) ? data.map(normalizeAnimeEntry) : []);
+            const normalized = Array.isArray(data) ? data.map(normalizeAnimeEntry) : [];
+            await GM_setValue(ANIME_DB_KEY, normalized);
+            if (normalized.length) {
+                await clearAnimeDbEmptyState();
+                if (scriptEnabledWatch && isTabVisible() && isThisTabLeader()) {
+                    scheduleNext(RESUME_DELAY_MS);
+                }
+            } else {
+                await markAnimeDbEmpty();
+                if (scriptEnabledWatch && isTabVisible() && isThisTabLeader()) {
+                    scheduleNext(EMPTY_DB_RECHECK_MS);
+                }
+            }
         }
 
         async function ensureAnimeDbInitialized() {
             return await getAnimeDb();
+        }
+
+        async function markAnimeDbEmpty(forceReminder = false) {
+            const now = Date.now();
+            const stored = await GM_getValue(EMPTY_DB_STATE_KEY, null);
+            const firstTransition = stored?.active !== true;
+            const firstDetectedAt = Number(stored?.firstDetectedAt || now);
+            emptyDbLastReminderAt = Math.max(emptyDbLastReminderAt, Number(stored?.lastReminderAt || 0));
+            const shouldRemind = forceReminder || !emptyDbLastReminderAt || now - emptyDbLastReminderAt >= EMPTY_DB_REMINDER_MS;
+            animeDbEmpty = true;
+            if (firstTransition) saveDiagnosticLog('anime_database_empty', { firstDetectedAt });
+            if (shouldRemind) {
+                emptyDbLastReminderAt = now;
+                safePush('info', 'Добавьте аниме в базу, чтобы автолут мог получать карты. Автолут ждёт заполнения базы.');
+            }
+            await GM_setValue(EMPTY_DB_STATE_KEY, {
+                active:true,
+                firstDetectedAt,
+                lastReminderAt:emptyDbLastReminderAt,
+                checkedAt:now
+            });
+            updateButtonState();
+        }
+
+        async function clearAnimeDbEmptyState() {
+            const wasEmpty = animeDbEmpty === true || (await GM_getValue(EMPTY_DB_STATE_KEY, null))?.active === true;
+            animeDbEmpty = false;
+            emptyDbLastReminderAt = 0;
+            await GM_deleteValue(EMPTY_DB_STATE_KEY);
+            if (wasEmpty) {
+                saveDiagnosticLog('anime_database_restored');
+                safePush('success', 'База аниме заполнена. Автолут продолжает работу.');
+            }
+            updateButtonState();
+        }
+
+        async function refreshAnimeDbEmptyState(forceReminder = false) {
+            const db = await getAnimeDb();
+            if (db.length) {
+                await clearAnimeDbEmptyState();
+                return false;
+            }
+            await markAnimeDbEmpty(forceReminder);
+            return true;
         }
 
         async function getFinishedAnimeArchive() {
@@ -12202,7 +13141,7 @@
         async function isKodikWarmupDoneForCurrentCardDay() {
             const progress = await ensureDailyProgressState();
             const data = await GM_getValue(KODIK_WARMUP_DONE_KEY, null);
-            return !!(data && data.date === progress.date && data.status === 'ok');
+            return !!(data && data.date === progress.date && ['ok', 'terminal'].includes(data.status));
         }
 
         async function markKodikWarmupDoneForCurrentCardDay(entry, episode, status = 'sent') {
@@ -12226,7 +13165,29 @@
             safePush('info', 'Не хватает данных для квеста просмотра. Добавьте это аниме в базу заново со страницы аниме.');
         }
 
-        async function ensureDailyKodikWarmup(entry, episode) {
+        async function isKodikWarmupAuthorized(trigger) {
+            const storedEnabled = await GM_getValue(STORAGE_KEY_WATCH, true);
+            return !!(
+                trigger?.source === 'card_loot_cycle'
+                && trigger?.cardLootActive === true
+                && cfg.modAutoLootCards
+                && window.__suiteAutoLootCardsInstalled
+                && scriptEnabledWatch
+                && storedEnabled
+            );
+        }
+
+        async function ensureDailyKodikWarmup(entry, episode, trigger) {
+            if (!(await isKodikWarmupAuthorized(trigger))) {
+                suiteSelfDiagnosticIssue('autowatch', 'watch_quest_blocked_outside_card_loot_cycle', {
+                    source:trigger?.source || 'unknown',
+                    cardLootActive:trigger?.cardLootActive === true,
+                    settingEnabled:!!cfg.modAutoLootCards,
+                    moduleInstalled:!!window.__suiteAutoLootCardsInstalled,
+                    runtimeEnabled:!!scriptEnabledWatch
+                });
+                return false;
+            }
             if (await isKodikWarmupDoneForCurrentCardDay()) return true;
             if (!(await isCurrentServerDayConfirmed())) {
                 log('Запрос квеста просмотра ждёт подтверждения нового дня от сайта.');
@@ -12251,7 +13212,14 @@
                 };
 
                 try {
-                    const result = await fetchData('/index.php?controller=ajax&mod=anime_grabber&module=kodik_watched', {
+                    if (!(await isKodikWarmupAuthorized(trigger))) {
+                        suiteSelfDiagnosticIssue('autowatch', 'watch_quest_cancelled_after_module_disabled', {
+                            source:trigger?.source || 'unknown',
+                            cardLootActive:trigger?.cardLootActive === true
+                        });
+                        return false;
+                    }
+                    const responseText = await fetchData('/index.php?controller=ajax&mod=anime_grabber&module=kodik_watched', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
@@ -12262,7 +13230,31 @@
                             news_id: entry.anime_id,
                             kodik_data: JSON.stringify(watchData)
                         }).toString()
-                    }, 'json');
+                    }, 'text');
+
+                    const normalizedResponse = String(responseText || '').trim();
+                    if(/^Hacking attempt!?$/i.test(normalizedResponse)){
+                        await markKodikWarmupDoneForCurrentCardDay(entry, targetEpisode, 'terminal');
+                        suiteSelfDiagnosticIssue('autowatch', 'watch_quest_rejected_hacking_attempt', {
+                            animeId:entry.anime_id,
+                            season:watchData.season,
+                            episode:targetEpisode,
+                            response:normalizedResponse
+                        });
+                        warn('Квест просмотра отклонён сайтом как Hacking attempt; повторов сегодня не будет.');
+                        return false;
+                    }
+
+                    let result = null;
+                    try { result = JSON.parse(normalizedResponse); }
+                    catch(error) {
+                        suiteSelfDiagnosticIssue('autowatch', 'watch_quest_unexpected_response', {
+                            animeId:entry.anime_id,
+                            episode:targetEpisode,
+                            response:normalizedResponse.slice(0, 1000),
+                            error:error?.message || String(error)
+                        });
+                    }
 
                     if (result?.status) {
                         await markKodikWarmupDoneForCurrentCardDay(entry, targetEpisode, 'ok');
@@ -12677,8 +13669,13 @@
                 scriptEnabledWatch = await GM_getValue(STORAGE_KEY_WATCH, true);
                 pauseOnLimitEnabled = await GM_getValue(PAUSE_ON_LIMIT_ENABLED_KEY, true);
 
-                if (!scriptEnabledWatch) {
-                    scheduleNext(RETRY_DISABLED_MS);
+                if (!cfg.modAutoLootCards || !window.__suiteAutoLootCardsInstalled || !scriptEnabledWatch) {
+                    stopMainCardCheckLogic();
+                    return;
+                }
+
+                if (animeDbEmpty && await refreshAnimeDbEmptyState()) {
+                    scheduleNext(EMPTY_DB_RECHECK_MS);
                     return;
                 }
 
@@ -12730,12 +13727,12 @@
 
                 const initialPool = await buildOrderedPool();
                 if (!initialPool.length) {
-                    log('База аниме пуста. Автолут остановлен до добавления аниме.');
-                    saveDiagnosticLog('anime_database_empty');
-                    safePush('info', 'Добавьте аниме в базу, чтобы автолут мог получать карты.');
-                    stopMainCardCheckLogic();
+                    log('База аниме пуста. Автолут ждёт добавления аниме.');
+                    await markAnimeDbEmpty();
+                    scheduleNext(EMPTY_DB_RECHECK_MS);
                     return;
                 }
+                if (animeDbEmpty) await clearAnimeDbEmptyState();
 
                 const state = await updateSmartTarget();
                 if (!state || state.index === -1) {
@@ -12802,7 +13799,10 @@
 
                 const serverDayConfirmed = await isCurrentServerDayConfirmed();
                 if (serverDayConfirmed) {
-                    ensureDailyKodikWarmup(cur, targetEp).catch(e => {
+                    ensureDailyKodikWarmup(cur, targetEp, {
+                        source:'card_loot_cycle',
+                        cardLootActive:true
+                    }).catch(e => {
                         warn('Не удалось отправить запрос квеста просмотра:', e);
                     });
                 }
@@ -12816,7 +13816,10 @@
                 if (data.cards) {
                     if (!serverDayConfirmed) {
                         await confirmCurrentServerDay('card_response');
-                        ensureDailyKodikWarmup(cur, targetEp).catch(e => {
+                        ensureDailyKodikWarmup(cur, targetEp, {
+                            source:'card_loot_cycle',
+                            cardLootActive:true
+                        }).catch(e => {
                             warn('Не удалось отправить запрос квеста просмотра:', e);
                         });
                     }
@@ -13455,6 +14458,16 @@
         // UI
         // =========================================================
         async function updateButtonState() {
+            window.__suiteAutoLootCardsHealthAt = Date.now();
+            window.__suiteAutoLootCardsRuntimeState = {
+                enabled: !!scriptEnabledWatch,
+                leader: !!isThisTabLeader(),
+                loopRunning: !!isLoopRunning,
+                nextRunAt: Number(nextRunAt || 0),
+                timeoutPresent: !!checkNewCardTimeoutId,
+                animeDbEmpty: !!animeDbEmpty,
+                updatedAt: Date.now()
+            };
             const btn = document.getElementById('aw-active-tab-toggle');
             const info = document.getElementById('aw-active-tab-info');
             const timer = document.getElementById('aw-active-tab-timer');
@@ -13463,6 +14476,9 @@
             const holder = document.getElementById('aw-active-tab-holder');
             const barFill = document.getElementById('aw-daily-bar-fill');
             const lastCardEl = document.getElementById('aw-active-tab-last-card');
+            const dbButton = document.getElementById('aw-open-anime-db');
+            const dbWarning = document.getElementById('aw-empty-db-warning');
+            const panel = document.getElementById('aw-active-tab-panel');
             const title = document.querySelector('#aw-active-tab-panel .aw-title');
             if (!btn || !info || !timer || !daily || !pause || !holder) return;
 
@@ -13483,6 +14499,7 @@
             } else {
                 info.textContent = 'Эта вкладка выполняет автолут';
             }
+            if (animeDbEmpty) info.textContent = 'База аниме пуста — автолут ждёт заполнения';
 
             let compactTimerText = '-';
             if (nextRunAt > Date.now()) {
@@ -13504,6 +14521,10 @@
             } else {
                 timer.textContent = 'До попытки: —';
             }
+            if (animeDbEmpty) {
+                compactTimerText = 'ждёт базу';
+                timer.textContent = 'Проверка базы: раз в минуту';
+            }
 
             // прогресс-бар
             const progressState = await GM_getValue(DAILY_PROGRESS_KEY, null);
@@ -13520,12 +14541,20 @@
                 if (collapsed) {
                     title.innerHTML =
                         '<span class="aw-compact-name">АВТОЛУТ</span>' +
+                        (animeDbEmpty ? '<span class="aw-compact-badge aw-compact-db-empty">⚠ БАЗА ПУСТА</span>' : '') +
                         `<span class="aw-compact-badge aw-compact-limit">${dailyCompact}</span>` +
                         `<span class="aw-compact-badge aw-compact-time">${compactTimerText}</span>`;
                 } else {
                     title.textContent = 'Автолут';
                 }
             }
+            panel?.classList.toggle('aw-db-is-empty', animeDbEmpty === true);
+            if (dbButton) {
+                dbButton.classList.toggle('aw-db-empty-btn', animeDbEmpty === true);
+                dbButton.textContent = animeDbEmpty ? '⚠ База пуста' : 'База аниме';
+                dbButton.title = animeDbEmpty ? 'Добавьте хотя бы одно аниме — автолут сейчас ожидает' : 'Открыть базу аниме';
+            }
+            if (dbWarning) dbWarning.hidden = !animeDbEmpty;
             daily.textContent = `Сегодня: ${limit ? `${current} / ${limit}` : (current > 0 ? current : '?')}`;
 
             pause.textContent = `Пауза: ${paused ? 'да' : 'нет'}`;
@@ -13747,6 +14776,32 @@
                     background: #451a03;
                     border: 1px solid #92400e;
                     box-shadow: 0 0 12px rgba(245,158,11,.22);
+                }
+                .aw-compact-db-empty {
+                    color: #fecaca;
+                    background: #450a0a;
+                    border: 1px solid #dc2626;
+                    box-shadow: 0 0 14px rgba(239,68,68,.32);
+                }
+                #aw-active-tab-panel.aw-db-is-empty {
+                    border-color: #dc2626;
+                    box-shadow: 0 8px 40px rgba(0,0,0,.65),0 0 18px rgba(239,68,68,.18);
+                }
+                #aw-active-tab-panel .aw-db-empty-btn {
+                    color: #fecaca;
+                    background: #450a0a;
+                    border-color: #dc2626;
+                    box-shadow: 0 0 12px rgba(239,68,68,.24);
+                }
+                #aw-empty-db-warning {
+                    margin-top: 8px;
+                    padding: 7px 9px;
+                    border: 1px solid #dc2626;
+                    border-radius: 8px;
+                    color: #fecaca;
+                    background: rgba(69,10,10,.72);
+                    font-size: 12px;
+                    font-weight: 700;
                 }
                 .aw-last-card {
                     display: inline-block;
@@ -14081,6 +15136,7 @@
                     </div>
                     <div id="aw-active-tab-last-card" class="aw-line" style="display:none"></div>
                     <div id="aw-active-tab-timer" class="aw-line">До попытки: ...</div>
+                    <div id="aw-empty-db-warning" hidden>⚠ База аниме пуста. Добавьте аниме через кнопку ниже.</div>
                     <div class="aw-actions">
                         <button id="aw-open-anime-db" class="aw-btn">База аниме</button>
                         <button id="aw-open-stats" class="aw-btn">Статистика</button>
@@ -14231,6 +15287,9 @@
             stopPanelTicker();
             panelTickerIntervalId = setInterval(() => {
                 updateButtonState();
+                if (animeDbEmpty && Date.now() - emptyDbLastReminderAt >= EMPTY_DB_REMINDER_MS) {
+                    void markAnimeDbEmpty();
+                }
             }, 1000);
         }
 
@@ -14256,7 +15315,7 @@
             claimTabLock(document.hasFocus?.() === true);
 
             if (scriptEnabledWatch && isThisTabLeader()) {
-                scheduleNext(RESUME_DELAY_MS);
+                scheduleNext(animeDbEmpty ? EMPTY_DB_RECHECK_MS : RESUME_DELAY_MS);
             }
         }
 
@@ -14265,7 +15324,7 @@
             updateButtonState();
             if (becameLeader && scriptEnabledWatch) {
                 const hasFutureRun = checkNewCardTimeoutId && nextRunAt > Date.now() + RESUME_DELAY_MS;
-                if (!hasFutureRun) scheduleNext(RESUME_DELAY_MS);
+                if (!hasFutureRun) scheduleNext(animeDbEmpty ? EMPTY_DB_RECHECK_MS : RESUME_DELAY_MS);
             }
         }
 
@@ -14287,7 +15346,7 @@
                     }
                     if (isThisTabLeader()) {
                         const hasFutureRun = checkNewCardTimeoutId && nextRunAt > Date.now() + RESUME_DELAY_MS;
-                        if (!hasFutureRun) scheduleNext(RESUME_DELAY_MS);
+                        if (!hasFutureRun) scheduleNext(animeDbEmpty ? EMPTY_DB_RECHECK_MS : RESUME_DELAY_MS);
                         return;
                     }
                 }
@@ -14301,6 +15360,15 @@
                 if (e.key === TAB_LOCK_KEY) onTabLockChange(e);
             };
             window.addEventListener('storage', storageHandler);
+            if (typeof GM_addValueChangeListener === 'function') {
+                storageListenerId = GM_addValueChangeListener(ANIME_DB_KEY, () => {
+                    void refreshAnimeDbEmptyState().then(empty => {
+                        if (!empty && scriptEnabledWatch && isTabVisible() && isThisTabLeader()) {
+                            scheduleNext(RESUME_DELAY_MS);
+                        }
+                    });
+                });
+            }
         }
 
         function removeStorageListener() {
@@ -14337,6 +15405,7 @@
             await ensureDailyProgressState();
             await ensureAnimeDbInitialized();
             await syncFinishedArchiveWithDb();
+            await refreshAnimeDbEmptyState();
 
             createPanel();
             installFetchInterceptor();
@@ -14362,6 +15431,11 @@
             });
 
             if (isTabVisible() && scriptEnabledWatch && isThisTabLeader()) {
+                if (animeDbEmpty) {
+                    scheduleNext(EMPTY_DB_RECHECK_MS);
+                    log('База аниме пуста. Включён минутный режим ожидания заполнения базы.');
+                    return;
+                }
                 // Восстанавливаем таймер из прошлого запроса — не сбрасываем при перезагрузке
                 const restored = await restoreTimerFromStorage();
                 if (!restored) {
@@ -15405,11 +16479,11 @@
     if(xhrPrototype && !xhrPrototype.__suiteLabyrinthFatigueHooked){
       const originalOpen = xhrPrototype.open;
       const originalSend = xhrPrototype.send;
-      xhrPrototype.open = function(method, url){
+      const hookedOpen = function(method, url){
         this.__suiteLabyrinthFatigueUrl = String(url || '');
         return originalOpen.apply(this, arguments);
       };
-      xhrPrototype.send = function(body){
+      const hookedSend = function(body){
         const url = this.__suiteLabyrinthFatigueUrl || '';
         if(suiteLabyrinthFatigueIsStepRequest(url, body)){
           const startedAt = Date.now();
@@ -15433,6 +16507,12 @@
         }
         return originalSend.apply(this, arguments);
       };
+      hookedOpen.__suiteLabyrinthFatigueHooked = true;
+      hookedOpen.__suiteXhrOriginal = originalOpen;
+      hookedSend.__suiteLabyrinthFatigueHooked = true;
+      hookedSend.__suiteXhrOriginal = originalSend;
+      xhrPrototype.open = hookedOpen;
+      xhrPrototype.send = hookedSend;
       try{ Object.defineProperty(xhrPrototype, '__suiteLabyrinthFatigueHooked', { value:true, configurable:true }); }
       catch(e){ xhrPrototype.__suiteLabyrinthFatigueHooked = true; }
     }
@@ -15463,6 +16543,8 @@
         return request;
       }
       try{ Object.defineProperty(hookedFetch, '__suiteLabyrinthFatigueHooked', { value:true }); }catch(e){}
+      try{ Object.defineProperty(hookedFetch, '__suiteLabyrinthFatigueOriginal', { value:originalFetch }); }
+      catch(e){ hookedFetch.__suiteLabyrinthFatigueOriginal = originalFetch; }
       pageWindow.fetch = hookedFetch;
     }
   }
@@ -15654,7 +16736,8 @@
       ].filter(Boolean).join(' ').toLowerCase();
       const pageText = visibleEventText().toLowerCase();
       const responseCounter = suiteLabyrinthFatigueNumber(response.fatigue_counter?.value);
-      const counterReset = Number.isFinite(responseCounter) && responseCounter === 0 && Number(previousValue) > 0;
+      const skippedCounter = !!response.fatigue_counter?.skipped;
+      const counterReset = !skippedCounter && Number.isFinite(responseCounter) && responseCounter === 0 && Number(previousValue) > 0;
       if(responseText.includes('щит сработал') || (counterReset && pageText.includes('щит сработал'))) return 'shield_block';
       if(response.event === 'mimic_chest_back') return 'mimic_chest_back';
       if(response.event === 'trap_back') return 'trap_back';
@@ -15710,7 +16793,18 @@
       const previousValue = runtime.state.value;
       runtime.state.movesSincePrevious = Math.max(0, Number(runtime.state.movesSincePrevious || 0)) + 1;
       const counterValue = suiteLabyrinthFatigueNumber(response.fatigue_counter?.value);
-      if(Number.isFinite(counterValue)){
+      const skippedCounterReset = !!response.fatigue_counter?.skipped
+        && counterValue === 0
+        && Number(previousValue) > 0;
+      if(skippedCounterReset){
+        runtime.state.skipped = true;
+        suiteTelemetryLog('fatigue', 'skipped_counter_reset_ignored', {
+          previousValue,
+          reportedValue:counterValue,
+          coord,
+          response,
+        });
+      }else if(Number.isFinite(counterValue)){
         runtime.state.value = Math.max(0, Math.min(10, counterValue));
         runtime.state.skipped = !!response.fatigue_counter.skipped;
       }else{
@@ -15722,7 +16816,7 @@
       if(resetType){
         addResetEvent(resetType, response, coord, movesBeforeReset);
         runtime.state.movesSincePrevious = 0;
-      }else if(Number(previousValue) > 0 && Number.isFinite(counterValue) && counterValue === 0){
+      }else if(!skippedCounterReset && Number(previousValue) > 0 && Number.isFinite(counterValue) && counterValue === 0){
         suiteTelemetryLog('fatigue', 'unrecognized_counter_reset', {
           previousValue,
           response,
