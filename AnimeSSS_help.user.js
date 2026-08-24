@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.59
+// @version      3.60
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -3921,6 +3921,7 @@
     // ── Порция 2 ─────────────────────────────────────────
     {s:'Награда в виде',                                          icon:'coin',   title:'Награда',     theme:'neon-green'},
     {s:'Успешное повышение звёздности карты',                     icon:'star',   title:'Улучшение',   theme:'neon-green'},
+    {s:'Вы уже повышали уровень звёздности на другой такой же карточке', icon:'star', title:'Улучшение', theme:'neon-amber'},
     {
       s:'Данная карта не доступна к повышению уровня звёздности, но модераторы получили вашу заявку ' +
         'и после рассмотрения вы сможете улучшать данную карту',
@@ -3956,6 +3957,8 @@
     {s:'В этой комнате нельзя оставить подарок',                   icon:'warn',   title:'Комната',     theme:'neon-amber'},
     {s:'Ошибка установки подарка',                                icon:'err',    title:'Подарок',     theme:'rose'      },
     {s:'Правильный ответ',                                        icon:'check',  title:'Верно',       theme:'neon-green'},
+    {s:'Сначала ответь на вопрос викторины',                       icon:'warn',   title:'Викторина',   theme:'neon-amber'},
+    {s:'Шпион демонической секты? Тут дел непроворот)',            icon:'warn',   title:'Лабиринт',    theme:'neon-amber'},
     {s:'У тебя нет нужной карты для удара',                       icon:'warn',   title:'Внимание',    theme:'neon-amber'},
     {s:'Сначала победи сложного босса',                           icon:'warn',   title:'Внимание',    theme:'neon-amber'},
     {s:'Сначала победи мини-босса',                               icon:'warn',   title:'Внимание',    theme:'neon-amber'},
@@ -4046,6 +4049,7 @@
     {s:'Отголосок сорвался',                                       icon:'warn',   title:'Неудача',     theme:'rose'      },
     {s:'Отголосок уже исчез',                                      icon:'clock',  title:'Отголосок',   theme:'rose'      },
     {s:'Кирпич полностью заряжен',                                 icon:'bolt',   title:'Кирпич',      theme:'neon-green'},
+    {r:/Вы получили \d[\d\s]*\s+энергии небесного кирпича\.?/i, icon:'bolt', title:'Кирпич', theme:'neon-green'},
     {s:'Неудача. Ты не пройдешь',                                  icon:'warn',   title:'Неудача',     theme:'rose'      },
     {s:'Открытие паков карточек отключено',                        icon:'clock',  title:'Внимание',    theme:'neon-amber'},
     {s:'Карты не существует',                                      icon:'warn',   title:'Внимание',    theme:'neon-amber'},
@@ -4098,8 +4102,19 @@
       title:'Шахта',
       theme:'neon-green'
     },
+    {r:/Ты отремонтировал персональную шахту за \d[\d\s]*\s+[AА]СС\.?\s*Добыча ресурсов возобновлена\.?/i, icon:'coin', title:'Шахта', theme:'neon-green'},
     {s:'Ты помог со сбором шахты',                                 icon:'coin',   title:'Шахта',       theme:'neon-green'},
+    // ── Кодекс и испытания ────────────────────────────────
     {s:'Сначала заверши испытание Дао',                            icon:'warn',   title:'Дао',         theme:'neon-amber'},
+    {r:/Уровень культивации заверш[её]н!\s*Вы получили \d[\d\s]*\s+очк(?:о|а|ов) для испытаний актуальной главы Кодекса\.?/i, icon:'star', title:'Культивация', theme:'neon-green'},
+    {s:'Новое испытание успешно открыто',                          icon:'star',   title:'Испытание',   theme:'neon-green'},
+    {s:'Испытание успешно завершено',                              icon:'check',  title:'Испытание',   theme:'neon-green'},
+    // ── Награды Кодекса ───────────────────────────────────
+    {r:/Вы получили \d[\d\s]*\s+карт(?:у|ы)?\s+ранга\s+[A-E]\.?/i, icon:'card', title:'Карты', theme:'neon-green'},
+    {r:/Вы получили \d[\d\s]*\s+зв[её]здного рейтинга\.?/i,     icon:'star',   title:'Рейтинг',     theme:'neon-green'},
+    {r:/Вы получили \d[\d\s]*\s+камн(?:ень|я|ей) духа\.?/i,     icon:'coin',   title:'Камни духа',  theme:'neon-green'},
+    {r:/Вы получили \d[\d\s]*\s+опыта (?:аккаунта|уровня)\.?/i, icon:'lvl',    title:'Опыт',        theme:'neon-green'},
+    {s:'Полный рейтинг добавим следующим этапом',                  icon:'clock',  title:'Рейтинг',     theme:'neon-blue' },
     {s:'Отголосок повторён',                                       icon:'check',  title:'Готово',      theme:'emerald'   },
     {s:'Ты отказался от отголоска',                                icon:'warn',   title:'Отголосок',   theme:'rose'      },
     {s:'Всевидящее око показало соседние комнаты',                 icon:'bolt',   title:'Лабиринт',    theme:'neon-blue' },
