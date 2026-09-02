@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.60
+// @version      3.61
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -29,6 +29,10 @@
 
 (function () {
   'use strict';
+
+  // Служебный iframe нужен только как авторизованный снимок страницы клуба.
+  // Не запускаем внутри него модули помощника, таймеры и телеметрию.
+  if(window.top !== window && new URLSearchParams(location.search).has('suite_gacha_snapshot')) return;
 
   // ============================================================
   //  GM ХРАНИЛИЩЕ — утилиты
@@ -1206,6 +1210,7 @@
       if(current[marker]) return true;
       seen.add(current);
       current = current.__suiteLabyrinthFatigueOriginal
+        || current.__fatigueDebugOriginal
         || current.__suiteChatStoneOriginal
         || current.__suiteXhrOriginal
         || current.__awVisibleTabOriginal
@@ -1448,14 +1453,12 @@
         });
       }
       if(fatigueHealthy){
-        const pageWindow = getPageWindow();
-        const fetchHookPresent = suiteFunctionChainHas(pageWindow.fetch, '__suiteLabyrinthFatigueHooked');
-        const xhrPrototype = pageWindow.XMLHttpRequest?.prototype;
-        const xhrHookPresent = suiteFunctionChainHas(xhrPrototype?.open, '__suiteLabyrinthFatigueHooked')
-          && suiteFunctionChainHas(xhrPrototype?.send, '__suiteLabyrinthFatigueHooked');
+        const hookHealth = suiteLabyrinthFatigueHookHealth();
+        const fetchHookPresent = hookHealth.length > 0 && hookHealth.every(item => !item.fetchAvailable || item.fetchHookPresent);
+        const xhrHookPresent = hookHealth.length > 0 && hookHealth.every(item => !item.xhrAvailable || item.xhrHookPresent);
         const statePresent = !!window.__suiteLabyrinthFatigueState;
         if(!fetchHookPresent || !xhrHookPresent || !statePresent){
-          report('fatigue', 'step_capture_runtime_incomplete', { fetchHookPresent, xhrHookPresent, statePresent });
+          report('fatigue', 'step_capture_runtime_incomplete', { fetchHookPresent, xhrHookPresent, statePresent, contexts:hookHealth });
         }
         if(document.querySelector('.labyrinth__arena') && !document.getElementById('suite-lab-fatigue-counter')){
           report('fatigue', 'fatigue_counter_not_mounted');
@@ -3999,6 +4002,7 @@
     {s:'Ты выбрался из ловушки',                                   icon:'check',  title:'Ловушка',     theme:'emerald'   },
     {s:'Сначала выберись из ловушки',                              icon:'warn',   title:'Ловушка',     theme:'neon-amber'},
     {s:'Сбежать пока нельзя',                                      icon:'clock',  title:'Ловушка',     theme:'neon-amber'},
+    {s:'Недостаточно копий карты для снятия ловушки',               icon:'warn',   title:'Ловушка',     theme:'neon-amber'},
     {s:'Сначала выполни условие коллекции',                        icon:'warn',   title:'Внимание',    theme:'neon-amber'},
     {s:'Путь закрыт. Сначала собери нужное количество одинаковых карт.', icon:'lock', title:'Путь закрыт', theme:'neon-amber'},
     {s:'Вы уже выставили свою оценку для данной статьи',           icon:'warn',   title:'Внимание',    theme:'neon-amber'},
@@ -4020,6 +4024,7 @@
     {s:'Следующий шаг ещё недоступен',                             icon:'clock',  title:'Лабиринт',    theme:'neon-amber'},
     {s:'Купить ход можно только когда доступных ходов не осталось', icon:'coin',   title:'Лабиринт',    theme:'neon-amber'},
     {s:'На сегодня попытки закончились',                           icon:'clock',  title:'Лабиринт',    theme:'rose'      },
+    {r:/Подношение принято!\s*Получено \d[\d\s]*\s+камн(?:ень|я|ей) духа и \+\d+\s+ход(?:а|ов)? в Лабиринте Бесконечности\.\s*Так же увеличен шанс познать просветление и лимит получения карточек за просмотр/i, icon:'coin', title:'Подношение', theme:'neon-green'},
     {s:'Щит активирован',                                          icon:'shield', title:'Щит',         theme:'neon-blue' },
     {s:'Алтарь наградил тебя',                                     icon:'star',   title:'Награда',     theme:'neon-green'},
     {s:'Сундук открыт',                                            icon:'star',   title:'Сундук',      theme:'neon-green'},
@@ -4052,6 +4057,7 @@
     {r:/Вы получили \d[\d\s]*\s+энергии небесного кирпича\.?/i, icon:'bolt', title:'Кирпич', theme:'neon-green'},
     {s:'Неудача. Ты не пройдешь',                                  icon:'warn',   title:'Неудача',     theme:'rose'      },
     {s:'Открытие паков карточек отключено',                        icon:'clock',  title:'Внимание',    theme:'neon-amber'},
+    {s:'Доступен сегодняшний набор карт.',                          icon:'card',   title:'Набор карт',  theme:'neon-green'},
     {s:'Карты не существует',                                      icon:'warn',   title:'Внимание',    theme:'neon-amber'},
     {s:'Данной карты не сущетсвует',                               icon:'warn',   title:'Внимание',    theme:'neon-amber'},
     {s:'У вас нет такой карты',                                    icon:'card',   title:'Карта',        theme:'rose'      },
@@ -4109,6 +4115,9 @@
     {r:/Уровень культивации заверш[её]н!\s*Вы получили \d[\d\s]*\s+очк(?:о|а|ов) для испытаний актуальной главы Кодекса\.?/i, icon:'star', title:'Культивация', theme:'neon-green'},
     {s:'Новое испытание успешно открыто',                          icon:'star',   title:'Испытание',   theme:'neon-green'},
     {s:'Испытание успешно завершено',                              icon:'check',  title:'Испытание',   theme:'neon-green'},
+    {s:'Глава полностью завершена.',                               icon:'check',  title:'Кодекс',      theme:'neon-green'},
+    {r:/Восстановлено \d[\d\s]*\s+очк(?:о|а|ов)?\.? испытаний\.\s*Списано \d[\d\s]*\s+случайных карт ранга C, D или E\.?/i, icon:'refresh', title:'Испытание', theme:'neon-green'},
+    {r:/Испытание успешно изменено\.\s*Списано \d[\d\s]*\s+случайных карт ранга C, D или E\.?/i, icon:'refresh', title:'Испытание', theme:'neon-green'},
     // ── Награды Кодекса ───────────────────────────────────
     {r:/Вы получили \d[\d\s]*\s+карт(?:у|ы)?\s+ранга\s+[A-E]\.?/i, icon:'card', title:'Карты', theme:'neon-green'},
     {r:/Вы получили \d[\d\s]*\s+зв[её]здного рейтинга\.?/i,     icon:'star',   title:'Рейтинг',     theme:'neon-green'},
@@ -4127,6 +4136,7 @@
     {s:'Нельзя одновременно выбирать карты ранга S и +',           icon:'warn',   title:'Выбор карт',   theme:'neon-amber'},
     {s:'Уже выбран дубль этой карты. С ним нельзя добавлять другие карты.', icon:'warn', title:'Выбор карт', theme:'neon-amber'},
     {s:'Нельзя добавлять дубль этой карты, когда уже выбраны другие карты.', icon:'warn', title:'Выбор карт', theme:'neon-amber'},
+    {s:'Одна из выбранных вами карт больше вам не пренадлежит, обновите страницу и попробуйте снова', icon:'warn', title:'Выбор карт', theme:'neon-amber'},
     {s:'Максимум 70 карточек',                                     icon:'warn',   title:'Лимит',       theme:'rose'      },
     {s:'Награда получена',                                         icon:'coin',   title:'Награда',     theme:'neon-green'},
     {s:'Сегодня вы уже ставили реакцию на комментарий данного пользователя', icon:'clock', title:'Лимит', theme:'rose'},
@@ -4171,9 +4181,81 @@
     return null;
   }
 
-  function cptSendUnknown(text){
-    suiteReportEvent('unknown_push', { text });
+  const CPT_UNKNOWN_SENT_KEY = 'suite_custom_push_unknown_sent_v1';
+  const cptUnknownInFlight = new Set();
+  let cptUnknownSent = new Set();
+
+  function cptNormalizeUnknownText(text){
+    return String(text || '').replace(/\s+/g, ' ').trim();
   }
+
+  function cptReadUnknownSentState(){
+    const stored = gmStoreGet(CPT_UNKNOWN_SENT_KEY, null);
+    if(stored?.version === SUITE_ACCESS_VERSION && Array.isArray(stored.notifications)){
+      return {
+        version: SUITE_ACCESS_VERSION,
+        notifications: [...new Set(stored.notifications.map(cptNormalizeUnknownText).filter(Boolean))]
+      };
+    }
+
+    const emptyState = { version: SUITE_ACCESS_VERSION, notifications: [] };
+    gmStoreSet(CPT_UNKNOWN_SENT_KEY, emptyState);
+    return emptyState;
+  }
+
+  function cptPrepareUnknownSentStore(){
+    const state = cptReadUnknownSentState();
+    cptUnknownSent = new Set(state.notifications);
+
+    if(typeof GM_addValueChangeListener === 'function'){
+      try {
+        GM_addValueChangeListener(CPT_UNKNOWN_SENT_KEY, (_key, _oldValue, newValue, remote) => {
+          if(!remote) return;
+          let nextState = newValue;
+          if(typeof nextState === 'string'){
+            try { nextState = JSON.parse(nextState); } catch(e) { return; }
+          }
+          if(nextState?.version !== SUITE_ACCESS_VERSION || !Array.isArray(nextState.notifications)) return;
+          nextState.notifications
+            .map(cptNormalizeUnknownText)
+            .filter(Boolean)
+            .forEach(notification => cptUnknownSent.add(notification));
+        });
+      } catch(e) {}
+    }
+  }
+
+  async function cptSendUnknown(text){
+    const normalizedText = cptNormalizeUnknownText(text);
+    if(!normalizedText || cptUnknownSent.has(normalizedText) || cptUnknownInFlight.has(normalizedText)) return false;
+
+    const state = cptReadUnknownSentState();
+    state.notifications.forEach(notification => cptUnknownSent.add(notification));
+    if(cptUnknownSent.has(normalizedText)) return false;
+
+    cptUnknownInFlight.add(normalizedText);
+    try {
+      const sent = await suiteReportEvent('unknown_push', { text: normalizedText });
+      if(!sent) return false;
+
+      const latestState = cptReadUnknownSentState();
+      const mergedNotifications = new Set([
+        ...latestState.notifications,
+        ...cptUnknownSent,
+        normalizedText
+      ]);
+      cptUnknownSent = mergedNotifications;
+      gmStoreSet(CPT_UNKNOWN_SENT_KEY, {
+        version: SUITE_ACCESS_VERSION,
+        notifications: [...mergedNotifications]
+      });
+      return true;
+    } finally {
+      cptUnknownInFlight.delete(normalizedText);
+    }
+  }
+
+  cptPrepareUnknownSentStore();
 
   let cptRoot=null, cptStyleInjected=false;
   const cptMap=new Map();
@@ -4398,7 +4480,7 @@
         const match=cptResolve(text);
         if(match){ cptShow(text,match.icon,match.title,text,CPT_CLS[match.theme]); return null; }
         // Неизвестное уведомление — отправляем в дискорд для пополнения базы
-        if(text) cptSendUnknown(text);
+        if(text) void cptSendUnknown(text);
         return orig(...args);
       };
       wrapped.__suiteCustomPushHook=true;
@@ -5465,6 +5547,21 @@
     function getTodayKey(){ return getRewardCycleInfo().cycleKey || getMoscowParts().dateKey; }
     function getDailyState(){ return getStoredJson('daily_state', {}); }
     function setDailyState(value){ setStoredJson('daily_state', value); }
+    function getLastCheckState(){ return getStoredJson('last_check', {}); }
+    function getCheckThrottleDelay(){
+      const lastCheck = getLastCheckState();
+      if(lastCheck.cycleKey !== getTodayKey()) return 0;
+      const elapsed = Date.now() - Number(lastCheck.checkedAt || 0);
+      return Math.max(0, RETRY_DELAY_MS - Math.max(0, elapsed));
+    }
+    function reserveCheckSlot(reason){
+      setStoredJson('last_check', {
+        cycleKey:getTodayKey(),
+        checkedAt:Date.now(),
+        reason:String(reason || 'schedule'),
+        owner:TAB_ID
+      });
+    }
     function getTabLock(){ return getStoredJson('tab_lock', null); }
     function setTabLock(value){ setStoredJson('tab_lock', value); }
     function setStatus(text){
@@ -5663,10 +5760,18 @@
         state.retryTimer = null;
       }
     }
-    function startRetrying(){
+    function startRetrying(delayMs = RETRY_DELAY_MS){
       if(state.retryTimer || isTodayFinished()) return;
+      const delay = Math.max(1000, Math.min(RETRY_DELAY_MS, Number(delayMs) || RETRY_DELAY_MS));
       setStatus('Награда пока не собрана, проверяю раз в минуту до 21:00 МСК.');
-      state.retryTimer = setInterval(() => runDailyCheck('retry'), RETRY_DELAY_MS);
+      if(delay < RETRY_DELAY_MS){
+        state.retryTimer = setTimeout(() => {
+          state.retryTimer = null;
+          void runDailyCheck('retry');
+        }, delay);
+      }else{
+        state.retryTimer = setInterval(() => runDailyCheck('retry'), RETRY_DELAY_MS);
+      }
     }
     function getFrameDocument(){
       try{ return state.gachaFrame?.contentDocument || null; }
@@ -5727,7 +5832,17 @@
         scheduleNextCheck();
         return;
       }
-      if(!acquireTabLock()) return;
+      if(!acquireTabLock()){
+        startRetrying();
+        return;
+      }
+      const throttleDelay = getCheckThrottleDelay();
+      if(throttleDelay > 0){
+        releaseTabLock();
+        startRetrying(throttleDelay);
+        return;
+      }
+      reserveCheckSlot(reason);
       state.isRunning = true;
       suiteTelemetryLog('gacha', 'check_started', { reason, today:getTodayKey(), page:location.pathname });
       try{
@@ -5786,6 +5901,13 @@
           return;
         }
         if(!reward.isAvailable){
+          markToday('waiting', {
+            currentExp,
+            need:reward.need,
+            step:reward.step,
+            rewardType:reward.type,
+            reason:'reward_not_available'
+          });
           setStatus('Опыт хватает, но первая награда еще не стала доступной.');
           startRetrying();
           return;
@@ -16560,87 +16682,134 @@
     };
   }
 
+  function suiteLabyrinthFatigueHookContexts(){
+    const contexts = [];
+    const add = (label, target) => {
+      if(!target || contexts.some(item => item.target === target)) return;
+      contexts.push({ label, target });
+    };
+    add('sandbox', window);
+    try{ add('page', getPageWindow()); }catch(e){}
+    return contexts;
+  }
+
+  function suiteLabyrinthFatigueHookHealth(){
+    return suiteLabyrinthFatigueHookContexts().map(({ label, target }) => {
+      try{
+        const xhrPrototype = target.XMLHttpRequest?.prototype;
+        const xhrAvailable = !!xhrPrototype;
+        const fetchAvailable = typeof target.fetch === 'function';
+        return {
+          label,
+          xhrAvailable,
+          xhrHookPresent:!xhrAvailable || (
+            suiteFunctionChainHas(xhrPrototype.open, '__suiteLabyrinthFatigueHooked')
+            && suiteFunctionChainHas(xhrPrototype.send, '__suiteLabyrinthFatigueHooked')
+          ),
+          fetchAvailable,
+          fetchHookPresent:!fetchAvailable || suiteFunctionChainHas(target.fetch, '__suiteLabyrinthFatigueHooked'),
+        };
+      }catch(e){
+        return { label, xhrAvailable:false, xhrHookPresent:false, fetchAvailable:false, fetchHookPresent:false };
+      }
+    });
+  }
+
   function installLabyrinthFatigueStepHook(){
-    const pageWindow = getPageWindow();
     const dispatch = payload => {
       setTimeout(() => {
         const handler = window.__suiteLabyrinthFatigueStepHandler;
         if(typeof handler === 'function') handler(payload);
       }, 0);
     };
-
-    const xhrPrototype = pageWindow.XMLHttpRequest?.prototype;
-    if(xhrPrototype && !xhrPrototype.__suiteLabyrinthFatigueHooked){
-      const originalOpen = xhrPrototype.open;
-      const originalSend = xhrPrototype.send;
-      const hookedOpen = function(method, url){
-        this.__suiteLabyrinthFatigueUrl = String(url || '');
-        return originalOpen.apply(this, arguments);
-      };
-      const hookedSend = function(body){
-        const url = this.__suiteLabyrinthFatigueUrl || '';
-        if(suiteLabyrinthFatigueIsStepRequest(url, body)){
-          const startedAt = Date.now();
-          this.addEventListener('loadend', function(){
-            let data = null;
-            let rawText = '';
-            try{
-              if(this.responseType === 'json') data = this.response;
-              else if(!this.responseType || this.responseType === 'text') rawText = this.responseText || '';
-            }catch(e){}
-            if(!data && rawText){
-              try{ data = JSON.parse(rawText); }catch(e){}
-            }
-            dispatch({
-              transport:'xhr',
-              status:Number(this.status || 0),
-              durationMs:Date.now() - startedAt,
-              response:suiteLabyrinthFatigueResponseSummary(data),
-            });
-          }, { once:true });
+    suiteLabyrinthFatigueHookContexts().forEach(({ label, target }) => {
+      try{
+        const xhrPrototype = target.XMLHttpRequest?.prototype;
+        if(xhrPrototype){
+          if(typeof xhrPrototype.open === 'function' && !suiteFunctionChainHas(xhrPrototype.open, '__suiteLabyrinthFatigueHooked')){
+            const originalOpen = xhrPrototype.open;
+            const hookedOpen = function(method, url){
+              this.__suiteLabyrinthFatigueUrl = String(url || '');
+              return originalOpen.apply(this, arguments);
+            };
+            hookedOpen.__suiteLabyrinthFatigueHooked = true;
+            hookedOpen.__suiteLabyrinthFatigueHookContext = label;
+            hookedOpen.__suiteXhrOriginal = originalOpen;
+            xhrPrototype.open = hookedOpen;
+          }
+          if(typeof xhrPrototype.send === 'function' && !suiteFunctionChainHas(xhrPrototype.send, '__suiteLabyrinthFatigueHooked')){
+            const originalSend = xhrPrototype.send;
+            const hookedSend = function(body){
+              const url = this.__suiteLabyrinthFatigueUrl || '';
+              if(suiteLabyrinthFatigueIsStepRequest(url, body)){
+                const startedAt = Date.now();
+                this.addEventListener('loadend', function(){
+                  let data = null;
+                  let rawText = '';
+                  try{
+                    if(this.responseType === 'json') data = this.response;
+                    else if(!this.responseType || this.responseType === 'text') rawText = this.responseText || '';
+                  }catch(e){}
+                  if(!data && rawText){
+                    try{ data = JSON.parse(rawText); }catch(e){}
+                  }
+                  dispatch({
+                    transport:`xhr:${label}`,
+                    status:Number(this.status || 0),
+                    durationMs:Date.now() - startedAt,
+                    response:suiteLabyrinthFatigueResponseSummary(data),
+                  });
+                }, { once:true });
+              }
+              return originalSend.apply(this, arguments);
+            };
+            hookedSend.__suiteLabyrinthFatigueHooked = true;
+            hookedSend.__suiteLabyrinthFatigueHookContext = label;
+            hookedSend.__suiteXhrOriginal = originalSend;
+            xhrPrototype.send = hookedSend;
+          }
+          const xhrHookPresent = suiteFunctionChainHas(xhrPrototype.open, '__suiteLabyrinthFatigueHooked')
+            && suiteFunctionChainHas(xhrPrototype.send, '__suiteLabyrinthFatigueHooked');
+          try{ Object.defineProperty(xhrPrototype, '__suiteLabyrinthFatigueHooked', { value:xhrHookPresent, configurable:true }); }
+          catch(e){ xhrPrototype.__suiteLabyrinthFatigueHooked = xhrHookPresent; }
         }
-        return originalSend.apply(this, arguments);
-      };
-      hookedOpen.__suiteLabyrinthFatigueHooked = true;
-      hookedOpen.__suiteXhrOriginal = originalOpen;
-      hookedSend.__suiteLabyrinthFatigueHooked = true;
-      hookedSend.__suiteXhrOriginal = originalSend;
-      xhrPrototype.open = hookedOpen;
-      xhrPrototype.send = hookedSend;
-      try{ Object.defineProperty(xhrPrototype, '__suiteLabyrinthFatigueHooked', { value:true, configurable:true }); }
-      catch(e){ xhrPrototype.__suiteLabyrinthFatigueHooked = true; }
-    }
 
-    if(typeof pageWindow.fetch === 'function' && !pageWindow.fetch.__suiteLabyrinthFatigueHooked){
-      const originalFetch = pageWindow.fetch;
-      function hookedFetch(resource, init){
-        const url = typeof resource === 'string' ? resource : resource?.url || '';
-        const shouldCapture = suiteLabyrinthFatigueIsStepRequest(url, init?.body);
-        const startedAt = shouldCapture ? Date.now() : 0;
-        const request = originalFetch.apply(this, arguments);
-        if(shouldCapture){
-          request.then(response => {
-            response.clone().text().then(text => {
-              let data = null;
-              try{ data = JSON.parse(text); }catch(e){}
-              dispatch({
-                transport:'fetch',
-                status:Number(response.status || 0),
-                durationMs:Date.now() - startedAt,
-                response:suiteLabyrinthFatigueResponseSummary(data),
+        if(typeof target.fetch === 'function' && !suiteFunctionChainHas(target.fetch, '__suiteLabyrinthFatigueHooked')){
+          const originalFetch = target.fetch;
+          function hookedFetch(resource, init){
+            const url = typeof resource === 'string' ? resource : resource?.url || '';
+            const shouldCapture = suiteLabyrinthFatigueIsStepRequest(url, init?.body);
+            const startedAt = shouldCapture ? Date.now() : 0;
+            const request = originalFetch.apply(this, arguments);
+            if(shouldCapture){
+              request.then(response => {
+                response.clone().text().then(text => {
+                  let data = null;
+                  try{ data = JSON.parse(text); }catch(e){}
+                  dispatch({
+                    transport:`fetch:${label}`,
+                    status:Number(response.status || 0),
+                    durationMs:Date.now() - startedAt,
+                    response:suiteLabyrinthFatigueResponseSummary(data),
+                  });
+                }).catch(()=>{});
+              }).catch(error => {
+                dispatch({ transport:`fetch:${label}`, status:0, durationMs:Date.now() - startedAt, response:null, error:String(error) });
               });
-            }).catch(()=>{});
-          }).catch(error => {
-            dispatch({ transport:'fetch', status:0, durationMs:Date.now() - startedAt, response:null, error:String(error) });
-          });
+            }
+            return request;
+          }
+          try{ Object.defineProperty(hookedFetch, '__suiteLabyrinthFatigueHooked', { value:true }); }catch(e){}
+          try{ Object.defineProperty(hookedFetch, '__suiteLabyrinthFatigueHookContext', { value:label }); }catch(e){}
+          try{ Object.defineProperty(hookedFetch, '__suiteLabyrinthFatigueOriginal', { value:originalFetch }); }
+          catch(e){ hookedFetch.__suiteLabyrinthFatigueOriginal = originalFetch; }
+          target.fetch = hookedFetch;
         }
-        return request;
+      }catch(error){
+        suiteSelfDiagnosticIssue('fatigue', 'step_hook_install_failed', { context:label, error });
       }
-      try{ Object.defineProperty(hookedFetch, '__suiteLabyrinthFatigueHooked', { value:true }); }catch(e){}
-      try{ Object.defineProperty(hookedFetch, '__suiteLabyrinthFatigueOriginal', { value:originalFetch }); }
-      catch(e){ hookedFetch.__suiteLabyrinthFatigueOriginal = originalFetch; }
-      pageWindow.fetch = hookedFetch;
-    }
+    });
+    return suiteLabyrinthFatigueHookHealth();
   }
 
   function cleanupLabyrinthFatigue(){
@@ -16699,6 +16868,8 @@
       statsPage:0,
       cacheExact:false,
       localUpdateAt:0,
+      pageStepKey:null,
+      lastProcessedPageKey:null,
       state:loadState(),
       handleStepResponse:null,
     };
@@ -16812,6 +16983,15 @@
       ].join(':');
     }
 
+    function pageStepKey(response, coord){
+      return [
+        response.today_steps ?? '',
+        response.total_steps ?? '',
+        coord?.x ?? '',
+        coord?.y ?? '',
+      ].join(':');
+    }
+
     function visibleEventText(){
       return [
         document.querySelector('#labyrinthEventTitle')?.textContent,
@@ -16819,6 +16999,72 @@
         document.querySelector('#labyrinthFatigueTitle')?.textContent,
         document.querySelector('#labyrinthFatigueText')?.textContent,
       ].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+    }
+
+    function syncLabyrinthFatiguePageState(){
+      let data = null;
+      try{ data = getPageWindow()?.labyrinthData; }catch(e){}
+      const response = suiteLabyrinthFatigueResponseSummary(data);
+      if(!response?.fatigue_counter) return false;
+      if(!successfulStep({ status:200, response })) return false;
+      const coord = normalizeCoord(response.current) || readCurrentCoord() || runtime.state.coord;
+      const observedKey = pageStepKey(response, coord);
+      if(!observedKey.replace(/:/g, '')) return false;
+
+      if(runtime.pageStepKey === null){
+        runtime.pageStepKey = observedKey;
+        runtime.lastProcessedPageKey = observedKey;
+        mergeWithStoredState();
+        const previousValue = runtime.state.value;
+        const counterValue = suiteLabyrinthFatigueNumber(response.fatigue_counter.value);
+        const skippedCounterReset = !!response.fatigue_counter.skipped
+          && counterValue === 0
+          && Number(previousValue) > 0;
+        let changed = false;
+        if(skippedCounterReset){
+          if(!runtime.state.skipped){ runtime.state.skipped = true; changed = true; }
+        }else if(Number.isFinite(counterValue)){
+          const nextValue = Math.max(0, Math.min(10, counterValue));
+          if(runtime.state.value !== nextValue){ runtime.state.value = nextValue; changed = true; }
+          const nextSkipped = !!response.fatigue_counter.skipped;
+          if(runtime.state.skipped !== nextSkipped){ runtime.state.skipped = nextSkipped; changed = true; }
+        }
+        if(coord && !sameCoord(runtime.state.coord, coord)){
+          runtime.state.coord = coord;
+          changed = true;
+        }
+        const accuracyChanged = Number.isFinite(runtime.state.value) && !runtime.cacheExact;
+        if(Number.isFinite(runtime.state.value)) runtime.cacheExact = true;
+        if(changed){
+          runtime.state.updatedAt = Date.now();
+          runtime.localUpdateAt = runtime.state.updatedAt;
+          saveState();
+          suiteTelemetryLog('fatigue', 'page_state_baseline_synced', {
+            previousValue,
+            value:runtime.state.value,
+            skipped:runtime.state.skipped,
+            coord:runtime.state.coord,
+          });
+        }
+        if(changed || accuracyChanged){
+          renderBox();
+          if(document.querySelector(`#${MODAL_ID}.is-open`)) renderModal();
+        }
+        return changed || accuracyChanged;
+      }
+
+      if(runtime.pageStepKey === observedKey) return false;
+      runtime.pageStepKey = observedKey;
+      if(runtime.lastProcessedPageKey === observedKey) return false;
+      suiteTelemetryLog('fatigue', 'page_state_fallback_used', {
+        counter:response.fatigue_counter,
+        event:response.event,
+        coord,
+        todaySteps:response.today_steps,
+        totalSteps:response.total_steps,
+      });
+      handleStepResponse({ transport:'page_state', status:200, durationMs:0, response });
+      return true;
     }
 
     function detectResetEvent(response, previousValue){
@@ -16878,11 +17124,13 @@
 
       mergeWithStoredState();
       const coord = normalizeCoord(response.current) || readCurrentCoord() || runtime.state.coord;
+      const observedKey = pageStepKey(response, coord);
       const key = stepKey(response, coord);
-      if(runtime.state.recentStepKeys.includes(key)){
+      if(runtime.lastProcessedPageKey === observedKey || runtime.state.recentStepKeys.includes(key)){
         suiteTelemetryLog('fatigue', 'duplicate_step_ignored', { key, response });
         return;
       }
+      runtime.lastProcessedPageKey = observedKey;
 
       const previousValue = runtime.state.value;
       runtime.state.movesSincePrevious = Math.max(0, Number(runtime.state.movesSincePrevious || 0)) + 1;
@@ -16957,6 +17205,7 @@
     runtime.handleStepResponse = handleStepResponse;
     window.__suiteLabyrinthFatigueStepHandler = handleStepResponse;
     installLabyrinthFatigueStepHook();
+    syncLabyrinthFatiguePageState();
 
     try{
       runtime.storageListener = GM_addValueChangeListener(STORAGE_KEY, (_key, _oldValue, newValue, remote) => {
@@ -17209,11 +17458,15 @@
     }
 
     runtime.startTimer = setTimeout(() => {
+      installLabyrinthFatigueStepHook();
+      syncLabyrinthFatiguePageState();
       updateCacheAccuracy();
       attachBox();
       renderBox();
     }, 500);
     runtime.attachInterval = setInterval(() => {
+      installLabyrinthFatigueStepHook();
+      syncLabyrinthFatiguePageState();
       updateCacheAccuracy();
       attachBox();
       renderBox();
