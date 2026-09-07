@@ -1741,18 +1741,43 @@
     .packs-page .lootbox__card.cv-pack-valued.cv-pack-neon > .cv-pack-neon-ring { bottom:56px; }
     #cv-pack-tools { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-top:12px; }
     #cv-pack-tools:empty { display:none; }
-    #cv-pack-tools > #cv-guarantee-block, #cv-pack-tools > #cv-stats-btn {
-      box-sizing:border-box; width:100%; min-width:0; margin:0; max-width:none; padding:16px;
+    #cv-pack-tools > #cv-guarantee-block, #cv-pack-tools > #cv-pack-stats-card {
+      display:flex; align-items:flex-start; gap:16px; box-sizing:border-box;
+      width:100%; min-width:0; min-height:168px; margin:0; max-width:none; padding:22px 20px;
       border:1px solid var(--bdc,#292929); border-radius:12px; background:var(--bg,#111);
       color:var(--tt,#ddd); font:inherit; text-align:left; line-height:1.5; box-shadow:none;
     }
     #cv-pack-tools > #cv-guarantee-block { order:0; }
-    #cv-pack-tools > #cv-stats-btn { order:1; cursor:pointer; }
-    #cv-pack-tools > #cv-stats-btn:hover { border-color:var(--accent,#9e294f); }
-    #cv-pack-tools strong { display:block; font-size:13px; }
-    #cv-pack-tools small { display:block; margin-top:5px; color:var(--tt-2,#999); font-size:12px; }
-    #cv-pack-tools .cv-pack-tool-value { color:#c4b5fd; }
+    #cv-pack-tools > #cv-pack-stats-card { order:1; }
+    #cv-pack-tools .cv-pack-tool-icon {
+      display:grid; place-items:center; flex:0 0 42px; height:46px; border:1px solid #9964c1;
+      border-radius:9px; background:rgba(160,108,205,.08); color:#c78be9; font-size:23px; font-weight:700;
+    }
+    #cv-pack-stats-card .cv-pack-tool-icon { color:#e5779c; border-color:#a63d61; background:rgba(158,41,79,.09); }
+    #cv-pack-tools .cv-pack-tool-icon svg { display:block; width:23px; height:23px; }
+    #cv-pack-tools .cv-pack-tool-body { min-width:0; flex:1; }
+    #cv-pack-tools .cv-pack-tool-title { display:block; font-size:14px; font-weight:700; color:var(--tt,#ddd); }
+    #cv-pack-tools .cv-pack-tool-note { display:block; margin-top:4px; font-size:12px; color:var(--tt-2,#999); }
+    #cv-pack-tools .cv-pack-metrics { display:flex; flex-wrap:wrap; align-items:flex-start; gap:12px 24px; margin-top:14px; }
+    #cv-pack-tools .cv-pack-metric { display:flex; flex-direction:column; gap:3px; }
+    #cv-pack-tools .cv-pack-metric-label { font-size:11px; color:var(--tt-2,#999); }
+    #cv-pack-tools .cv-pack-tool-value { display:block; font-size:24px; font-weight:800; line-height:1.2; color:#d8b4fe; font-variant-numeric:tabular-nums; }
+    #cv-pack-tools .cv-pack-stones-value { color:#f2cd84; font-size:21px; }
+    #cv-pack-tools .cv-pack-stones-value span { font-size:14px; vertical-align:middle; }
+    #cv-pack-tools #cv-stats-btn {
+      display:inline-flex; align-items:center; justify-content:center; gap:10px; width:auto; max-width:100%; height:auto;
+      margin:16px 0 0; padding:10px 16px; border:1px solid #a63d61; border-radius:8px;
+      background:rgba(158,41,79,.18); color:#f4aec5;
+      font-family:"Segoe UI",Arial,sans-serif; font-size:12px; font-weight:700; line-height:1.4; text-transform:none;
+      white-space:normal; text-align:center; letter-spacing:normal; box-shadow:none; cursor:pointer;
+    }
+    #cv-pack-tools #cv-stats-btn:hover { background:rgba(158,41,79,.32); border-color:#d8678e; color:#ffe1eb; }
+    #cv-pack-tools #cv-stats-btn:focus-visible { outline:2px solid #e5779c; outline-offset:3px; }
     @media(max-width:760px) { #cv-pack-tools { grid-template-columns:minmax(0,1fr); } }
+    @media(max-width:420px) {
+      #cv-pack-tools > #cv-guarantee-block, #cv-pack-tools > #cv-pack-stats-card { padding:18px 14px; gap:12px; }
+      #cv-pack-tools .cv-pack-metrics { column-gap:18px; }
+    }
     /* Бейдж лучшей карты — внизу карты */
     .cv-best-badge {
       position:absolute;bottom:42px;left:50%;transform:translateX(-50%);z-index:999;
@@ -3544,15 +3569,13 @@
     const tools=getPackTools();
     const lbl=document.querySelector('label.checkbox input#packs_demand')?.closest('label.checkbox');
     const existing=document.getElementById('cv-stats-btn');
-    if(existing){ if(tools&&existing.parentElement!==tools)tools.append(existing); return; }
+    if(existing){ if(tools)placePackStatsButton(existing,tools); return; }
     if(!tools&&!lbl)return;
     const btn=document.createElement('button'); btn.id='cv-stats-btn'; btn.type='button'; btn.textContent='📊 Статистика карт';
     btn.style.cssText='display:block;margin:10px auto 0;padding:7px 20px;background:linear-gradient(135deg,#0ea5e9,#6366f1);border:none;border-radius:8px;color:#fff;font-weight:600;font-size:13px;cursor:pointer;';
     btn.onmouseover=()=>btn.style.opacity='.8'; btn.onmouseout=()=>btn.style.opacity='1';
     if(tools){
-      btn.style.cssText='';
-      btn.innerHTML='<strong>Статистика паков</strong><small>Посмотреть полученные карты и историю выпадений →</small>';
-      tools.append(btn);
+      placePackStatsButton(btn,tools);
     }else lbl.insertAdjacentElement('afterend',btn);
     createStatsPanel();
     btn.addEventListener('click',()=>{
@@ -3564,8 +3587,25 @@
     });
   }
 
+  function placePackStatsButton(button,tools){
+    let card=document.getElementById('cv-pack-stats-card');
+    if(!card){
+      card=document.createElement('div'); card.id='cv-pack-stats-card';
+      card.innerHTML='<span class="cv-pack-tool-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 3v17h17M8 15v-4m5 4V7m5 8V4"/></svg></span><div class="cv-pack-tool-body"><strong class="cv-pack-tool-title">Статистика паков</strong><small class="cv-pack-tool-note">Полученные карты и история выпадений</small></div>';
+    }
+    if(card.parentElement!==tools)tools.append(card);
+    const body=card.querySelector('.cv-pack-tool-body');
+    if(button.parentElement!==body){
+      button.style.cssText='';
+      button.onmouseover=null; button.onmouseout=null;
+      button.textContent='Открыть статистику →';
+      body.append(button);
+    }
+  }
+
   function cleanupStatsUi(){
     document.getElementById('cv-stats-btn')?.remove();
+    document.getElementById('cv-pack-stats-card')?.remove();
     document.getElementById('cv-stats-panel')?.remove();
     statsPanel = null;
   }
@@ -8757,7 +8797,6 @@
   let autoPendingChoice=null;
   let autoPausedAfterReload=false;
   const AUTO_DELAY_START=250;
-  const AUTO_DELAY_BEFORE_PICK=900;
   const AUTO_DELAY_AFTER_PICK=650;
   const AUTO_DELAY_AFTER_BUY=1000;
   const AUTO_DELAY_WAIT_HIGHLIGHT=500;
@@ -9110,7 +9149,7 @@
     const extraDelay=needsAutoRareViewDelay(card)?AUTO_DELAY_RARE_VIEW:0;
     setAutoStatus('Выбираю лучшую карту...');
     if(extraDelay)setAutoStatus('Редкая карта, пауза 3 сек...');
-    setTimeout(()=>{
+    const choose=()=>{
       if(!cfg.autoOpenEnabled){ autoBusy=false; return; }
       if(!autoPackReady() || !card.isConnected || card.closest('.lootbox__row')!==getActiveRow()){
         autoBusy=false; scheduleAutoLoop(AUTO_DELAY_WAIT_CLOSE); return;
@@ -9126,7 +9165,10 @@
       autoBusy=false;
       setAutoStatus('Жду следующий пак...');
       scheduleAutoLoop(AUTO_DELAY_AFTER_PICK);
-    },AUTO_DELAY_BEFORE_PICK+extraDelay);
+    };
+    // The site's readiness check already waits for animation; no extra pick delay.
+    if(extraDelay) setTimeout(choose,extraDelay);
+    else choose();
   }
   function autoBuyPack() {
     const stones=getCurrentStoneBalance();
@@ -10815,7 +10857,7 @@
       }
     }
 
-    const html = tools ? `<strong>Полных гарантов: <span class="cv-pack-tool-value">${fullGuarantees}</span></strong><small>До следующего гаранта: <span class="cv-pack-tool-value">${stonesNeededForNext.toLocaleString('ru-RU')} 💎</span></small>` : `
+    const html = tools ? `<span class="cv-pack-tool-icon" aria-hidden="true">S</span><div class="cv-pack-tool-body"><strong class="cv-pack-tool-title">Расчёт гарантов</strong><small class="cv-pack-tool-note">По текущему балансу камней</small><div class="cv-pack-metrics"><div class="cv-pack-metric"><span class="cv-pack-metric-label">Полных гарантов</span><strong class="cv-pack-tool-value">${fullGuarantees}</strong></div><div class="cv-pack-metric"><span class="cv-pack-metric-label">До следующего не хватает</span><strong class="cv-pack-tool-value cv-pack-stones-value">${stonesNeededForNext.toLocaleString('ru-RU')} <span aria-label="камней духа">💎</span></strong></div></div></div>` : `
       <div style="font-size:13px;font-weight:700;color:#818cf8;">
         🏅 Полных гарантов: <span style="font-size:15px;color:#a78bfa">${fullGuarantees}</span>
       </div>
