@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.61
+// @version      3.62
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -30,8 +30,8 @@
 (function () {
   'use strict';
 
-  // Служебный iframe нужен только как авторизованный снимок страницы клуба.
-  // Не запускаем внутри него модули помощника, таймеры и телеметрию.
+  // Совместимость со служебными iframe старых версий помощника.
+  // Новые проверки гачи используют HTML-запрос без запуска скриптов страницы.
   if(window.top !== window && new URLSearchParams(location.search).has('suite_gacha_snapshot')) return;
 
   // ============================================================
@@ -591,6 +591,44 @@
     return /(?:HTTP\s*(?:401|403)|user[_\s-]*hash|login[_\s-]*hash|unauthori[sz]ed|forbidden|session|сесси|не\s+авториз|ошибка\s+доступа|доступ\s+запрещ)/i.test(text);
   }
 
+  // Auth pauses are shared by tabs on this host. Only a newly loaded,
+  // authenticated document may clear one; focus/timers in stale tabs cannot.
+  const suiteAuthDocumentStartedAt = performance.timeOrigin || Date.now();
+  const suiteAuthPauses = new Map();
+  function suiteIsAuthenticationError(value) {
+    return /(?:не\s+авторизован|сессия\s+истекла|сессии\s+ист[её]к|войдите\s+на\s+сайт|HTTP\s*401\b|unauthori[sz]ed|authentication_required)/i.test(String(value || ''));
+  }
+  function suiteDocumentIsGuest(doc) {
+    return !!doc.querySelector('.login--not-logged, form input[name="login_password"]')
+      && !doc.querySelector('a[href*="action=logout"],a[href*="do=logout"],a[href*="/logout"]');
+  }
+  function suiteAuthPauseKey(module) {
+    return `suite_auth_pause_v1_${module}`;
+  }
+  function suiteGetAuthPause(module) {
+    let pause = suiteAuthPauses.get(module) || null;
+    try {
+      const stored = JSON.parse(localStorage.getItem(suiteAuthPauseKey(module)) || 'null');
+      if(stored && Number.isFinite(stored.at)) pause = stored;
+    } catch(e) {}
+    if(pause && suiteAuthDocumentStartedAt > pause.at && !suiteDocumentIsGuest(document)
+      && suiteGetCurrentUserName() && suiteGetUserHash()){
+      try { localStorage.removeItem(suiteAuthPauseKey(module)); } catch(e) {}
+      pause = null;
+    }
+    suiteAuthPauses.set(module, pause);
+    return pause;
+  }
+  function suitePauseForAuthentication(module, reason) {
+    const pause = { at:Date.now(), reason:String(reason || '').slice(0, 300) };
+    suiteAuthPauses.set(module, pause);
+    try { localStorage.setItem(suiteAuthPauseKey(module), JSON.stringify(pause)); } catch(e) {}
+    suiteTelemetryLog(module, 'authentication_paused', {
+      reason:pause.reason, resume:'new_authenticated_document'
+    }, 'warning');
+    return pause;
+  }
+
   function suiteGetSafeNickname() {
     if(suiteAuthenticatedNickname) return suiteAuthenticatedNickname;
     try {
@@ -1006,7 +1044,10 @@
           return suiteTelemetryTakeBatch(current, current[0].module || 'suite');
         }, []);
         if(!events.length) break;
-        const module = events[0].module || 'suite';
+        // Preserve the component on events, but use a server-supported channel.
+        // This also drains old queued auto_open reports.
+        const sourceModule = events[0].module || 'suite';
+        const module = ['suite','autowatch','chat_stone','gacha','fatigue','quiz'].includes(sourceModule) ? sourceModule : 'suite';
         const ids = new Set(events.map(item => item.id));
         const eventSessionId = events[0].sessionId || suiteTelemetrySessionId;
         const ok = await suiteReportEvent('telemetry_batch', {
@@ -1205,18 +1246,16 @@
 
   function suiteFunctionChainHas(fn, marker) {
     const seen = new Set();
-    let current = fn;
-    for(let depth = 0; typeof current === 'function' && depth < 12 && !seen.has(current); depth++){
+    const pending = [fn];
+    const originalKeys = ['__suiteLabyrinthFatigueOriginal', '__fatigueDebugOriginal',
+      '__suiteChatStoneOriginal', '__suiteXhrOriginal', '__awVisibleTabOriginal',
+      '__suiteCustomPushOriginal', '__suiteGlobalDiagnosticsOriginal', '__animeSSSTradeDebugOriginal'];
+    while(pending.length && seen.size < 32){
+      const current = pending.pop();
+      if(typeof current !== 'function' || seen.has(current)) continue;
       if(current[marker]) return true;
       seen.add(current);
-      current = current.__suiteLabyrinthFatigueOriginal
-        || current.__fatigueDebugOriginal
-        || current.__suiteChatStoneOriginal
-        || current.__suiteXhrOriginal
-        || current.__awVisibleTabOriginal
-        || current.__suiteCustomPushOriginal
-        || current.__suiteGlobalDiagnosticsOriginal
-        || null;
+      for(const key of originalKeys) if(typeof current[key] === 'function') pending.push(current[key]);
     }
     return false;
   }
@@ -1244,9 +1283,17 @@
     }
   }
 
+  let suiteHealthVisibleSince = document.visibilityState === 'visible' ? Date.now() : 0;
+  document.addEventListener('visibilitychange', () => {
+    suiteHealthVisibleSince = document.visibilityState === 'visible' ? Date.now() : 0;
+  });
   function suiteRunLightweightHealthCheck() {
     try {
       const now = Date.now();
+      // Background timer throttling and intentional iframe non-init are not failures.
+      // Direct exception/stall reports remain immediate and independent of this check.
+      if(window.top !== window || !suiteHealthVisibleSince || document.visibilityState !== 'visible'
+        || now - suiteHealthVisibleSince < 30 * 1000) return;
       const route = location.pathname;
       const report = (module, code, details = {}) => suiteSelfDiagnosticIssue(module, code, {
         detectedBy:'health_contract',
@@ -1270,7 +1317,11 @@
       if(!window.__suiteMainInitialized){
         const startedAt = Number(window.__suiteMainInitStartedAt || 0);
         if(startedAt && now - startedAt >= 30 * 1000){
-          report('suite', 'main_initialization_stalled', { startedAt, elapsedMs:now - startedAt });
+          const phase = window.__suiteMainInitPhase || 'unknown';
+          report('suite', phase === 'waiting_for_access_context' ? 'access_context_unavailable' : 'main_initialization_stalled', {
+            startedAt, elapsedMs:now - startedAt, phase,
+            nicknameKnown:!!suiteGetCurrentUserName(), guestDocument:suiteDocumentIsGuest(document)
+          });
         }
         return;
       }
@@ -1321,12 +1372,12 @@
         } else if(push){
           const brokenMethods = ['info','warning','error','success']
             .filter(method => typeof push[method] === 'function' && !suiteFunctionChainHas(push[method], '__suiteCustomPushHook'));
-          if(brokenMethods.length) report('suite', 'custom_push_hooks_overwritten', { brokenMethods });
+          if(brokenMethods.length) report('suite', 'custom_push_hooks_overwritten', { brokenMethods, evidence:'marker_not_reachable', unknownWrapperPossible:true });
         }
       }
 
       const valueCandidates = [...document.querySelectorAll('.lootbox__card,.trade__main-item')]
-        .filter(card => card.querySelector('.card-stats'));
+        .filter(card => card.querySelectorAll('.card-stats span').length >= 4);
       if(cfg.modCardValue && valueCandidates.length && !valueCandidates.some(card => card.querySelector('.card-value'))){
         report('suite', 'card_value_not_rendered', { candidateCount:valueCandidates.length });
       }
@@ -1395,7 +1446,7 @@
         const state = window.__suiteGachaAutolootState;
         if(!state || !state.scheduleTimer) report('gacha', 'gacha_scheduler_missing', { hasState:!!state, hasScheduleTimer:!!state?.scheduleTimer });
         const nextCheckAt = Number(state?.nextCheckAt || 0);
-        if(nextCheckAt && now - nextCheckAt > 2 * 60 * 1000){
+        if(!suiteGetAuthPause('gacha') && nextCheckAt && now - nextCheckAt > 2 * 60 * 1000){
           report('gacha', 'gacha_scheduler_overdue', { nextCheckAt, overdueMs:now - nextCheckAt });
         }
       }
@@ -1414,7 +1465,7 @@
         const xhrHookPresent = suiteFunctionChainHas(xhrPrototype?.open, '__suiteChatStoneHooked')
           && suiteFunctionChainHas(xhrPrototype?.send, '__suiteChatStoneHooked');
         if(state?.ready && (!fetchHookPresent || !xhrHookPresent)){
-          report('chat_stone', 'chat_stone_interceptors_overwritten', { fetchHookPresent, xhrHookPresent });
+          report('chat_stone', 'chat_stone_interceptors_overwritten', { fetchHookPresent, xhrHookPresent, evidence:'marker_not_reachable', unknownWrapperPossible:true });
         }
       }
       if(autoWatchHealthy){
@@ -1424,7 +1475,8 @@
         if(!window.__awVisibleTabFetchInstalled || !fetchHookPresent){
           report('autowatch', 'autowatch_fetch_interceptor_missing', {
             installedFlag:!!window.__awVisibleTabFetchInstalled,
-            fetchHookPresent
+            fetchHookPresent,
+            evidence:'marker_not_reachable', unknownWrapperPossible:true
           });
         }
         const healthAt = Number(window.__suiteAutoLootCardsHealthAt || 0);
@@ -1432,7 +1484,8 @@
           report('autowatch', 'autowatch_ui_heartbeat_stalled', { healthAt, elapsedMs:healthAt ? now - healthAt : null });
         }
         const runtime = window.__suiteAutoLootCardsRuntimeState;
-        if(document.visibilityState === 'visible' && runtime?.enabled && runtime?.leader && !runtime?.loopRunning){
+        if(document.visibilityState === 'visible' && runtime?.enabled && runtime?.leader && !runtime?.loopRunning
+          && !runtime?.authPaused && !runtime?.collectionPaused){
           const nextRunAt = Number(runtime.nextRunAt || 0);
           if(!nextRunAt || now - nextRunAt > 2 * 60 * 1000){
             report('autowatch', 'autowatch_scheduler_stalled', {
@@ -1515,9 +1568,10 @@
   function suiteSleep(ms){return new Promise(resolve=>setTimeout(resolve,ms));}
 
   async function suiteAccessGate() {
+    const startedAt = Date.now();
     let clubId = suiteGetMyClubId();
     while(!clubId){
-      await suiteSleep(500);
+      await suiteSleep(Date.now() - startedAt < 30000 ? 500 : 5000);
       clubId = suiteGetMyClubId();
     }
     suiteAuthenticatedClubId = clubId;
@@ -1668,6 +1722,37 @@
         filter:brightness(1.18);
       }
     }
+    .packs-page .lootbox__card.cv-pack-valued { padding-bottom:58px; }
+    .packs-page .lootbox__card.cv-pack-valued .card-stats {
+      height:52px; grid-template-columns:repeat(4,minmax(0,1fr)); grid-template-rows:24px 22px;
+    }
+    .packs-page .lootbox__card.cv-pack-valued .card-stats > .card-value {
+      grid-column:1 / -1; border-left:0; border-top:1px solid var(--bdc,#292929);
+      justify-self:stretch; padding-top:2px !important; color:#c4b5fd !important;
+    }
+    .packs-page .lootbox__card.cv-pack-valued .cv-best-badge { bottom:64px; }
+    .packs-page .lootbox__card.cv-pack-neon {
+      background:transparent !important; box-shadow:none !important; border:0 !important;
+    }
+    .packs-page .lootbox__card.cv-pack-neon > .cv-pack-neon-ring {
+      inset:-2px -2px 38px; padding:3px; border-radius:14px;
+      filter:drop-shadow(0 0 5px var(--cv-neon-main));
+    }
+    .packs-page .lootbox__card.cv-pack-valued.cv-pack-neon > .cv-pack-neon-ring { bottom:56px; }
+    #cv-pack-tools { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-top:12px; }
+    #cv-pack-tools:empty { display:none; }
+    #cv-pack-tools > #cv-guarantee-block, #cv-pack-tools > #cv-stats-btn {
+      box-sizing:border-box; width:100%; min-width:0; margin:0; max-width:none; padding:16px;
+      border:1px solid var(--bdc,#292929); border-radius:12px; background:var(--bg,#111);
+      color:var(--tt,#ddd); font:inherit; text-align:left; line-height:1.5; box-shadow:none;
+    }
+    #cv-pack-tools > #cv-guarantee-block { order:0; }
+    #cv-pack-tools > #cv-stats-btn { order:1; cursor:pointer; }
+    #cv-pack-tools > #cv-stats-btn:hover { border-color:var(--accent,#9e294f); }
+    #cv-pack-tools strong { display:block; font-size:13px; }
+    #cv-pack-tools small { display:block; margin-top:5px; color:var(--tt-2,#999); font-size:12px; }
+    #cv-pack-tools .cv-pack-tool-value { color:#c4b5fd; }
+    @media(max-width:760px) { #cv-pack-tools { grid-template-columns:minmax(0,1fr); } }
     /* Бейдж лучшей карты — внизу карты */
     .cv-best-badge {
       position:absolute;bottom:42px;left:50%;transform:translateX(-50%);z-index:999;
@@ -1882,7 +1967,7 @@
       --cv-neon-bg: #0db42959;
       --cv-neon-border: #05801a;
     }
-    .cv-neon-outline::before {
+    .cv-neon-outline:not(.cv-pack-neon)::before, .cv-pack-neon > .cv-pack-neon-ring {
       content:'';
       position:absolute;
       inset:-4px;
@@ -1896,7 +1981,8 @@
       -webkit-mask-composite:xor;
       mask-composite:exclude;
     }
-    body.suite-neon-animation-off .cv-neon-outline::before {
+    body.suite-neon-animation-off .cv-neon-outline:not(.cv-pack-neon)::before,
+    body.suite-neon-animation-off .cv-pack-neon > .cv-pack-neon-ring {
       animation:none !important;
       background:var(--cv-neon-main) !important;
     }
@@ -2507,7 +2593,13 @@
   //  ПАРСИНГ КАРТОЧЕК
   // ============================================================
 
-  function parseStat(span) { return parseInt(span.textContent.replace(/\D/g,''))||0; }
+  function parseStat(span) {
+    // Hidden responsive alternatives must not be concatenated with the full count.
+    const full = span?.querySelector('.pack-stat-full');
+    const label = [span?.getAttribute('aria-label'),span?.getAttribute('title')].find(value=>/\d/.test(value||''));
+    const text = full?.textContent ?? label ?? span?.textContent ?? '';
+    return parseInt(text.replace(/\D/g,''),10)||0;
+  }
   function getCardRank(card) {
     const el=card.matches('[data-rank]')?card:card.querySelector('[data-rank]');
     if(el) return el.getAttribute('data-rank').toUpperCase();
@@ -2715,10 +2807,15 @@
         if(!ex){
           const span=document.createElement('span'); span.className='card-value'; span.title='Ценность карточки';
           span.innerHTML=`<i class="fas fa-star"></i> ${value}`;
-          const spans=card.querySelectorAll('.card-stats span'); spans[spans.length-1].after(span);
-        } else { ex.innerHTML=`<i class="fas fa-star"></i> ${value}`; }
+          card.querySelector('.card-stats').append(span);
+        } else {
+          const html=`<i class="fas fa-star"></i> ${value}`;
+          if(ex.innerHTML!==html) ex.innerHTML=html;
+        }
+        card.classList.toggle('cv-pack-valued', !!card.closest('.packs-page'));
       } else {
         card.querySelector('.card-value')?.remove();
+        card.classList.remove('cv-pack-valued');
       }
       if(isTradeCard&&isHighRank){
         const cardId=getCardId(card);
@@ -2738,16 +2835,12 @@
 
   function highlightBestCard() {
     const row=getActiveRow();
-    document.querySelectorAll('.cv-best-badge').forEach(b=>b.remove());
-    document.querySelectorAll('.cv-best-card').forEach(c=>{ c.classList.remove('cv-best-card'); const s=c.querySelector('.card-value'); if(s)s.title='Ценность карточки'; });
-    if(!row)return;
+    if(!row){ syncBestCardHighlights([]); return; }
     const cards=[...row.querySelectorAll('.lootbox__card')]; if(!cards.length)return;
     const entries=cards.map(c=>{
       const r=computeCardValue(c);
-      const dupSpan=c.querySelector('span[title="Дубли на руках"]');
-      const dup=dupSpan?parseInt(dupSpan.textContent.replace(/\D/g,''))||0:99;
-      const allSpans=c.querySelectorAll('.card-stats span');
-      const want=allSpans.length>=2?parseInt(allSpans[1].textContent.replace(/\D/g,''))||0:0;
+      const dup=r?r.dup:99;
+      const want=r?r.want:0;
       const rank=r?r.rankUpper:null;
       return {card:c, value:r?r.value:0, dup, rank, want};
     });
@@ -2794,11 +2887,26 @@
       bestEntries=entries.filter(e=>e.value===maxVal);
     }
 
-    bestEntries.forEach(({card})=>{
-      card.classList.add('cv-best-card');
-      const badge=document.createElement('div'); badge.className='cv-best-badge'; badge.textContent='★ ЛУЧШАЯ';
-      card.style.position='relative'; card.insertBefore(badge,card.firstChild);
-      const s=card.querySelector('.card-value'); if(s)s.title='⭐ Лучшая карта в паке';
+    syncBestCardHighlights(bestEntries.map(entry=>entry.card));
+  }
+  function syncBestCardHighlights(cards) {
+    const selected=new Set(cards);
+    document.querySelectorAll('.cv-best-card').forEach(card=>{
+      if(selected.has(card))return;
+      card.classList.remove('cv-best-card');
+      card.querySelectorAll('.cv-best-badge').forEach(b=>b.remove());
+      const value=card.querySelector('.card-value');
+      if(value && value.title!=='Ценность карточки')value.title='Ценность карточки';
+    });
+    cards.forEach(card=>{
+      if(!card.classList.contains('cv-best-card'))card.classList.add('cv-best-card');
+      if(!card.querySelector('.cv-best-badge')){
+        const badge=document.createElement('div'); badge.className='cv-best-badge'; badge.textContent='★ ЛУЧШАЯ';
+        card.insertBefore(badge,card.firstChild);
+      }
+      if(card.style.position!=='relative')card.style.position='relative';
+      const value=card.querySelector('.card-value');
+      if(value && value.title!=='⭐ Лучшая карта в паке')value.title='⭐ Лучшая карта в паке';
     });
   }
 
@@ -3423,14 +3531,29 @@
     renderStatsTab();
   }
 
+  function getPackTools(){
+    const anchor=document.querySelector('.packs-page .packs-guarantees');
+    if(!anchor)return null;
+    let tools=document.getElementById('cv-pack-tools');
+    if(!tools){ tools=document.createElement('div'); tools.id='cv-pack-tools'; }
+    if(anchor.nextElementSibling!==tools)anchor.after(tools);
+    return tools;
+  }
   function insertStatsButton(){
     if(!cfg.modStats)return;
+    const tools=getPackTools();
     const lbl=document.querySelector('label.checkbox input#packs_demand')?.closest('label.checkbox');
-    if(!lbl||document.getElementById('cv-stats-btn'))return;
+    const existing=document.getElementById('cv-stats-btn');
+    if(existing){ if(tools&&existing.parentElement!==tools)tools.append(existing); return; }
+    if(!tools&&!lbl)return;
     const btn=document.createElement('button'); btn.id='cv-stats-btn'; btn.type='button'; btn.textContent='📊 Статистика карт';
     btn.style.cssText='display:block;margin:10px auto 0;padding:7px 20px;background:linear-gradient(135deg,#0ea5e9,#6366f1);border:none;border-radius:8px;color:#fff;font-weight:600;font-size:13px;cursor:pointer;';
     btn.onmouseover=()=>btn.style.opacity='.8'; btn.onmouseout=()=>btn.style.opacity='1';
-    lbl.insertAdjacentElement('afterend',btn);
+    if(tools){
+      btn.style.cssText='';
+      btn.innerHTML='<strong>Статистика паков</strong><small>Посмотреть полученные карты и историю выпадений →</small>';
+      tools.append(btn);
+    }else lbl.insertAdjacentElement('afterend',btn);
     createStatsPanel();
     btn.addEventListener('click',()=>{
       const p=document.getElementById('cv-stats-panel');
@@ -3488,6 +3611,13 @@
     card.style.position='relative';
     if(card.classList.contains('trade__main-item'))card.style.overflow='visible';
     card.classList.add('cv-neon-outline',`cv-neon-${type}`);
+    if(card.matches('.packs-page .lootbox__card')){
+      card.classList.add('cv-pack-neon');
+      const ring=document.createElement('div');
+      ring.className='cv-pack-neon-ring';
+      ring.setAttribute('aria-hidden','true');
+      card.append(ring);
+    }
     // Скрываем иконки trophy/lock:
     // их заменяет анимированная обводка
     card.querySelectorAll('.lock-trade-btn').forEach(btn => btn.style.display='none');
@@ -3498,6 +3628,9 @@
   }
 
   function clearNeonFromCard(card){
+    if(!card.classList.contains('cv-neon-outline') && !card.querySelector('.cv-pack-neon-ring,.neon-outline-wrapper'))return;
+    card.querySelector('.cv-pack-neon-ring')?.remove();
+    card.classList.remove('cv-pack-neon');
     card.querySelector('.neon-outline-wrapper')?.remove();
     card.classList.remove(
       'cv-neon-outline',
@@ -5364,7 +5497,8 @@
         try{ item.target.removeEventListener(item.type, item.handler, item.options); }catch(e){}
       });
       try{ state.releaseTabLock?.(); }catch(e){}
-      try{ state.gachaFrame?.remove(); }catch(e){}
+      try{ state.snapshotController?.abort(); }catch(e){}
+      try{ state.rewardController?.abort(); }catch(e){}
     }
     document.getElementById('suite-gacha-autoloot-style')?.remove();
     document.querySelectorAll('.suite-gacha-title-tools,.suite-gacha-modal').forEach(el=>el.remove());
@@ -5404,8 +5538,7 @@
       retryTimer:null,
       scheduleTimer:null,
       isRunning:false,
-      gachaFrame:null,
-      gachaFrameLoadPromise:null,
+      snapshotController:null,
       lockRenewTimer:null,
       intervals:[],
       listeners:[],
@@ -5565,6 +5698,8 @@
     function getTabLock(){ return getStoredJson('tab_lock', null); }
     function setTabLock(value){ setStoredJson('tab_lock', value); }
     function setStatus(text){
+      if(state.lastStatus === text) return;
+      state.lastStatus = text;
       console.log(`[Suite Gacha] ${text}`);
       suiteTelemetryLog('gacha', 'status', { text });
     }
@@ -5663,34 +5798,54 @@
         (data.step != null && Number.isFinite(Number(data.step)));
     }
     async function postGachaRewardOnce(userHash){
-      const response = await fetch(`${location.origin}/gacha_reward/`, {
-        method:'POST',
-        credentials:'include',
-        headers:{
-          'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8',
-          'X-Requested-With':'XMLHttpRequest',
-          'Accept':'application/json, text/javascript, */*; q=0.01'
-        },
-        body:new URLSearchParams({ user_hash:userHash }).toString()
-      });
-      const text = await response.text();
-      let data;
-      try{ data = JSON.parse(text); }
-      catch(error){ data = { status:'parse_error', text:text || error.message }; }
-      if(!response.ok) {
-        const error = new Error(`HTTP ${response.status}: ${getGachaResultText(data)}`);
-        error.status = response.status;
-        throw error;
+      if(!cfg.modGachaAutoloot || window.__suiteGachaAutolootState !== state
+        || document.hidden || suiteGetAuthPause('gacha') || !hasMoscowTimeReached()) {
+        throw new Error('gacha_request_cancelled');
       }
-      return data;
+      const controller = new AbortController();
+      state.rewardController = controller;
+      const timeout = setTimeout(() => controller.abort(), 12000);
+      try {
+        const response = await fetch(`${location.origin}/gacha_reward/`, {
+          method:'POST',
+          signal:controller.signal,
+          credentials:'include',
+          headers:{
+            'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8',
+            'X-Requested-With':'XMLHttpRequest',
+            'Accept':'application/json, text/javascript, */*; q=0.01'
+          },
+          body:new URLSearchParams({ user_hash:userHash }).toString()
+        });
+        const text = await response.text();
+        let data;
+        try{ data = JSON.parse(text); }
+        catch(error){
+          if(suiteDocumentIsGuest(new DOMParser().parseFromString(text, 'text/html'))) {
+            throw new Error('authentication_required: вместо ответа гачи получена форма входа');
+          }
+          data = { status:'parse_error', text:text || error.message };
+        }
+        if(!response.ok) {
+          const error = new Error(`HTTP ${response.status}: ${getGachaResultText(data)}`);
+          error.status = response.status;
+          throw error;
+        }
+        return data;
+      } finally {
+        clearTimeout(timeout);
+        if(state.rewardController === controller) state.rewardController = null;
+      }
     }
     async function postGachaReward(){
       let userHash = getUserHash();
       if(!userHash) throw new Error('user_hash not found');
       try {
         const data = await postGachaRewardOnce(userHash);
+        if(suiteIsAuthenticationError(getGachaResultText(data))) return data;
         if(!suiteIsUserHashError(JSON.stringify(data))) return data;
       } catch(error) {
+        if(suiteIsAuthenticationError(error?.message)) throw error;
         if(!suiteIsUserHashError(error?.message)) throw error;
       }
       const refreshedHash = await suiteRefreshUserHashFromServer();
@@ -5732,23 +5887,29 @@
       const block = getGachaBlock(doc);
       const first = block?.querySelector('.club__rewards-item');
       if(!first) return null;
-      const stateText = `${first.className || ''} ${first.textContent || ''}`;
       return {
         item:first,
         type:getRewardType(first),
         step:parseNumber(first.dataset.step),
         need:parseNumber(first.dataset.need),
         isAvailable:first.classList.contains('is-available'),
-        isClaimed:/(?:is-(?:received|collected|taken|claimed)|награда\s+(?:уже\s+)?получена|уже\s+собрано)/i.test(stateText),
+        isClaimed:isGachaItemClaimed(first),
         button:first.querySelector('#get-gacha-reward, [onclick*="GetGachaReward"]')
       };
+    }
+    function isGachaItemClaimed(item){
+      if(!item) return false;
+      const stateText = `${item.className || ''} ${item.textContent || ''}`;
+      // GetGachaReward on the site replaces its button with this check icon.
+      // A waiting item without a check must never count as collected.
+      return /(?:is-(?:received|collected|taken|claimed)|награда\s+(?:уже\s+)?получена|уже\s+собрано)/i.test(stateText)
+        || !!item.querySelector('.club__rewards-item-exp .fa-check-circle');
     }
     function isRewardAlreadyCollected(doc = document){
       const block = getGachaBlock(doc);
       if(!block) return false;
       const first = block.querySelector('.club__rewards-item');
-      const firstState = `${first?.className || ''} ${first?.textContent || ''}`;
-      if(/(?:is-(?:received|collected|taken|claimed)|награда\s+(?:уже\s+)?получена|уже\s+собрано)/i.test(firstState)) return true;
+      if(isGachaItemClaimed(first)) return true;
       const statusText = [...block.querySelectorAll('.club__rewards-status,.club__rewards-message,.club__notice,.alert')]
         .map(node => node.textContent || '')
         .join(' ');
@@ -5761,7 +5922,7 @@
       }
     }
     function startRetrying(delayMs = RETRY_DELAY_MS){
-      if(state.retryTimer || isTodayFinished()) return;
+      if(state.retryTimer || isTodayFinished() || suiteGetAuthPause('gacha')) return;
       const delay = Math.max(1000, Math.min(RETRY_DELAY_MS, Number(delayMs) || RETRY_DELAY_MS));
       setStatus('Награда пока не собрана, проверяю раз в минуту до 21:00 МСК.');
       if(delay < RETRY_DELAY_MS){
@@ -5773,60 +5934,34 @@
         state.retryTimer = setInterval(() => runDailyCheck('retry'), RETRY_DELAY_MS);
       }
     }
-    function getFrameDocument(){
-      try{ return state.gachaFrame?.contentDocument || null; }
-      catch(error){
-        console.warn('[Suite Gacha] Нет доступа к фоновой странице клуба:', error);
-        return null;
-      }
-    }
-    function createHiddenGachaFrame(){
-      if(state.gachaFrame) return;
-      state.gachaFrame = document.createElement('iframe');
-      state.gachaFrame.id = 'suite-gacha-hidden-club-frame';
-      state.gachaFrame.title = 'AnimeSSS gacha background frame';
-      state.gachaFrame.style.cssText = 'position:fixed;width:1px;height:1px;left:-9999px;top:-9999px;opacity:0;pointer-events:none;border:0;';
-    }
-    function loadGachaFrame(forceReload = false){
-      createHiddenGachaFrame();
-      const targetUrl = `${location.origin}${getClubPath()}${getClubPath().includes('?') ? '&' : '?'}suite_gacha_snapshot=${Date.now()}`;
-      const currentFrameDocument = getFrameDocument();
-      if(!forceReload && currentFrameDocument && getGachaBlock(currentFrameDocument)) {
-        return Promise.resolve(currentFrameDocument);
-      }
-      if(state.gachaFrameLoadPromise) return state.gachaFrameLoadPromise;
-      state.gachaFrameLoadPromise = new Promise(resolve => {
-        let finished = false;
-        let timeout = null;
-        const finish = () => {
-          if(finished) return;
-          finished = true;
-          clearTimeout(timeout);
-          state.gachaFrameLoadPromise = null;
-          resolve(getFrameDocument());
-        };
-        state.gachaFrame.addEventListener('load', finish, { once:true });
-        state.gachaFrame.src = targetUrl;
-        if(!state.gachaFrame.isConnected) document.documentElement.append(state.gachaFrame);
-        timeout = setTimeout(finish, 12000);
-      });
-      return state.gachaFrameLoadPromise;
-    }
     async function getSnapshotDocument(){
-      if(isDefaultClubPage() && isRewardAlreadyCollected(document)) return document;
-      const frameDoc = await loadGachaFrame(true);
-      const loginForm = frameDoc?.querySelector('form[action*="login"],form[id*="login"],form[class*="login"],input[name="login"]');
-      if(loginForm){
-        if(isDefaultClubPage() && getGachaBlock(document)) return document;
-        throw new Error('Фоновая страница клуба открыла форму входа');
+      // Always fresh: a tab can still display yesterday's checkmark.
+      const controller = new AbortController();
+      state.snapshotController = controller;
+      const timeout = setTimeout(() => controller.abort(), 12000);
+      try {
+        const response = await fetch(new URL(getClubPath(), location.origin).href, {
+          credentials:'same-origin', cache:'no-store', signal:controller.signal,
+          headers:{ Accept:'text/html' }
+        });
+        if(!response.ok) throw new Error(`HTTP ${response.status}: страница гачи`);
+        const doc = new DOMParser().parseFromString(await response.text(), 'text/html');
+        if(suiteDocumentIsGuest(doc)) throw new Error('authentication_required: страница клуба требует входа');
+        if(!getGachaBlock(doc)) throw new Error('Default club gacha page is unavailable');
+        return doc;
+      } finally {
+        clearTimeout(timeout);
+        if(state.snapshotController === controller) state.snapshotController = null;
       }
-      if(frameDoc && getGachaBlock(frameDoc)) return frameDoc;
-      if(isDefaultClubPage() && getGachaBlock(document)) return document;
-      throw new Error('Default club gacha page is unavailable');
     }
 
     async function runDailyCheck(reason = 'schedule'){
       if(state.isRunning || isTodayFinished() || !cfg.modGachaAutoloot) return;
+      if(suiteGetAuthPause('gacha')){
+        stopRetrying();
+        setStatus('Гача на паузе: войдите на сайт и перезагрузите страницу.');
+        return;
+      }
       if(!hasMoscowTimeReached()){
         stopRetrying();
         scheduleNextCheck();
@@ -5844,15 +5979,18 @@
       }
       reserveCheckSlot(reason);
       state.isRunning = true;
+      const cycleKey = getTodayKey();
       suiteTelemetryLog('gacha', 'check_started', { reason, today:getTodayKey(), page:location.pathname });
       try{
         const settings = getRewardSettings();
         const snapshotDoc = await getSnapshotDocument();
+        if(document.hidden || !cfg.modGachaAutoloot || suiteGetAuthPause('gacha') || window.__suiteGachaAutolootState !== state
+          || cycleKey !== getTodayKey() || !hasMoscowTimeReached() || isTodayFinished()) return;
         const currentExp = getCurrentExp(snapshotDoc);
         const reward = getFirstReward(snapshotDoc);
         suiteTelemetryLog('gacha', 'snapshot_parsed', {
           reason,
-          source:snapshotDoc === document ? 'current_page' : 'background',
+          source:snapshotDoc === document ? 'current_page' : 'fetched_html',
           currentExp,
           reward:reward ? { type:reward.type, step:reward.step, need:reward.need, isAvailable:reward.isAvailable, isClaimed:reward.isClaimed } : null,
           settings
@@ -5879,6 +6017,7 @@
         }
         if(!Number.isFinite(currentExp) || !Number.isFinite(reward.need)){
           setStatus('Не смог прочитать опыт или требование первой награды.');
+          startRetrying();
           return;
         }
         const rewardLabel = REWARDS.find(item => item.id === reward.type)?.label || reward.type || 'неизвестная награда';
@@ -5915,6 +6054,14 @@
         setStatus(`Лутаю первую награду: ${rewardLabel}, шаг ${reward.step}.`);
         const response = await postGachaReward();
         const responseText = getGachaResultText(response);
+        if(suiteIsAuthenticationError(responseText)) throw new Error(responseText);
+        if(/(?:награда\s+уже\s+(?:получена|собрана)|уже\s+(?:получили|забрали|собрали)\s+награду)/i.test(String(responseText))){
+          stopRetrying();
+          saveRewardHistoryEntry({ dateKey:cycleKey, status:'no_information', reason:'server_already_collected' });
+          markToday('looted_external', { dateKey:cycleKey, serverResponse:responseText });
+          setStatus('Награда уже собрана, повторных запросов сегодня не будет.');
+          return;
+        }
         suiteTelemetryLog('gacha', 'reward_response', {
           requested:{ type:reward.type, step:reward.step, need:reward.need, currentExp },
           response,
@@ -5922,7 +6069,7 @@
           successful:isSuccessfulGachaResponse(response)
         });
         if(!isSuccessfulGachaResponse(response)){
-          markToday('waiting', { currentExp, need:reward.need, step:reward.step, rewardType:reward.type, serverResponse:responseText });
+          markToday('waiting', { dateKey:cycleKey, currentExp, need:reward.need, step:reward.step, rewardType:reward.type, serverResponse:responseText });
           setStatus(`Сервер не выдал гачу: ${responseText}. Продолжаю проверять.`);
           startRetrying();
           return;
@@ -5932,7 +6079,7 @@
         const receivedReward = REWARDS.find(item => item.id === receivedRewardType) || null;
         const receivedQuantity = extractRewardQuantity(response, receivedRewardType, responseText);
         saveRewardHistoryEntry({
-          dateKey:getTodayKey(),
+          dateKey:cycleKey,
           status:'looted',
           rewardType:receivedRewardType,
           rewardLabel:receivedReward?.label || rewardLabel,
@@ -5942,6 +6089,7 @@
           step:response.step ?? reward.step ?? null
         });
         markToday('looted', {
+          dateKey:cycleKey,
           lootedCount:1,
           currentExp,
           need:reward.need,
@@ -5954,8 +6102,15 @@
         notify('success', responseText);
       }catch(error){
         const message = error?.message || String(error);
+        if(window.__suiteGachaAutolootState !== state || !cfg.modGachaAutoloot) return;
+        if(suiteIsAuthenticationError(message)){
+          suitePauseForAuthentication('gacha', message);
+          stopRetrying();
+          setStatus('Гача на паузе: войдите на сайт и перезагрузите страницу.');
+          return;
+        }
         suiteTelemetryLog('gacha', 'check_failed', { reason, error:message }, 'error');
-        markToday('waiting', { error:message });
+        markToday('waiting', { dateKey:cycleKey, error:message });
         setStatus(`Ошибка автолута гачи: ${message}. Продолжаю проверять.`);
         startRetrying();
       }finally{
@@ -6241,6 +6396,7 @@
     if(isDefaultClubPage()) state.intervals.push(setInterval(injectControls, 2000));
     on(document, 'visibilitychange', () => {
       if(document.hidden) releaseTabLock();
+      else runDailyCheck('visible');
     });
   }
 
@@ -8598,6 +8754,7 @@
   let autoPanel=null, autoRunInput=null, autoTargetInput=null, autoStatusEl=null, autoCountEl=null;
   let autoLoopTimer=null, autoOpenedCount=Number(cfg.autoOpenedCount)||0, autoWaitingManual=false, autoBusy=false;
   let autoLastChosenPackId='', autoManualPackId='';
+  let autoPendingChoice=null;
   let autoPausedAfterReload=false;
   const AUTO_DELAY_START=250;
   const AUTO_DELAY_BEFORE_PICK=900;
@@ -8637,6 +8794,10 @@
       autoWaitingManual:!!autoWaitingManual, autoLoopTimerPresent:!!autoLoopTimer,
       activePackId:row?.getAttribute('data-pack-id')||'', lastChosenPackId:autoLastChosenPackId,
       cardCount:cards.length,
+      packStage:document.querySelector('.packs-stage')?.getAttribute('data-pack-state') || '',
+      rowClass:row?.className || '',
+      listClass:row?.querySelector('.lootbox__list')?.className || '',
+      pendingChoice:autoPendingChoice?{packId:autoPendingChoice.packId,cardId:autoPendingChoice.cardId,startedAt:autoPendingChoice.startedAt}:null,
       valuedCardCount:cards.filter(card=>card.querySelector('.card-value')).length,
       bestCardCount:cards.filter(card=>card.classList.contains('cv-best-card')).length,
       selectedPack20:!!isPack20Active(), stoneBalance:getCurrentStoneBalance(),
@@ -8739,6 +8900,7 @@
       autoExpectation.reported=true;
       const code=autoExpectation.kind==='cards_after_buy'?'pack_cards_not_appeared'
         :autoExpectation.kind==='pack_close_after_card'?'pack_did_not_close_after_card_pick'
+          :autoExpectation.kind==='pack_animation_ready'?'pack_animation_not_finished'
           :'best_card_highlight_stalled';
       autoReportDiagnosticStall(code,{source});
     }
@@ -8798,6 +8960,7 @@
     autoOpenSuppressGuard=false;
     autoPausedAfterReload=false;
     autoLastChosenPackId=''; autoManualPackId='';
+    autoPendingChoice=null;
     setAutoStatus(reason);
     updateAutoCount();
   }
@@ -8813,6 +8976,7 @@
   }
   function handleAutoManualPick(card) {
     if(!autoWaitingManual || !cfg.autoOpenEnabled || !isAutoOpenAvailable()) return;
+    if(!autoPackReady()) return;
     const row=card.closest('.lootbox__row[data-pack-id]');
     if(!row) return;
     const packId=row.getAttribute('data-pack-id')||'';
@@ -8821,15 +8985,7 @@
     autoResolveExpectation('manual_card_pick');
     autoOpenSuppressGuard=false;
     autoManualPackId='';
-    autoLastChosenPackId=packId;
-    autoOpenedCount++;
-    saveAutoOpenedCount();
-    updateAutoCount();
-    const limit=Number(cfg.autoOpenTarget)||0;
-    if(limit>0 && autoOpenedCount>=limit) {
-      stopAutoOpen('Готово');
-      return;
-    }
+    autoBeginChoice(card);
     autoBusy=false;
     setAutoStatus('Ручной выбор принят, жду следующий пак...');
     scheduleAutoLoop(AUTO_DELAY_AFTER_PICK);
@@ -8872,6 +9028,42 @@
     const cards=getCardsFromActiveRow();
     return cards.length>0;
   }
+  function autoPackReady() {
+    const stage=document.querySelector('.packs-stage');
+    const row=getActiveRow();
+    if(!row || (stage && stage.getAttribute('data-pack-state')!=='ready'))return false;
+    return !row.classList.contains('loot-lock')
+      && !row.querySelector('.lootbox__list.step1,.lootbox__list.packs-slot-reveal');
+  }
+  function autoBeginChoice(card) {
+    const row=card.closest('.lootbox__row[data-pack-id]');
+    autoLastChosenPackId=row?.getAttribute('data-pack-id')||'';
+    autoPendingChoice={row,packId:autoLastChosenPackId,cardId:card.getAttribute('data-id'),startedAt:Date.now()};
+    autoStartExpectation('pack_close_after_card',{packId:autoLastChosenPackId,card:getAutoCardIdentity(card)});
+  }
+  function autoCheckChoice() {
+    if(!autoPendingChoice)return false;
+    const pending=autoPendingChoice;
+    const stage=document.querySelector('.packs-stage')?.getAttribute('data-pack-state');
+    if(stage!=='error' && (!pending.row?.isConnected || pending.row.getAttribute('data-pack-id')!==pending.packId)){
+      // The site's successful choose handler removes the old pack id before loadPacks.
+      autoPendingChoice=null;
+      autoResolveExpectation('card_pick_confirmed_by_pack_change');
+      autoOpenedCount++;
+      saveAutoOpenedCount(); updateAutoCount();
+      const limit=Number(cfg.autoOpenTarget)||0;
+      if(limit>0 && autoOpenedCount>=limit){stopAutoOpen('Готово');return true;}
+      return false;
+    }
+    if(stage==='error' || Date.now()-pending.startedAt>=AUTO_DIAGNOSTIC_STALL_MS){
+      autoReportDiagnosticStall('pack_did_not_close_after_card_pick',{source:'choice_confirmation',stage:stage||'legacy'});
+      stopAutoOpen('Выбор не подтверждён — проверь пак или окно подтверждения');
+      return true;
+    }
+    setAutoStatus('Жду подтверждения выбора карты...');
+    scheduleAutoLoop(AUTO_DELAY_WAIT_CLOSE);
+    return true;
+  }
   function getCurrentStoneBalance() {
     const el=document.querySelector('.lootbox__balance');
     if(!el) return null;
@@ -8905,6 +9097,8 @@
     ensureAutoDiagnosticTimer();
     autoPausedAfterReload=false;
     autoWaitingManual=false;
+    autoPendingChoice=null;
+    autoLastChosenPackId='';
     autoOpenSuppressGuard=false;
     autoBusy=false;
     setAutoStatus('Запуск...');
@@ -8918,26 +9112,16 @@
     if(extraDelay)setAutoStatus('Редкая карта, пауза 3 сек...');
     setTimeout(()=>{
       if(!cfg.autoOpenEnabled){ autoBusy=false; return; }
-      autoLastChosenPackId=getActiveRow()?.getAttribute('data-pack-id')||'';
-      autoStartExpectation('pack_close_after_card',{
-        packId:autoLastChosenPackId,
-        card:getAutoCardIdentity(card),
-        cardCount:getCardsFromActiveRow().length
-      });
+      if(!autoPackReady() || !card.isConnected || card.closest('.lootbox__row')!==getActiveRow()){
+        autoBusy=false; scheduleAutoLoop(AUTO_DELAY_WAIT_CLOSE); return;
+      }
+      autoBeginChoice(card);
       autoDiagnosticRecord('card_click',{packId:autoLastChosenPackId,card:getAutoCardIdentity(card)});
       autoOpenSuppressGuard=true;
       try {
         card.click();
       } finally {
         autoOpenSuppressGuard=false;
-      }
-      autoOpenedCount++;
-      saveAutoOpenedCount();
-      updateAutoCount();
-      const limit=Number(cfg.autoOpenTarget)||0;
-      if(limit>0 && autoOpenedCount>=limit) {
-        stopAutoOpen('Готово');
-        return;
       }
       autoBusy=false;
       setAutoStatus('Жду следующий пак...');
@@ -8985,6 +9169,18 @@
       return;
     }
     if(!isAutoOpenAvailable()) { stopAutoOpen('Модуль выключен'); return; }
+    if(autoCheckChoice())return;
+    const stage=document.querySelector('.packs-stage')?.getAttribute('data-pack-state');
+    if(stage==='error'){
+      autoReportDiagnosticStall('pack_site_error',{source:'loop'});
+      stopAutoOpen('Ошибка сайта — проверь пак'); return;
+    }
+    if((stage && stage!=='ready' && stage!=='idle') || (hasOpenCardsReady() && !autoPackReady())){
+      autoStartExpectation('pack_animation_ready',{packId:getActiveRow()?.getAttribute('data-pack-id')||''});
+      setAutoStatus('Жду завершения загрузки или анимации...');
+      scheduleAutoLoop(AUTO_DELAY_WAIT_CLOSE); return;
+    }
+    if(autoExpectation?.kind==='pack_animation_ready')autoResolveExpectation('pack_stage_ready');
 
     const limit=Number(cfg.autoOpenTarget)||0;
     if(limit>0 && autoOpenedCount>=limit) { stopAutoOpen('Готово'); return; }
@@ -10578,6 +10774,7 @@
     // Определяем якорь для вставки блока:
     // 1. Если включена статистика и кнопка есть — после кнопки статистики
     // 2. Иначе — после label.checkbox с #packs_demand
+    const tools = getPackTools();
     const statsBtn = document.getElementById('cv-stats-btn');
     const packsDemandLabel = document.querySelector('label.checkbox input#packs_demand')?.closest('label.checkbox');
 
@@ -10597,7 +10794,10 @@
         'line-height:1.7',
       ].join(';');
 
-      if (cfg.modStats && statsBtn) {
+      if (tools) {
+        block.style.cssText='';
+        tools.append(block);
+      } else if (cfg.modStats && statsBtn) {
         statsBtn.insertAdjacentElement('afterend', block);
       } else if (packsDemandLabel) {
         packsDemandLabel.insertAdjacentElement('afterend', block);
@@ -10608,13 +10808,14 @@
       }
     } else {
       // Блок уже есть — перемещаем если нужно (статистика включилась/выключилась)
-      const shouldBeAfter = cfg.modStats && statsBtn ? statsBtn : packsDemandLabel;
+      if(tools && block.parentElement!==tools){ block.style.cssText=''; tools.append(block); }
+      const shouldBeAfter = tools ? null : cfg.modStats && statsBtn ? statsBtn : packsDemandLabel;
       if (shouldBeAfter && block.previousElementSibling !== shouldBeAfter) {
         shouldBeAfter.insertAdjacentElement('afterend', block);
       }
     }
 
-    block.innerHTML = `
+    const html = tools ? `<strong>Полных гарантов: <span class="cv-pack-tool-value">${fullGuarantees}</span></strong><small>До следующего гаранта: <span class="cv-pack-tool-value">${stonesNeededForNext.toLocaleString('ru-RU')} 💎</span></small>` : `
       <div style="font-size:13px;font-weight:700;color:#818cf8;">
         🏅 Полных гарантов: <span style="font-size:15px;color:#a78bfa">${fullGuarantees}</span>
       </div>
@@ -10622,6 +10823,7 @@
         🔮 До следующего гаранта: <span style="font-size:15px;color:#fcd34d">${stonesNeededForNext.toLocaleString('ru-RU')} 💎</span>
       </div>
     `;
+    if(block.innerHTML!==html)block.innerHTML=html;
   }
 
   function watchGuarantee() {
@@ -10696,7 +10898,9 @@
   async function init(){
     window.__suiteMainInitStartedAt = window.__suiteMainInitStartedAt || Date.now();
     suiteStartModule('mobile_ui', null, suiteApplyMobileFloatingUiVisibility);
+    window.__suiteMainInitPhase = 'waiting_for_access_context';
     await suiteAccessGate();
+    window.__suiteMainInitPhase = 'starting_modules';
     suiteStartModule('neon', null, () => {
       insertNeonGradients();
       applyNeonAnimationSetting();
@@ -10737,6 +10941,7 @@
     suiteStartModule('pack_guard', null, setupBuyButtonGuard);
     suiteStartModule('guarantee', null, watchGuarantee);
     window.__suiteMainInitialized = true;
+    window.__suiteMainInitPhase = 'ready';
     window.__suiteMainInitializedAt = Date.now();
   }
 
@@ -12230,6 +12435,7 @@
         }
 
         async function fetchData(url, options = {}, type = 'json', requireOk = true) {
+            if (suiteGetAuthPause('autowatch')) throw new Error('authentication_required: автолут на паузе');
             const requestId = `aw_${Date.now()}_${++diagnosticRequestSequence}`;
             const startedAt = Date.now();
             const request = {
@@ -12243,26 +12449,18 @@
 
             try {
                 const response = await fetch(url, options);
+                let responseText = '';
                 try {
-                    const clone = response.clone();
-                    clone.text().then(responseText => {
-                        saveDiagnosticLog('network_request_finished', {
-                            ...request,
-                            status: response.status,
-                            statusText: response.statusText,
-                            ok: response.ok,
-                            responseUrl: response.url,
-                            responseHeaders: diagnosticSanitizeHeaders(response.headers),
-                            response: diagnosticParseResponse(responseText),
-                            durationMs: Date.now() - startedAt
-                        });
-                    }).catch(e => {
-                        saveDiagnosticLog('network_response_read_failed', {
-                            ...request,
-                            status: response.status,
-                            error: diagnosticSanitize(e),
-                            durationMs: Date.now() - startedAt
-                        });
+                    responseText = await response.clone().text();
+                    saveDiagnosticLog('network_request_finished', {
+                        ...request,
+                        status: response.status,
+                        statusText: response.statusText,
+                        ok: response.ok,
+                        responseUrl: response.url,
+                        responseHeaders: diagnosticSanitizeHeaders(response.headers),
+                        response: diagnosticParseResponse(responseText),
+                        durationMs: Date.now() - startedAt
                     });
                 } catch (e) {
                     saveDiagnosticLog('network_response_clone_failed', {
@@ -12273,8 +12471,15 @@
                     });
                 }
 
-                if (requireOk && !response.ok) throw new Error(`HTTP ${response.status} for ${url}`);
-                if (type === 'json') return response.json();
+                if (response.status === 401 || (requireOk && !response.ok)) throw new Error(`HTTP ${response.status} for ${url}`);
+                let data = null;
+                try { data = JSON.parse(responseText); } catch(e) {}
+                const message = [data?.error, data?.reason, data?.message, data?.status].filter(v => typeof v === 'string').join(' ');
+                if (suiteIsAuthenticationError(message)) throw new Error(message);
+                if (/^\s*</.test(responseText) && suiteDocumentIsGuest(new DOMParser().parseFromString(responseText, 'text/html'))) {
+                    throw new Error('authentication_required: вместо ответа автолута получена форма входа');
+                }
+                if (type === 'json') return data !== null ? data : response.json();
                 if (type === 'text') return response.text();
                 return response;
             } catch (e) {
@@ -12283,6 +12488,11 @@
                     durationMs: Date.now() - startedAt,
                     error: diagnosticSanitize(e)
                 });
+                if (suiteIsAuthenticationError(e?.message) && !suiteGetAuthPause('autowatch')) {
+                    suitePauseForAuthentication('autowatch', e.message);
+                    stopMainCardCheckLogic();
+                    safePush('warning', 'Автолут на паузе: войдите на сайт и перезагрузите страницу.');
+                }
                 throw e;
             }
         }
@@ -12746,7 +12956,7 @@
         }
 
         async function updateCardCounter(forceUpdate = false) {
-            if (!currentUser || profileFetchInProgress) return;
+            if (!currentUser || profileFetchInProgress || suiteGetAuthPause('autowatch')) return;
 
             const now = Date.now();
             const cachedData = await GM_getValue(CARD_COUNT_CACHE_KEY, null);
@@ -13316,10 +13526,12 @@
                 && window.__suiteAutoLootCardsInstalled
                 && scriptEnabledWatch
                 && storedEnabled
+                && !suiteGetAuthPause('autowatch')
             );
         }
 
         async function ensureDailyKodikWarmup(entry, episode, trigger) {
+            if (suiteGetAuthPause('autowatch')) return false;
             if (!(await isKodikWarmupAuthorized(trigger))) {
                 suiteSelfDiagnosticIssue('autowatch', 'watch_quest_blocked_outside_card_loot_cycle', {
                     source:trigger?.source || 'unknown',
@@ -13761,6 +13973,10 @@
         }
 
         function scheduleNext(delayMs) {
+            if (suiteGetAuthPause('autowatch')) {
+                stopMainCardCheckLogic();
+                return;
+            }
             if (checkNewCardTimeoutId) clearTimeout(checkNewCardTimeoutId);
             const clampedDelay = Math.max(0, delayMs);
             nextRunAt = Date.now() + clampedDelay;
@@ -13790,6 +14006,10 @@
 
         async function mainCardCheckLogic() {
             if (isLoopRunning) return;
+            if (suiteGetAuthPause('autowatch')) {
+                stopMainCardCheckLogic();
+                return;
+            }
             isLoopRunning = true;
 
             try {
@@ -14084,6 +14304,11 @@
 
                 scheduleNext(CHECK_NEW_CARD_INTERVAL + NEXT_LOOP_EXTRA_DELAY);
             } catch (e) {
+                if (suiteIsAuthenticationError(e?.message)) {
+                    if (!suiteGetAuthPause('autowatch')) suitePauseForAuthentication('autowatch', e.message);
+                    stopMainCardCheckLogic();
+                    return;
+                }
                 error('Ошибка цикла:', e);
                 saveDiagnosticLog('main_loop_error', { error: e });
                 scheduleNext(15000);
@@ -14632,10 +14857,15 @@
                 compact = 'ждёт базу';
                 full = 'Проверка базы: раз в минуту';
             }
+            if (suiteGetAuthPause('autowatch')) {
+                compact = 'нужен вход';
+                full = 'Войдите на сайт и перезагрузите страницу';
+            }
             return { compact, full };
         }
 
         function renderPanelLiveState() {
+            const authPaused = !!suiteGetAuthPause('autowatch');
             window.__suiteAutoLootCardsHealthAt = Date.now();
             window.__suiteAutoLootCardsRuntimeState = {
                 enabled: !!scriptEnabledWatch,
@@ -14644,6 +14874,8 @@
                 nextRunAt: Number(nextRunAt || 0),
                 timeoutPresent: !!checkNewCardTimeoutId,
                 animeDbEmpty: !!animeDbEmpty,
+                authPaused,
+                collectionPaused: !!panelPaused,
                 updatedAt: Date.now()
             };
             const btn = document.getElementById('aw-active-tab-toggle');
@@ -14655,7 +14887,7 @@
 
             const visible = isTabVisible();
             const leader = isThisTabLeader();
-            const active = scriptEnabledWatch && visible && leader && !panelPaused;
+            const active = scriptEnabledWatch && visible && leader && !panelPaused && !authPaused;
 
             setPanelText(btn, active ? 'Автолут: ВКЛ' : 'Автолут: ВЫКЛ');
             btn.style.background = active ? '#14532d' : '#7f1d1d';
@@ -14670,6 +14902,7 @@
                 setPanelText(info, 'Эта вкладка выполняет автолут');
             }
             if (animeDbEmpty) setPanelText(info, 'База аниме пуста — автолут ждёт заполнения');
+            if (authPaused) setPanelText(info, 'Автолут остановлен: требуется повторный вход на сайт');
             setPanelText(holder, `Вкладка: ${leader ? 'ведущая' : 'ожидание'}`);
             const countdown = getPanelCountdown();
             setPanelText(timer, countdown.full);
@@ -14719,7 +14952,7 @@
             setPanelHidden(dbWarning, !animeDbEmpty);
             setPanelText(daily, `Сегодня: ${limit ? `${current} / ${limit}` : (current > 0 ? current : '?')}`);
 
-            setPanelText(pause, `Пауза: ${panelPaused ? 'да' : 'нет'}`);
+            setPanelText(pause, `Пауза: ${suiteGetAuthPause('autowatch') ? 'нужна авторизация' : panelPaused ? 'да' : 'нет'}`);
 
             // последняя полученная карта
             if (lastCardEl) {
