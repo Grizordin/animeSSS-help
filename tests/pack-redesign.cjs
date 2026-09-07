@@ -17,7 +17,7 @@ function extract(name){
 }
 const css=source.match(/globalStyle\.textContent = `([\s\S]*?)`;/)[1];
 const constants=source.slice(source.indexOf('  const rankMap ='),source.indexOf('  const todayKey ='));
-const functions=['parseStat','getRareFactor','stretchToOne','calcCardValue','calcTradeSValue','calcBadCardValue','getCardRank','isGoldSCard','getCardId','computeCardValue','getActiveRow','addCardValue','highlightBestCard','syncBestCardHighlights','addNeonToCard','clearNeonFromCard','getNeonCardType','applyNeonToCard','getPackTools','insertStatsButton','cleanupStatsUi','insertGuaranteeInfo','autoPackReady','autoBeginChoice','autoCheckChoice','autoClickBestCard','handleAutoManualPick','suiteTelemetryFlush'].map(extract).join('\n');
+const functions=['parseStat','getRareFactor','stretchToOne','calcCardValue','calcTradeSValue','calcBadCardValue','getCardRank','isGoldSCard','getCardId','computeCardValue','getActiveRow','addCardValue','highlightBestCard','syncBestCardHighlights','addNeonToCard','clearNeonFromCard','getNeonCardType','applyNeonToCard','getPackTools','insertStatsButton','placePackStatsButton','cleanupStatsUi','insertGuaranteeInfo','autoPackReady','autoBeginChoice','autoCheckChoice','autoClickBestCard','handleAutoManualPick','suiteTelemetryFlush'].map(extract).join('\n');
 const fallback=`<style>.lootbox__card{position:relative;min-width:0}.lootbox__card>img{width:100%;height:auto;aspect-ratio:288/432}.card-stats{display:grid;position:absolute;left:0;right:0;bottom:0}.card-stats>span{display:flex;justify-content:center}</style><div class="packs-page"><div class="packs-guarantees"><span class="lootbox__counter__s">1620</span></div><span class="lootbox__balance">239082</span><div class="packs-stage" data-pack-state="ready"><div class="lootbox__row" data-pack-id="107214619"><div class="lootbox__list">${[[1046,5,181,1],[3276,19,385,0],[2488,15,260,1]].map((nums,i)=>`<div class="lootbox__card ${i!==1?'anime-cards__owned-by-user':''}" data-rank="${['e','d','c'][i]}" data-id="${i}"><img alt="Card"><div class="card-stats">${nums.map(n=>`<span><b class="pack-stat-full">${n}</b><b class="pack-stat-short">${n}</b><b class="pack-stat-tiny">${n}</b></span>`).join('')}</div></div>`).join('')}</div></div></div></div>`;
 const html=process.argv[2]?fs.readFileSync(process.argv[2],'utf8'):fallback;
 const setup=String.raw`
@@ -30,7 +30,7 @@ const renderStatsTab=()=>{}; const suiteClampToViewport=()=>{};let statsPanel=nu
 const PACK20_COUNT=20,PACK20_STONES=1600,GUARANTEE_STONES=144000;
 let autoPendingChoice=null,autoLastChosenPackId='',autoManualPackId='',autoWaitingManual=false,autoBusy=false,autoOpenSuppressGuard=false;
 let autoOpenedCount=0,autoExpectation=null,status='',stopped=false,reported=0,scheduled=0;
-const AUTO_DIAGNOSTIC_STALL_MS=10000,AUTO_DELAY_WAIT_CLOSE=350,AUTO_DELAY_BEFORE_PICK=0,AUTO_DELAY_RARE_VIEW=0,AUTO_DELAY_AFTER_PICK=650;
+const AUTO_DIAGNOSTIC_STALL_MS=10000,AUTO_DELAY_WAIT_CLOSE=350,AUTO_DELAY_RARE_VIEW=3000,AUTO_DELAY_AFTER_PICK=650;
 const autoStartExpectation=(kind,d)=>{autoExpectation={kind,...d};};
 const autoResolveExpectation=()=>{autoExpectation=null;};
 const getAutoCardIdentity=c=>c.dataset.id;
@@ -38,7 +38,8 @@ const autoReportDiagnosticStall=()=>{reported++;};
 const stopAutoOpen=s=>{status=s;stopped=true;autoPendingChoice=null;};
 const setAutoStatus=s=>{status=s;}; const scheduleAutoLoop=()=>{scheduled++;};
 const saveAutoOpenedCount=()=>{};const updateAutoCount=()=>{};const autoDiagnosticRecord=()=>{};
-const needsAutoRareViewDelay=()=>false;const isAutoOpenAvailable=()=>true;
+let rareDelayRequested=false;
+const needsAutoRareViewDelay=()=>rareDelayRequested;const isAutoOpenAvailable=()=>true;
 let suiteTelemetryFlushPromise=null,queue=[],sent=[],acceptBatch=true;
 const suiteTelemetrySessionId='test';
 const suiteTelemetryInstallId='test';
@@ -72,11 +73,16 @@ insertStatsButton();insertGuaranteeInfo();insertStatsButton();insertGuaranteeInf
 check(document.querySelector('.packs-guarantees').nextElementSibling.id==='cv-pack-tools','tools placed after guarantees');
 check(document.querySelectorAll('#cv-pack-tools #cv-stats-btn').length===1,'single statistics button');
 check(document.querySelectorAll('#cv-pack-tools #cv-guarantee-block').length===1,'single guarantee block');
-check(document.querySelector('#cv-guarantee-block strong').textContent.includes('1'),'guarantee amount');
-check(document.querySelector('#cv-guarantee-block small').textContent.replace(/\D/g,'')==='34518','remaining stones');
+check(document.querySelector('#cv-guarantee-block .cv-pack-tool-value').textContent==='1','guarantee amount');
+check(document.querySelector('#cv-guarantee-block .cv-pack-stones-value').textContent.replace(/\D/g,'')==='34518','remaining stones');
+document.getElementById('cv-pack-stats-card').click();
+check(document.getElementById('cv-stats-panel').style.display==='none','statistics card itself is not a button');
+check(document.querySelectorAll('#cv-pack-stats-card #cv-stats-btn').length===1,'button nested in statistics card');
+const statsObserver=new MutationObserver(()=>{});statsObserver.observe(document.getElementById('cv-pack-stats-card'),{childList:true,subtree:true,attributes:true});
+insertStatsButton();check(statsObserver.takeRecords().length===0,'stable statistics card update');statsObserver.disconnect();
 document.getElementById('cv-stats-btn').click();
 check(document.getElementById('cv-stats-panel').style.display==='block','statistics opens');
-cfg.modStats=false;cleanupStatsUi();check(!document.getElementById('cv-stats-btn')&&!!document.getElementById('cv-guarantee-block'),'stats off preserves guarantee');
+cfg.modStats=false;cleanupStatsUi();check(!document.getElementById('cv-pack-stats-card')&&!document.getElementById('cv-stats-btn')&&!!document.getElementById('cv-guarantee-block'),'stats off preserves guarantee and removes card');
 cfg.modGuarantee=false;insertGuaranteeInfo();check(!document.getElementById('cv-guarantee-block'),'guarantee off cleans block');
 cfg.modStats=true;cfg.modGuarantee=true;insertStatsButton();insertGuaranteeInfo();
 cfg.modNeon=false;addCardValue();check(!document.querySelector('.cv-pack-neon-ring'),'neon off removes ring');
@@ -88,7 +94,17 @@ list.classList.add('step1');check(!autoPackReady(),'animation blocks choice');li
 list.classList.add('packs-slot-reveal');check(!autoPackReady(),'shuffle blocks choice');list.classList.remove('packs-slot-reveal');
 stage.dataset.packState='loading';check(!autoPackReady(),'loading blocks choice');stage.dataset.packState='ready';
 let clicked=0;cards[1].addEventListener('click',()=>clicked++);
-autoClickBestCard(cards[1]);await new Promise(r=>setTimeout(r,20));
+list.classList.add('step1');autoClickBestCard(cards[1]);
+check(clicked===0&&!autoPendingChoice,'animation still blocks immediate selection');list.classList.remove('step1');
+const nativeSetTimeout=window.setTimeout;let pickTimer=null;
+window.setTimeout=(fn,delay)=>{pickTimer={fn,delay};return 1;};
+rareDelayRequested=true;autoClickBestCard(cards[1]);
+check(clicked===0&&pickTimer?.delay===3000,'intentional rare-card viewing delay preserved');
+cfg.autoOpenEnabled=false;pickTimer.fn();check(clicked===0,'disabling auto open cancels delayed rare choice');
+cfg.autoOpenEnabled=true;rareDelayRequested=false;pickTimer=null;
+autoClickBestCard(cards[1]);
+check(clicked===1&&pickTimer===null,'ready ordinary card selected synchronously without extra timer');
+window.setTimeout=nativeSetTimeout;
 check(clicked===1&&autoOpenedCount===0,'click alone not counted');
 check(autoCheckChoice()&&autoOpenedCount===0,'same pack keeps waiting');
 row.removeAttribute('data-pack-id');stage.dataset.packState='loading';
