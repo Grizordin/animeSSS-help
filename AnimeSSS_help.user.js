@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.62
+// @version      3.63
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -744,9 +744,9 @@
   }
 
   function suiteTelemetrySanitize(value, key = '', depth = 0, seen = new WeakSet()) {
-    if(value == null || typeof value === 'boolean' || typeof value === 'number') return value;
     const lowerKey = String(key).toLowerCase();
     if(/(?:user_?hash|dle_?login_?hash|cookie|authorization|token|password|secret)/i.test(lowerKey)) return '[redacted]';
+    if(value == null || typeof value === 'boolean' || typeof value === 'number') return value;
     if(typeof value === 'string') {
       const text = value
         .replace(/([?&](?:user_hash|dle_login_hash|token|auth|password)=)[^&#\s]*/gi, '$1[redacted]')
@@ -759,9 +759,10 @@
       return text.length > 30000 ? `${text.slice(0, 29999)}...` : text;
     }
     if(value instanceof Error) {
-      return { name:value.name, message:value.message, stack:String(value.stack || '').slice(0, 12000) };
+      return suiteTelemetrySanitize({ name:value.name, message:value.message, stack:String(value.stack || '').slice(0, 12000) }, key, depth, seen);
     }
-    if(typeof value !== 'object' || depth >= 6) return String(value);
+    if(typeof value !== 'object') return String(value);
+    if(depth >= 6) return '[truncated: max depth]';
     if(seen.has(value)) return '[circular]';
     seen.add(value);
     if(Array.isArray(value)) return value.slice(0, 250).map(item => suiteTelemetrySanitize(item, '', depth + 1, seen));
@@ -913,7 +914,9 @@
           path:location.pathname,
           visibility:document.visibilityState
         },
-        details:suiteTelemetrySanitize(details, '', 4),
+        // The logger sanitizes the complete event once, including these details.
+        // Starting at depth 4 here used to erase nested pack snapshots and actions.
+        details,
         context
       }, 'error');
       void suiteTelemetryFlush('self_diagnostic');
