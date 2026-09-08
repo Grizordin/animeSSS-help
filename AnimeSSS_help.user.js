@@ -3651,7 +3651,9 @@
       'cv-neon-red',
       'cv-neon-blue'
     );
-    card.style.position='relative';
+    // On the boss page any inline style matches the site's width:100% rule.
+    // Neon already supplies position:relative through .cv-neon-outline.
+    if(!card.matches('.boss-page .club-boost__image')) card.style.position='relative';
     if(card.classList.contains('trade__main-item'))card.style.overflow='visible';
     card.classList.add('cv-neon-outline',`cv-neon-${type}`);
     if(card.matches('.packs-page .lootbox__card')){
@@ -3684,6 +3686,9 @@
       'cv-neon-blue'
     );
     if(card.style.position === 'relative') card.style.removeProperty('position');
+    // removeProperty can leave style="", which still matches the site's [style].
+    if(card.matches('.boss-page .club-boost__image') && card.hasAttribute('style')
+      && !card.getAttribute('style').trim()) card.removeAttribute('style');
     if(card.classList.contains('trade__main-item')) card.style.removeProperty('overflow');
     card.querySelectorAll('.lock-trade-btn').forEach(btn => btn.style.removeProperty('display'));
   }
