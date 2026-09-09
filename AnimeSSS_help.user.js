@@ -7635,6 +7635,92 @@
     });
   }
 
+  // Exact counters for destructive card operations; unknown/abbreviated-only values
+  // must not silently become small integers and pass a safety filter.
+  function suiteReadInventoryCount(span){
+    if(!span)return null;
+    for(const key of ['data-cg-count','data-rf-count']){
+      const raw=span.getAttribute(key);
+      if(raw!==null && /^\d+$/.test(raw.trim()))return Number(raw);
+    }
+    for(const raw of [span.getAttribute('aria-label'),span.getAttribute('title'),span.textContent]){
+      const text=String(raw||'').trim();
+      if(/\d[\d\s.,]*\s*(?:[кkмm]|тыс|млн)/i.test(text))continue;
+      const match=text.match(/\d(?:[\d\s\u00a0\u202f]*\d)?/);
+      if(match && !/[.,]\d/.test(text))return Number(match[0].replace(/\s/g,''));
+    }
+    return null;
+  }
+  function suiteInventoryStats(card){
+    const result={want:null,dups:null,owners:null};
+    const spans=[...card.querySelectorAll('.card-stats > span')];
+    for(const span of spans){
+      const label=[span.title,span.getAttribute('aria-label'),span.getAttribute('data-cg-stat-label'),span.getAttribute('data-rf-stat-label')].join(' ').toLowerCase();
+      const value=suiteReadInventoryCount(span);
+      if(/хотят|жела/.test(label))result.want=value;
+      if(/дубли|руках/.test(label))result.dups=value;
+      if(/влад/.test(label))result.owners=value;
+    }
+    if(result.want===null)result.want=suiteReadInventoryCount(spans[1]);
+    return result;
+  }
+  function suiteCardActionButtonReady(button){
+    if(!button?.isConnected || button.disabled || button.hidden)return false;
+    const style=getComputedStyle(button);
+    return style.display!=='none' && style.visibility!=='hidden' && button.getClientRects().length>0;
+  }
+  function suiteConfirmCardAction({button,action,ids,signal,timeoutMs=35000}){
+    return new Promise(resolve=>{
+      const jq=window.jQuery || (typeof unsafeWindow!=='undefined' ? unsafeWindow.jQuery : null);
+      if(signal?.aborted || !suiteCardActionButtonReady(button) || !ids.length || typeof jq!=='function'){
+        resolve({ok:false,reason:'not_ready'});return;
+      }
+      // Observe only while our click is pending; never replace fetch/XHR or submit a second request.
+      const namespace='.suiteCardAction'+Date.now()+Math.random().toString(36).slice(2);
+      const target=jq(document), expected=ids.map(String).sort().join(',');
+      if(typeof target?.on!=='function'||typeof target?.off!=='function'){resolve({ok:false,reason:'observer_unavailable'});return;}
+      let request=null,finished=false,timer;
+      const finish=result=>{
+        if(finished)return;finished=true;
+        clearTimeout(timer);target.off(namespace);signal?.removeEventListener('abort',cancel);
+        resolve(result);
+      };
+      const cancel=()=>finish({ok:false,reason:'cancelled',uncertain:!!request});
+      const onSend=(_event,xhr,settings)=>{
+        try{
+          if(request)return;
+          const url=new URL(settings.url,location.href);
+          if(url.origin!==location.origin || url.searchParams.get('mod')!=='cards_ajax')return;
+          const params=typeof settings.data==='string'?new URLSearchParams(settings.data):null;
+          const sentAction=params?params.get('action'):settings.data?.action;
+          if(sentAction!==action)return;
+          const key=action==='create_energy'?'cards_ids':'card_ids';
+          const sentIds=params?[...params].filter(([name])=>name===key||name.startsWith(key+'[')).map(([,value])=>value)
+            :[].concat(settings.data?.[key]||[]).map(String);
+          if(sentIds.sort().join(',')===expected)request=xhr;
+        }catch(e){}
+      };
+      const onComplete=(_event,xhr)=>{
+        if(xhr!==request)return;
+        if(xhr.status<200 || xhr.status>=300){finish({ok:false,reason:'http_error',uncertain:true});return;}
+        let data=xhr.responseJSON;
+        if(!data){try{data=JSON.parse(xhr.responseText);}catch(e){}}
+        if(data?.error){finish({ok:false,reason:'server_rejected'});return;}
+        if(action==='create_energy' && /^\d+$/.test(String(data?.new_energy??''))){
+          finish({ok:true,newEnergy:Number(data.new_energy)});return;
+        }
+        if(action==='remelt_card' && data?.card && typeof data.card.image==='string' && data.card.image
+          && typeof data.card.name==='string' && data.card.name){finish({ok:true});return;}
+        finish({ok:false,reason:'invalid_response',uncertain:true});
+      };
+      try{target.on('ajaxSend'+namespace,onSend).on('ajaxComplete'+namespace,onComplete);}
+      catch(e){finish({ok:false,reason:'observer_unavailable'});return;}
+      signal?.addEventListener('abort',cancel,{once:true});
+      timer=setTimeout(()=>finish({ok:false,reason:request?'response_timeout':'request_not_observed',uncertain:true}),timeoutMs);
+      try{button.click();}catch(e){finish({ok:false,reason:'click_failed',uncertain:!!request});}
+    });
+  }
+
   function initBrickFill(){
     if(!cfg.modBrickFill) return;
     if(isPremiumLockedSetting('modBrickFill')){
@@ -7645,6 +7731,8 @@
     if(window.__suiteBrickFillInstalled) return;
     window.__suiteBrickFillInstalled=true;
     const brickCleanup=[];
+    const brickAbort=new AbortController();
+    brickCleanup.push(()=>brickAbort.abort());
     window.__suiteBrickFillCleanup=()=>{
       brickCleanup.splice(0).forEach(fn=>{try{fn();}catch(e){}});
       document.getElementById('stone-brick-panel')?.remove();
@@ -7763,19 +7851,23 @@
       if(cur===last)return true;
       brickNotify(`⬇️ Иду на последнюю стр. ${last}…`,0);
       if(!goToPage(last))return false;
-      await waitForInventoryUpdate();
+      if(!await waitForInventoryUpdate())return false;
       return getCurrentPage()===last;
     }
     function waitForInventoryUpdate(timeoutMs=8000){
       return new Promise(resolve=>{
         const list=document.querySelector('.stone__inventory-list')||document.querySelector('.stone__inventory');
-        if(!list){setTimeout(resolve,500);return;}
+        if(!list){resolve(false);return;}
         const before=list.innerHTML;let done=false;
-        const finish=()=>{if(done)return;done=true;obs.disconnect();clearInterval(poll);clearTimeout(fallback);setTimeout(resolve,200);};
-        const obs=new MutationObserver(()=>{if(list.innerHTML!==before)finish();});
+        const finish=ok=>{if(done)return;done=true;obs.disconnect();clearInterval(poll);clearTimeout(fallback);resolve(ok);};
+        const check=()=>{
+          if(brickAbort.signal.aborted){finish(false);return;}
+          if(list.innerHTML!==before && document.getElementById('celestialForge')?.dataset.filterBusy!=='true')finish(true);
+        };
+        const obs=new MutationObserver(check);
         obs.observe(list,{childList:true,subtree:true,characterData:true});
-        const poll=setInterval(()=>{if(list.innerHTML!==before)finish();},100);
-        const fallback=setTimeout(finish,timeoutMs);
+        const poll=setInterval(check,100);
+        const fallback=setTimeout(()=>finish(false),timeoutMs);
       });
     }
     function getActiveRank(){
@@ -7790,28 +7882,19 @@
         if(clicked===lastRank)return;
         jumpPending=true;
         lastRank=clicked;
-        await waitForInventoryUpdate(3000);
-        await goToLastPage();
-        jumpPending=false;
+        try{if(await waitForInventoryUpdate(8000))await goToLastPage();}
+        finally{jumpPending=false;}
       },true);
     }
     function parseCardStats(card){
-      let want=null,dups=null,owners=null;
-      card.querySelectorAll('.card-stats span').forEach(span=>{
-        const title=(span.title||'').trim().toLowerCase();
-        const num=parseInt((span.textContent||'').replace(/\D/g,''),10);
-        if(isNaN(num))return;
-        if(title.includes('хотят')||title.includes('жела'))want=num;
-        if(title.includes('дубли')||title.includes('руках'))dups=num;
-        if(title.includes('влад'))owners=num;
-      });
-      const spans=card.querySelectorAll('.card-stats span');
-      if(want===null&&spans[1]){const m=(spans[1].textContent||'').match(/(\d+)/);if(m)want=parseInt(m[1],10);}
-      return {want,dups,owners};
+      return suiteInventoryStats(card);
     }
     function getCardImage(card){return card.dataset.image||card.querySelector('img')?.getAttribute('src')||card.querySelector('img')?.getAttribute('data-src')||'';}
     function getCardRank(card){return (card.dataset.rank||getActiveRank()||'').toLowerCase();}
-    function getCardEnergy(card){return BRICK_ENERGY[getCardRank(card)]||1;}
+    function getCardEnergy(card){
+      const raw=card.getAttribute('data-energy');
+      return raw!==null && /^\d+$/.test(raw)?Number(raw):(BRICK_ENERGY[getCardRank(card)]||1);
+    }
     function isCardAvailable(card){
       if(!card)return false;
       if(card.classList.contains('stone__inventory-item--lock'))return false;
@@ -7847,37 +7930,50 @@
       });
     }
 
-    let brickBusy=false,brickReadyToTrade=false;
+    let brickBusy=false,brickReadyToTrade=false,brickTradePending=false,brickTradeUncertain=false;
     function updateBrickButton(busy=false){
       const btn=document.getElementById('stone-brick-main-btn');if(!btn)return;
-      const isBusy=busy||brickBusy;
+      const isBusy=busy||brickBusy||brickTradePending||brickTradeUncertain;
       const energy=getFutureEnergy();
       if(!isBusy&&energy>0&&brickReadyToTrade){btn.textContent='⚡ В энергию';btn.style.background='#276749';btn.dataset.mode='trade';}
       else{btn.textContent=isBusy?'⏳ В работе':'🧱 В кирпич';btn.style.background=isBusy?'#4a5568':'#6b46c1';btn.dataset.mode='fill';}
+      if(brickTradeUncertain)btn.textContent='Проверь обмен и обнови страницу';
       btn.disabled=isBusy;btn.style.opacity=isBusy?'0.65':'1';btn.style.cursor=isBusy?'not-allowed':'pointer';
     }
     function setBrickReady(v){brickReadyToTrade=!!v;updateBrickButton(false);}
-    function clickBrickTrade(){
+    async function clickBrickTrade(){
+      if(brickTradePending||brickTradeUncertain||brickAbort.signal.aborted)return {ok:false};
       const btn=document.querySelector('.stone__send-trade-btn');
-      if(!btn){brickNotify('⚠️ Кнопка обмена не найдена');return false;}
-      btn.click();
-      brickNotify('⚡ Отправлено на обмен');
-      setBrickReady(false);
-      setTimeout(()=>updateBrickButton(false),700);
-      return true;
+      if(!suiteCardActionButtonReady(btn)){brickNotify('⚠️ Кнопка обмена пока недоступна');return {ok:false};}
+      const energy=getFutureEnergy();
+      const ids=[...(getBasket()?.querySelectorAll('.stone__main-item[data-id]')||[])].map(el=>el.dataset.id);
+      brickTradePending=true;updateBrickButton(true);
+      try{
+        const result=await suiteConfirmCardAction({button:btn,action:'create_energy',ids,signal:brickAbort.signal});
+        if(brickAbort.signal.aborted)return {ok:false};
+        if(result.ok && await waitAfterBrickTrade(result.newEnergy)){
+          setBrickReady(false);brickNotify(`✅ Обмен подтверждён: ${energy} энергии`);
+          return {ok:true,energy};
+        }
+        if(brickAbort.signal.aborted)return {ok:false};
+        brickTradeUncertain=!!result.uncertain||result.ok;
+        suiteSelfDiagnosticIssue('suite','brick_exchange_not_confirmed',{reason:result.reason||'ui_not_settled',selectedCount:ids.length,energy});
+        brickNotify('⚠️ Обмен не подтверждён. Проверь баланс и карты; автоматическая работа остановлена.');
+        return {ok:false};
+      }finally{brickTradePending=false;updateBrickButton(false);}
     }
-    async function waitAfterBrickTrade(){
-      const before=getFutureEnergy();
-      for(let i=0;i<20;i++){
+    async function waitAfterBrickTrade(newEnergy){
+      for(let i=0;i<67&&!brickAbort.signal.aborted;i++){
+        const balance=Number(document.getElementById('now_energy')?.textContent.replace(/\D/g,''));
+        if(getUsedSlots()===0 && balance===newEnergy && document.getElementById('celestialForge')?.dataset.filterBusy!=='true')return true;
         await sleep(150);
-        if(getFutureEnergy()!==before || getUsedSlots()===0)break;
       }
-      await sleep(350);
+      return false;
     }
     async function fillBrickOnce({targetEnergy=0,rankCfg,activeRank,lockedImages,forceRefresh=false}){
       const takenMap=new Map();
       let addedTotal=0,noMore=false,reached=false;
-      while(true){
+      while(!brickAbort.signal.aborted){
         brickNotify('⏳ Фильтрую карты…',0);
         const free=getFreeSlots();
         if(free<=0){reached=true;break;}
@@ -7889,7 +7985,7 @@
           if(cur!==null&&cur>1){
             brickNotify(`⬇️ Стр. ${cur} пуста → иду на ${cur-1}…`,0);
             goToPage(cur-1);
-            await waitForInventoryUpdate();
+            if(!await waitForInventoryUpdate()){brickNotify('⚠️ Список карт не обновился. Работа остановлена.');break;}
             continue;
           }
           noMore=true;
@@ -7914,7 +8010,9 @@
           targetEnergy
         });
         for(const card of batch){
+          if(brickAbort.signal.aborted)break;
           card.click();
+          if(!getBasket()?.querySelector(`.stone__main-item[data-id="${card.dataset.id}"]`))continue;
           const img=getCardImage(card);if(img)takenMap.set(img,(takenMap.get(img)||0)+1);
           addedTotal++;
           addedOnPage++;
@@ -7929,13 +8027,14 @@
           plannedEnergy,
           targetEnergy
         });
+        if(!addedOnPage){brickNotify('⚠️ Карты не добавляются в корзину. Работа остановлена.');break;}
         if(getFreeSlots()<=0||(targetEnergy>0&&(energyAfterBatch>=targetEnergy||plannedEnergy>=targetEnergy)))reached=true;
         if(reached)break;
         const curAfter=getCurrentPage();
         if(curAfter!==null&&curAfter>1){
           brickNotify(`⬇️ Стр. ${curAfter}: добавлено ${addedOnPage} карт → иду на ${curAfter-1}…`,0);
           goToPage(curAfter-1);
-          await waitForInventoryUpdate();
+          if(!await waitForInventoryUpdate()){brickNotify('⚠️ Список карт не обновился. Работа остановлена.');break;}
         }else{
           noMore=true;
           break;
@@ -7944,7 +8043,7 @@
       return {energy:getFutureEnergy(),addedTotal,noMore,reached};
     }
     async function clickMatchingBrickCards(forceRefresh=false){
-      if(brickBusy)return;
+      if(brickBusy||brickTradePending||brickTradeUncertain||brickAbort.signal.aborted)return;
       if(warnCardStatsDemandRequired('stone_demand')) return;
       brickBusy=true;updateBrickButton(true);
       try{
@@ -7971,7 +8070,7 @@
         }
 
         let gained=0;
-        while(gained<target){
+        while(gained<target&&!brickAbort.signal.aborted){
           const remaining=target-gained;
           brickNotify(`⏳ Цель: ${gained}/${target}. Наполняю ещё ${remaining} энергии…`,0);
           const result=await fillBrickOnce({targetEnergy:remaining,rankCfg,activeRank,lockedImages,forceRefresh});
@@ -7982,10 +8081,9 @@
             break;
           }
           brickNotify(`⚡ Обмениваю ${energy} энергии…`,0);
-          const traded=clickBrickTrade();
-          if(!traded){setBrickReady(true);break;}
-          gained+=energy;
-          await waitAfterBrickTrade();
+          const traded=await clickBrickTrade();
+          if(!traded.ok){setBrickReady(true);break;}
+          gained+=traded.energy;
           setBrickReady(false);
           if(gained>=target){
             brickNotify(`✅ Цель выполнена: ${gained}/${target}`);
@@ -8137,6 +8235,8 @@
     if(window.__suiteRemeltInstalled) return;
     window.__suiteRemeltInstalled=true;
     const remeltCleanup=[];
+    const remeltAbort=new AbortController();
+    remeltCleanup.push(()=>remeltAbort.abort());
     window.__suiteRemeltCleanup=()=>{
       remeltCleanup.splice(0).forEach(fn=>{try{fn();}catch(e){}});
       document.getElementById('remelt-panel')?.remove();
@@ -8206,12 +8306,13 @@
     function waitForRemeltInventoryUpdate(timeoutMs=2800){
       return new Promise(resolve=>{
         const before=getRemeltInventorySignature();let done=false;
-        const finish=()=>{if(done)return;done=true;obs.disconnect();clearInterval(poll);clearTimeout(fallback);setTimeout(resolve,120);};
+        const finish=ok=>{if(done)return;done=true;obs.disconnect();clearInterval(poll);clearTimeout(fallback);resolve(ok);};
         const changed=()=>getRemeltInventorySignature()!==before;
-        const obs=new MutationObserver(()=>{if(changed())finish();});
+        const check=()=>{if(remeltAbort.signal.aborted)finish(false);else if(changed())finish(true);};
+        const obs=new MutationObserver(check);
         obs.observe(document.body,{childList:true,subtree:true,characterData:true});
-        const poll=setInterval(()=>{if(changed())finish();},80);
-        const fallback=setTimeout(finish,timeoutMs);
+        const poll=setInterval(check,80);
+        const fallback=setTimeout(()=>finish(false),timeoutMs);
       });
     }
     async function remeltGoToLastPage(){
@@ -8220,8 +8321,7 @@
       if(!last||last<=1||cur===last)return false;
       remeltNotify(`⬇️ Иду на последнюю стр. ${last}…`);
       if(!remeltGoToPage(last))return false;
-      await waitForRemeltInventoryUpdate();
-      return true;
+      return await waitForRemeltInventoryUpdate(8000)?true:null;
     }
     function getRemeltActiveRank(){
       const btn=document.querySelector('.remelt__rank-item--active,[class*="rank-item--active"]');
@@ -8236,26 +8336,15 @@
         const clicked=(btn.dataset.rank||btn.getAttribute('data-rank')||'').toLowerCase();
         if(!clicked||clicked===lastRank)return;
         jumpPending=true;lastRank=clicked;
-        await waitForRemeltInventoryUpdate(3000);
-        await remeltGoToLastPage();
-        const body=document.getElementById('remelt-panel-body');
-        if(body) renderRemeltBody(body);
-        jumpPending=false;
+        try{
+          if(await waitForRemeltInventoryUpdate(8000))await remeltGoToLastPage();
+          const body=document.getElementById('remelt-panel-body');
+          if(body)renderRemeltBody(body);
+        }finally{jumpPending=false;}
       },true);
     }
     function parseRemeltCardStats(card){
-      let want=null,dups=null,owners=null;
-      card.querySelectorAll('.card-stats span').forEach(span=>{
-        const title=(span.title||'').trim().toLowerCase();
-        const num=parseInt((span.textContent||'').replace(/\D/g,''),10);
-        if(isNaN(num))return;
-        if(title.includes('хотят')||title.includes('жела'))want=num;
-        if(title.includes('дубли')||title.includes('руках'))dups=num;
-        if(title.includes('влад'))owners=num;
-      });
-      const spans=card.querySelectorAll('.card-stats span');
-      if(want===null&&spans[1]){const m=(spans[1].textContent||'').match(/(\d+)/);if(m)want=parseInt(m[1],10);}
-      return {want,dups,owners};
+      return suiteInventoryStats(card);
     }
     function getRemeltCardImage(card){return card.dataset.image||card.querySelector('img')?.getAttribute('src')||card.querySelector('img')?.getAttribute('data-src')||'';}
     function parseRemeltLockedImages(html){
@@ -8367,24 +8456,38 @@
     }
     async function waitForRemeltStartBtn(timeoutMs=3000){
       const start=Date.now();
-      while(Date.now()-start<timeoutMs){
+      while(Date.now()-start<timeoutMs&&!remeltAbort.signal.aborted){
         const btn=getRemeltStartBtn();
-        if(btn&&getComputedStyle(btn).display!=='none'&&!btn.disabled)return btn;
+        if(suiteCardActionButtonReady(btn))return btn;
         await sleep(100);
       }
-      return getRemeltStartBtn();
+      return null;
+    }
+    async function waitAfterRemelt(ids,rank,timeoutMs=10000){
+      const started=Date.now();
+      while(Date.now()-started<timeoutMs&&!remeltAbort.signal.aborted){
+        if(getRemeltActiveRank()!==rank)return false;
+        const remaining=new Set(getRemeltCards().map(card=>card.dataset.id));
+        const button=getRemeltStartBtn();
+        if(getRemeltFilledSlotCount()===0 && ids.every(id=>!remaining.has(id))
+          && button && !button.disabled && !isRemeltVisible(button))return true;
+        await sleep(100);
+      }
+      return false;
     }
 
-    let remeltBusy=false,remeltHadSuccessfulRun=false;
+    let remeltBusy=false,remeltHadSuccessfulRun=false,remeltUncertain=false;
     function updateRemeltButton(busy=false){
       const btn=document.getElementById('remelt-main-btn');if(!btn)return;
-      const isBusy=busy||remeltBusy;
+      const isBusy=busy||remeltBusy||remeltUncertain;
       btn.textContent=isBusy?'⏳ В работе':'🔥 Переплавка';
+      if(remeltUncertain)btn.textContent='Проверь результат и обнови страницу';
       btn.style.background=isBusy?'#4a5568':'#c2410c';
       btn.disabled=isBusy;btn.style.opacity=isBusy?'0.65':'1';btn.style.cursor=isBusy?'not-allowed':'pointer';
     }
     async function runRemelt(){
-      if(remeltBusy)return;
+      if(remeltBusy||remeltUncertain||remeltAbort.signal.aborted)return;
+      if(document.getElementById('autoRemeltToggle')?.checked){remeltNotify('⚠️ Сначала выключи автоплавку сайта');return;}
       if(warnCardStatsDemandRequired('trade_demand')) return;
       const settings=loadRemeltSettings();
       const target=Math.max(0,parseInt(settings.targetCount,10)||0);
@@ -8401,9 +8504,9 @@
             remeltNotify('⚠️ Ник не найден, исключение желаемого пропущено');
           }
         }
-        if(!remeltHadSuccessfulRun) await remeltGoToLastPage();
+        if(!remeltHadSuccessfulRun && await remeltGoToLastPage()===null){remeltNotify('⚠️ Список карт не обновился. Работа остановлена.');return;}
         let done=0;
-        while(done<target){
+        while(done<target&&!remeltAbort.signal.aborted){
           const activeRank=getRemeltActiveRank();
           const need=getRemeltNeedCount(activeRank);
           const rankCfg=settings[activeRank]||defaultRankCfg();
@@ -8411,7 +8514,8 @@
           let stopped=false,stalePasses=0;
           let pageNo=getRemeltCurrentPage();
           let pageStartFilled=getRemeltFilledSlotCount();
-          while(getRemeltFilledSlotCount()<need){
+          while(getRemeltFilledSlotCount()<need&&!remeltAbort.signal.aborted){
+            if(getRemeltActiveRank()!==activeRank||document.getElementById('autoRemeltToggle')?.checked){stopped=true;break;}
             const cards=filterRemeltCards(rankCfg,activeRank,takenMap,lockedImages);
             const cur=getRemeltCurrentPage();
             if(!cards.length){
@@ -8419,7 +8523,7 @@
                 const addedOnPage=Math.max(0,getRemeltFilledSlotCount()-pageStartFilled);
                 remeltNotify(`⬇️ Стр. ${cur}: добавлено ${addedOnPage} карт → иду на ${cur-1}…`);
                 remeltGoToPage(cur-1);
-                await waitForRemeltInventoryUpdate();
+                if(!await waitForRemeltInventoryUpdate(8000)){remeltNotify('⚠️ Список карт не обновился. Работа остановлена.');stopped=true;break;}
                 pageNo=getRemeltCurrentPage();
                 pageStartFilled=getRemeltFilledSlotCount();
                 continue;
@@ -8431,6 +8535,7 @@
               pageStartFilled=getRemeltFilledSlotCount();
             }
             for(const card of cards){
+              if(remeltAbort.signal.aborted || getRemeltActiveRank()!==activeRank || document.getElementById('autoRemeltToggle')?.checked){stopped=true;break;}
               if(getRemeltFilledSlotCount()>=need)break;
               const beforeFilled=getRemeltFilledSlotCount();
               card.click();
@@ -8445,14 +8550,16 @@
             }
             const filledNow=getRemeltFilledSlotCount();
             if(filledNow>=need)break;
-            if(filledNow===0)stalePasses++;
+            if(filledNow===pageStartFilled)stalePasses++;
             else stalePasses=0;
             if(stalePasses>=2){
               getRemeltCards().forEach(c=>{delete c.dataset.suiteRemeltPicked;});
-              stalePasses=0;
-              await sleep(500);
+              remeltNotify('⚠️ Карты не добавляются в слоты. Работа остановлена.');
+              stopped=true;break;
             }
+            pageStartFilled=filledNow;
           }
+          if(remeltAbort.signal.aborted)break;
           if(stopped){remeltNotify(`⛔ Недостаточно карт. Выполнено ${done}/${target}`);break;}
           const slotsReady=await waitForRemeltSlotsFilled(need,6000);
           if(!slotsReady){
@@ -8462,12 +8569,23 @@
             continue;
           }
           const startBtn=await waitForRemeltStartBtn();
-          if(!startBtn){remeltNotify('⛔ Кнопка «Перековка» не появилась');break;}
-          startBtn.click();
+          if(!startBtn || getRemeltActiveRank()!==activeRank || document.getElementById('autoRemeltToggle')?.checked){remeltNotify('⛔ Переплавка сейчас недоступна');break;}
+          const wrapper=getRemeltActiveWrapper(activeRank);
+          if(!wrapper){remeltNotify('⛔ Поле переплавки изменилось');break;}
+          const ids=[...wrapper.querySelectorAll('.remelt__item:not(.remelt__item--result):not(.remelt6__slot--result) img[data-id]')].map(img=>img.dataset.id);
+          if(ids.length!==need || new Set(ids).size!==need){remeltNotify('⛔ Набор карт в слотах изменился');break;}
+          const result=await suiteConfirmCardAction({button:startBtn,action:'remelt_card',ids,signal:remeltAbort.signal});
+          if(remeltAbort.signal.aborted)break;
+          if(!result.ok || !await waitAfterRemelt(ids,activeRank)){
+            if(remeltAbort.signal.aborted)break;
+            remeltUncertain=!!result.uncertain||result.ok;
+            suiteSelfDiagnosticIssue('suite','remelt_not_confirmed',{reason:result.reason||'ui_not_settled',selectedCount:ids.length,rank:activeRank});
+            remeltNotify('⚠️ Переплавка не подтверждена. Проверь карты; автоматическая работа остановлена.');
+            break;
+          }
           done++;
           remeltHadSuccessfulRun=true;
           remeltNotify(`✅ Переплавка ${done}/${target}`);
-          await waitForRemeltInventoryUpdate(4000);
           getRemeltCards().forEach(c=>{delete c.dataset.suiteRemeltPicked;});
           await sleep(500);
         }
