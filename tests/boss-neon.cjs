@@ -1,4 +1,4 @@
-// Offline browser regression. Optional argument: full boss-page HTML fixture.
+// Offline browser regression. Optional argument: boss/contribution HTML or --contribution.
 // Embedded scripts, resource URLs and event handlers from the fixture are never run.
 const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
 const {chromium} = require('playwright');
@@ -27,7 +27,11 @@ const fallback = `<style>
 @media(max-width:760px){.boss-page .raid-row {grid-template-columns:1fr}.boss-page .club-boost__image {width:130px;max-width:100%}}
 @media(max-width:420px){.boss-page .club-boost__image {width:148px}}
 </style><div class="raid-row"><section class="raid-panel"></section><section class="raid-panel raid-loadout"><div class="club-boost--content"><div class="club-boost__inner"><div class="club-boost__image anime-cards__item anime-cards__owned-by-user-want"><img alt="Card"></div></div><div class="club-boost__inner"><div style="display:flex">Attack</div></div></div></section></div>`;
-const html = process.argv[2] ? fs.readFileSync(process.argv[2], 'utf8') : fallback;
+const contributionFallback = fallback.replaceAll('boss-page','contribution-page')
+  .replaceAll('raid-row','deposit-layout').replaceAll('158px','174px')
+  .replaceAll('130px','152px').replaceAll('148px','168px');
+const html = process.argv[2] === '--contribution' ? contributionFallback
+  : process.argv[2] ? fs.readFileSync(process.argv[2], 'utf8') : fallback;
 (async () => {
   const browser = await chromium.launch({headless:true,channel:'msedge'});
   try {
@@ -37,20 +41,24 @@ const html = process.argv[2] ? fs.readFileSync(process.argv[2], 'utf8') : fallba
     await page.evaluate(({html,css}) => {
       const parsed = new DOMParser().parseFromString(html, 'text/html');
       const styles = [...parsed.querySelectorAll('style')].map(el => el.textContent).join('\n');
-      const row = parsed.querySelector('.raid-row');
-      if (!row) throw Error('Missing raid-row');
+      const row = parsed.querySelector('.raid-row,.deposit-layout');
+      if (!row) throw Error('Missing boss/contribution layout');
       row.querySelectorAll('script,iframe,object,embed,link,style').forEach(el => el.remove());
       for (const el of [row,...row.querySelectorAll('*')]) {
         for (const attr of [...el.attributes]) {
           if (/^on/i.test(attr.name) || /^(src|srcset|href|poster)$/i.test(attr.name)) el.removeAttribute(attr.name);
         }
       }
-      const root = document.createElement('div'); root.className = 'boss-page'; root.append(row);
+      const root = document.createElement('div');
+      root.className = row.matches('.deposit-layout') ? 'contribution-page' : 'boss-page';
+      root.append(row);
       document.body.append(root);
       const style = document.createElement('style'); style.textContent = styles + '\n' + css;
       document.head.append(style);
       const card = root.querySelector('.club-boost__image');
       card.classList.remove('cv-neon-outline','cv-neon-green'); card.removeAttribute('style');
+      window.neonTestActionStyles = [...root.querySelectorAll('.club-boost__inner > div[style]')]
+        .map(el => ({el,style:el.getAttribute('style')}));
     }, {html,css});
     await page.addScriptTag({content: 'const neonStateMap = new WeakMap();\n' + functions});
     const results = [];
@@ -59,10 +67,10 @@ const html = process.argv[2] ? fs.readFileSync(process.argv[2], 'utf8') : fallba
       results.push(await page.evaluate(() => {
         let passed = 0;
         const check = (value,label) => {if (!value) throw Error(label); passed++;};
-        const card = document.querySelector('.boss-page .club-boost__image');
+        const card = document.querySelector('.club-boost__image');
         clearNeonFromCard(card);
         const baseline = card.getBoundingClientRect().width;
-        check(baseline > 0 && baseline <= 158.1, 'native card width');
+        check(baseline > 0 && baseline <= 174.1, 'native card width');
         // Reproduce the old defect before asserting the fix.
         card.style.position = 'relative';
         const broken = card.getBoundingClientRect().width;
@@ -92,8 +100,7 @@ const html = process.argv[2] ? fs.readFileSync(process.argv[2], 'utf8') : fallba
         clearNeonFromCard(card);
         check(card.style.opacity === '0.9', 'unrelated inline style preserved');
         card.removeAttribute('style');
-        const attack = document.querySelector('.club-boost__inner > div[style]');
-        check(attack?.style.display === 'flex', 'site action layout untouched');
+        check(window.neonTestActionStyles.every(({el,style}) => el.getAttribute('style') === style), 'site action layout untouched');
         return {width:innerWidth,baseline,broken,fixed:card.getBoundingClientRect().width,passed};
       }));
     }
