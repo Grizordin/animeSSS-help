@@ -25,7 +25,7 @@ const names = ['suiteIsAuthenticationError', 'suiteDocumentIsGuest', 'suiteAuthP
   'getFirstReward', 'isGachaItemClaimed', 'isRewardAlreadyCollected', 'getSnapshotDocument',
   'getGachaResultText', 'isSuccessfulGachaResponse', 'postGachaRewardOnce', 'runDailyCheck',
   'fetchData', 'scheduleNext', 'getPanelCountdown', 'getRewardCycleInfo', 'getMsUntilNextMoscowCheck',
-  'suiteRunLightweightHealthCheck'];
+  'getEnlightenmentTotal', 'suiteRunLightweightHealthCheck'];
 const functions = names.map(extract).join('\n');
 const setup = String.raw`
 let passed = 0;

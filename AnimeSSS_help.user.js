@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.64
+// @version      3.65
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -1406,7 +1406,7 @@
         report('suite', 'profile_buttons_missing');
       }
       const menuModal = document.querySelector('.lgn.is-active, .lgn.done, .lgn');
-      const menuVideo = menuModal?.querySelector('.lgn__ava-holder > video#profilebg, .lgn__inner > video#profilebg');
+      const menuVideo = menuModal?.querySelector('.ap-profile-bg video#profilebg, .lgn__ava-holder > video#profilebg, .lgn__inner > video#profilebg');
       if(cfg.modMenuBg && menuModal && menuVideo && !menuModal.querySelector('.lgn__inner.tm-fullbg-ready')){
         report('suite', 'menu_background_not_applied');
       }
@@ -1423,12 +1423,10 @@
           report('suite', 'guarantee_block_not_rendered');
         }
       }
-      const enlightenmentContainer = document.querySelector('.nclub__top-carou.nclub__sect');
-      if(cfg.modEnlightenment && enlightenmentContainer){
-        const counts = [...enlightenmentContainer.querySelectorAll('.club-top-list__count > div')];
-        if(counts.length && !counts.some(div => div.dataset.enlightenmentOriginalText)){
-          report('suite', 'enlightenment_not_applied', { count:counts.length });
-        }
+      if(cfg.modEnlightenment){
+        const counts = [...document.querySelectorAll('.nclub__top-carou.nclub__sect .club-top-list__count > div, .cg-daily .club-top-list__count > div')];
+        const pending = counts.filter(div => getEnlightenmentTotal(div.textContent) !== null);
+        if(pending.length) report('suite', 'enlightenment_not_applied', { count:pending.length });
       }
 
       if(wantHealthy && isWantCardsPage && !document.getElementById('want-btn-styles')) report('suite', 'want_cards_styles_missing');
@@ -2157,6 +2155,42 @@
     .lgn.tm-fullbg-host,
     .lgn.tm-fullbg-host .lgn__inner {
       background: transparent !important;
+    }
+    /* Redesigned account portal: one native media layer behind the scroller. */
+    .ap-modal.tm-fullbg-host > .ap-profile-bg.tm-menu-bg-layer {
+      z-index: 0 !important;
+      inset: 0 !important;
+    }
+    .ap-modal.tm-fullbg-host > .tm-menu-bg-layer video {
+      opacity: 1 !important;
+    }
+    .ap-modal.tm-fullbg-host > .tm-menu-bg-layer::after {
+      background: linear-gradient(90deg,
+        rgba(0,0,0,var(--suite-menu-bg-dim,.42)),
+        rgba(0,0,0,calc(var(--suite-menu-bg-dim,.42) * 1.15))) !important;
+    }
+    .ap-modal .ap-scroll.tm-fullbg-ready {
+      z-index: 1;
+      overflow-y: auto !important;
+      overflow-x: hidden !important;
+    }
+    .ap-modal .ap-scroll.tm-fullbg-ready::before,
+    .ap-modal .ap-scroll.tm-fullbg-ready::after,
+    .ap-modal .tm-fullbg-ready > .ap-profile-scene::before {
+      display: none !important;
+    }
+    .ap-modal .tm-fullbg-ready > .ap-profile-scene,
+    .ap-modal .tm-fullbg-ready > .ap-profile-panel {
+      background: transparent !important;
+    }
+    .ap-modal .tm-fullbg-ready :is(.ap-brand,.ap-identity h2,.ap-identity p,
+      .ap-heading h2,.ap-heading p,.ap-eyebrow,.ap-menu-heading,.ap-menu-link,
+      .ap-profile-action,.ap-cultivation strong,.ap-cultivation small,.ap-small-link,.ap-effect-btn) {
+      text-shadow: 0 1px calc(1px + 2px * var(--suite-menu-text-clarity)) rgba(0,0,0,var(--suite-menu-text-shadow-alpha)),
+        0 0 calc(2px + 10px * var(--suite-menu-text-clarity)) rgba(0,0,0,var(--suite-menu-text-shadow-alpha)) !important;
+    }
+    .ap-modal .tm-fullbg-ready .ap-profile-actions .ap-profile-action--main {
+      text-shadow: 0 1px 2px rgba(255,255,255,var(--suite-menu-text-shadow-alpha)) !important;
     }
     /* Панель настроек */
     #suite-settings-panel * { box-sizing:border-box; }
@@ -3797,6 +3831,7 @@
   // ============================================================
   //  ФОН МЕНЮ
   // ============================================================
+  const menuBackgroundOrigins = new WeakMap();
 
   function applyMenuBgTuning(wrapper) {
     if(!wrapper) return;
@@ -3810,13 +3845,31 @@
     wrapper.style.setProperty('--suite-menu-hover-bg-alpha', (0.02 + clarity * 0.045).toFixed(3));
     wrapper.style.setProperty('--suite-menu-hover-border-alpha', (0.08 + clarity * 0.28).toFixed(2));
     wrapper.style.setProperty('--suite-menu-hover-glow-alpha', (0.04 + clarity * 0.22).toFixed(2));
+    const layer=wrapper.closest('.ap-modal')?.querySelector(':scope > .tm-menu-bg-layer');
+    if(layer)layer.style.setProperty('--suite-menu-bg-dim', dim.toFixed(2));
   }
 
   function applyMenuBackground(){
     if(!cfg.modMenuBg)return;
     const modal=document.querySelector('.lgn.is-active, .lgn.done, .lgn'); if(!modal)return;
     const wrapper=modal.querySelector('.lgn__inner'); if(!wrapper)return;
-    const menuVideo=modal.querySelector('.lgn__ava-holder > video#profilebg'); if(!menuVideo)return;
+    const menuVideo=modal.querySelector('.ap-profile-bg video#profilebg, .lgn__ava-holder > video#profilebg, .lgn__inner > video.tm-menu-profilebg'); if(!menuVideo)return;
+    const modern=wrapper.classList.contains('ap-scroll') && modal.classList.contains('ap-modal');
+    const layer=modern?menuVideo.closest('.ap-profile-bg'):menuVideo;
+    if(!layer)return;
+    if(!menuBackgroundOrigins.has(wrapper)){
+      menuBackgroundOrigins.set(wrapper,{element:layer,parent:layer.parentNode,next:layer.nextSibling});
+    }
+    if(modern){
+      // Keep the native .ap-profile-bg video selector and media lifecycle intact.
+      // Moving its holder outside the scroller gives every scroll position a full backdrop.
+      if(layer.parentElement!==modal)modal.prepend(layer);
+      if(!layer.classList.contains('tm-menu-bg-layer'))layer.classList.add('tm-menu-bg-layer');
+      if(!modal.classList.contains('tm-fullbg-host'))modal.classList.add('tm-fullbg-host');
+      if(!wrapper.classList.contains('tm-fullbg-ready'))wrapper.classList.add('tm-fullbg-ready');
+      applyMenuBgTuning(wrapper);
+      return;
+    }
     applyMenuBgTuning(wrapper);
     if(menuVideo.classList.contains('tm-menu-profilebg')&&wrapper.classList.contains('tm-fullbg-ready'))return;
     if(menuVideo.parentElement!==wrapper)wrapper.prepend(menuVideo);
@@ -3835,14 +3888,27 @@
   function cleanupMenuBackground(){
     const modal=document.querySelector('.lgn.is-active, .lgn.done, .lgn'); if(!modal)return;
     const wrapper=modal.querySelector('.lgn__inner');
+    const origin=wrapper && menuBackgroundOrigins.get(wrapper);
     const holder=modal.querySelector('.lgn__ava-holder');
     const menuVideo=modal.querySelector('video#profilebg');
+    if(origin){
+      const {element,parent,next}=origin;
+      element.classList.remove('tm-menu-bg-layer');
+      element.style.removeProperty('--suite-menu-bg-dim');
+      if(!element.getAttribute('style')?.trim())element.removeAttribute('style');
+      if(parent?.isConnected)parent.insertBefore(element,next?.parentNode===parent?next:null);
+      menuBackgroundOrigins.delete(wrapper);
+    }
     if(menuVideo){
       menuVideo.classList.remove('tm-menu-profilebg');
-      if(holder && menuVideo.parentElement!==holder) holder.prepend(menuVideo);
+      if(!origin && holder && menuVideo.parentElement!==holder) holder.prepend(menuVideo);
     }
     modal.classList.remove('tm-fullbg-host');
-    if(wrapper) wrapper.classList.remove('tm-fullbg-ready');
+    if(wrapper){
+      wrapper.classList.remove('tm-fullbg-ready');
+      [...wrapper.style].filter(name=>name.startsWith('--suite-menu-')).forEach(name=>wrapper.style.removeProperty(name));
+      if(!wrapper.getAttribute('style')?.trim())wrapper.removeAttribute('style');
+    }
   }
 
   // ============================================================
@@ -3875,25 +3941,39 @@
   //  ПРОСВЕТЛЕНИЕ
   // ============================================================
 
-    function applyEnlightenment(){
-        if(!cfg.modEnlightenment)return;
-        const container=document.querySelector('.nclub__top-carou.nclub__sect');
-        if(!container)return;
-        container.querySelectorAll('.club-top-list__count > div').forEach(div=>{
-            if(!div.dataset.enlightenmentOriginalText) div.dataset.enlightenmentOriginalText = div.textContent;
-            const m=div.textContent.trim().match(/^Просветление\s+(\d+)\s*\(([^)]+)\)/);
-            if(!m)return;
-            const additions=m[2].match(/\d+/g);
-            if(!additions)return;
-            const total=parseInt(m[1])+additions.reduce((s,n)=>s+parseInt(n),0);
-            div.textContent=`Просветление ${total}`;
-        });
-    }
+  function getEnlightenmentTotal(text){
+    const match=String(text||'').trim().match(/^Просветление\s+(\d[\d\s]*)\s*\((\s*\+\s*\d[\d\s]*)+\)\s*$/i);
+    if(!match)return null;
+    const parts=String(text).slice(String(text).indexOf('(')+1,String(text).lastIndexOf(')')).split('+').slice(1);
+    const values=[match[1],...parts].map(value=>Number(value.replace(/\s/g,'')));
+    const total=values.reduce((sum,value)=>sum+value,0);
+    return values.every(Number.isSafeInteger)&&Number.isSafeInteger(total)?total:null;
+  }
+  function applyEnlightenment(){
+    if(!cfg.modEnlightenment)return;
+    document.querySelectorAll('.nclub__top-carou.nclub__sect .club-top-list__count > div, .cg-daily .club-top-list__count > div').forEach(div=>{
+      const text=div.textContent;
+      if(div.dataset.enlightenmentRenderedText && text!==div.dataset.enlightenmentRenderedText){
+        // The site updated this node: never restore an older snapshot over fresh data.
+        delete div.dataset.enlightenmentOriginalText;
+        delete div.dataset.enlightenmentRenderedText;
+      }
+      const total=getEnlightenmentTotal(text);
+      if(total===null)return;
+      const rendered=`Просветление ${total}`;
+      div.dataset.enlightenmentOriginalText=text;
+      div.dataset.enlightenmentRenderedText=rendered;
+      div.textContent=rendered;
+    });
+  }
 
   function cleanupEnlightenment(){
     document.querySelectorAll('.club-top-list__count > div[data-enlightenment-original-text]').forEach(div=>{
-      div.textContent = div.dataset.enlightenmentOriginalText || div.textContent;
+      if(!div.dataset.enlightenmentRenderedText || div.textContent===div.dataset.enlightenmentRenderedText){
+        div.textContent = div.dataset.enlightenmentOriginalText || div.textContent;
+      }
       delete div.dataset.enlightenmentOriginalText;
+      delete div.dataset.enlightenmentRenderedText;
     });
   }
 
@@ -3936,6 +4016,7 @@
   };
 
   const CPT_MAP = [
+    {r:/^Вы успешно приобрели\s+["«].+["»]\.?$/i,                icon:'bag',    title:'Покупка',     theme:'neon-green'},
     {s:'Вы купили товар',                                        icon:'bag',    title:'Покупка',     theme:'neon-green'},
     {s:'Вы вернули товар',                                       icon:'coin',   title:'Возврат',     theme:'neon-pink' },
     {s:'Вы применили товар',                                     icon:'bolt',   title:'Применено',   theme:'neon-blue' },
@@ -3951,11 +4032,13 @@
     {s:'Витрина достижений сохранена',                           icon:'star',   title:'Сохранено',   theme:'emerald'   },
     {s:'Витрина',                                                icon:'save',   title:'Сохранено',   theme:'emerald'   },
     {s:'В витрину можно выставить максимум три звёздные карты',   icon:'star',   title:'Витрина',     theme:'neon-amber'},
+    {r:/В витрину можно выставить максимум три пробужд[её]нные карты SSS/i, icon:'star', title:'Витрина', theme:'neon-amber'},
     {s:'Загруженная вами карточка была отправлена на модерацию', icon:'mod',    title:'Модерация',   theme:'neon-pink' },
     {s:'Карточка отправлена на модерацию',                       icon:'mod',    title:'Модерация',   theme:'neon-pink' },
     {s:'Для вступления изменений',                               icon:'refresh',title:'Обновление',  theme:'neon-pink' },
     {s:'Автоплавка отключена',                                   icon:'fire',   title:'Внимание',    theme:'rose'      },
     {s:'К переплавке доступны только карты одного ранга',        icon:'warn',   title:'Внимание',    theme:'neon-amber'},
+    {s:'Для переплавки нужны три карточки одинакового ранга',    icon:'fire',   title:'Переплавка',  theme:'neon-amber'},
     {s:'добавить на переплавку больше',                          icon:'plus',   title:'Внимание',    theme:'neon-amber'},
     {s:'В колоде может быть не больше',                          icon:'warn',   title:'Внимание',    theme:'rose'      },
     {s:'Введите название вашей колоды',                          icon:'save',   title:'Внимание',    theme:'ocean'     },
@@ -4065,6 +4148,7 @@
     {s:'Недостаточный уровень',                                  icon:'lvl',    title:'Ошибка',      theme:'rose'      },
     {s:'Возникла ошибка',                                        icon:'refresh',title:'Ошибка',      theme:'neon-amber'},
     {s:'Ошибка сети',                                            icon:'err',    title:'Ошибка',      theme:'neon-amber'},
+    {s:'Не удалось получить ответ сервера. Повторите загрузку паков.', icon:'refresh', title:'Паки', theme:'neon-amber'},
     {s:'Ошибка доступа',                                         icon:'lock',   title:'Ошибка',      theme:'rose'      },
     {s:'Неизвестный ответ сервера',                              icon:'err',    title:'Ошибка',      theme:'neon-amber'},
     {s:'Ошибка при копировании',                                  icon:'err',    title:'Ошибка',      theme:'neon-amber'},
@@ -4293,6 +4377,8 @@
     {s:'Ты помог со сбором шахты',                                 icon:'coin',   title:'Шахта',       theme:'neon-green'},
     // ── Кодекс и испытания ────────────────────────────────
     {s:'Сначала заверши испытание Дао',                            icon:'warn',   title:'Дао',         theme:'neon-amber'},
+    {s:'Сначала открой одни из врат испытания Дао',                 icon:'warn',   title:'Дао',         theme:'neon-amber'},
+    {r:/Сменить испытание можно только с \d{2}:\d{2} до \d{2}:\d{2} по МСК\.?/i, icon:'clock', title:'Испытание', theme:'neon-amber'},
     {r:/Уровень культивации заверш[её]н!\s*Вы получили \d[\d\s]*\s+очк(?:о|а|ов) для испытаний актуальной главы Кодекса\.?/i, icon:'star', title:'Культивация', theme:'neon-green'},
     {s:'Новое испытание успешно открыто',                          icon:'star',   title:'Испытание',   theme:'neon-green'},
     {s:'Испытание успешно завершено',                              icon:'check',  title:'Испытание',   theme:'neon-green'},
@@ -4300,6 +4386,7 @@
     {r:/Восстановлено \d[\d\s]*\s+очк(?:о|а|ов)?\.? испытаний\.\s*Списано \d[\d\s]*\s+случайных карт ранга C, D или E\.?/i, icon:'refresh', title:'Испытание', theme:'neon-green'},
     {r:/Испытание успешно изменено\.\s*Списано \d[\d\s]*\s+случайных карт ранга C, D или E\.?/i, icon:'refresh', title:'Испытание', theme:'neon-green'},
     // ── Награды Кодекса ───────────────────────────────────
+    {r:/^Вы получили \d[\d\s]*\s+[AА][CС][CС]\.?$/i,            icon:'coin',   title:'ACC',         theme:'neon-green'},
     {r:/Вы получили \d[\d\s]*\s+карт(?:у|ы)?\s+ранга\s+[A-E]\.?/i, icon:'card', title:'Карты', theme:'neon-green'},
     {r:/Вы получили \d[\d\s]*\s+зв[её]здного рейтинга\.?/i,     icon:'star',   title:'Рейтинг',     theme:'neon-green'},
     {r:/Вы получили \d[\d\s]*\s+камн(?:ень|я|ей) духа\.?/i,     icon:'coin',   title:'Камни духа',  theme:'neon-green'},
@@ -4320,6 +4407,7 @@
     {s:'Одна из выбранных вами карт больше вам не пренадлежит, обновите страницу и попробуйте снова', icon:'warn', title:'Выбор карт', theme:'neon-amber'},
     {s:'Максимум 70 карточек',                                     icon:'warn',   title:'Лимит',       theme:'rose'      },
     {s:'Награда получена',                                         icon:'coin',   title:'Награда',     theme:'neon-green'},
+    {s:'Вы уже ставили реакцию на данный список',                  icon:'clock',  title:'Реакция',     theme:'neon-amber'},
     {s:'Сегодня вы уже ставили реакцию на комментарий данного пользователя', icon:'clock', title:'Лимит', theme:'rose'},
     {s:'Сообщения удалены',                                        icon:'check',  title:'Готово',      theme:'emerald'   },
     {s:'Вы уже поставили 3 дизлайка на карты, которые сейчас на модерации. Дождитесь следующей партии карт и сможете ставить новые', icon:'clock', title:'Лимит', theme:'rose'},
@@ -8738,6 +8826,7 @@
     document.addEventListener('click', function(e) {
       const btn = e.target.closest('.lootbox__open-btn');
       if (!btn) return;
+      if (btn===getAutoPackRetryButton()) return;
       if (!cfg.modGuard) return;
       const cost = getActivePack20Cost();
       if (cost === 100 || cost === 500) {
@@ -8774,7 +8863,7 @@
   function clickBuyButton(skipCostCheck){
     const b=document.querySelector('.lootbox__open-btn'); if(!b)return;
     const s=window.getComputedStyle(b); if(s.display==='none'||s.visibility==='hidden'||b.disabled||b.classList.contains('disabled'))return;
-    if(!skipCostCheck && cfg.modGuard){
+    if(!skipCostCheck && cfg.modGuard && b!==getAutoPackRetryButton()){
       const cost=getActivePack20Cost();
       if(cost===100||cost===500){ showPackConfirmDialog(cost,()=>b.click()); return; }
     }
@@ -8921,6 +9010,8 @@
   let autoLoopTimer=null, autoOpenedCount=Number(cfg.autoOpenedCount)||0, autoWaitingManual=false, autoBusy=false;
   let autoLastChosenPackId='', autoManualPackId='';
   let autoPendingChoice=null;
+  let autoPackRetry=null;
+  const AUTO_PACK_RETRY_DELAYS=[2000,5000,10000];
   let autoPausedAfterReload=false;
   const AUTO_DELAY_START=250;
   const AUTO_DELAY_AFTER_PICK=650;
@@ -9061,7 +9152,7 @@
         autoBusySinceAt=now;
       }
     }else autoBusySinceAt=0;
-    if(autoExpectation&&!autoExpectation.reported&&now-autoExpectation.startedAt>=AUTO_DIAGNOSTIC_STALL_MS){
+    if(!autoPackRetry&&autoExpectation&&!autoExpectation.reported&&now-autoExpectation.startedAt>=AUTO_DIAGNOSTIC_STALL_MS){
       autoExpectation.reported=true;
       const code=autoExpectation.kind==='cards_after_buy'?'pack_cards_not_appeared'
         :autoExpectation.kind==='pack_close_after_card'?'pack_did_not_close_after_card_pick'
@@ -9127,6 +9218,7 @@
     autoLastChosenPackId=''; autoManualPackId='';
     autoPendingChoice=null;
     setAutoStatus(reason);
+    autoPackRetry=null;
     updateAutoCount();
   }
   function pauseAutoOpen(reason,packId='') {
@@ -9206,6 +9298,52 @@
     autoPendingChoice={row,packId:autoLastChosenPackId,cardId:card.getAttribute('data-id'),startedAt:Date.now()};
     autoStartExpectation('pack_close_after_card',{packId:autoLastChosenPackId,card:getAutoCardIdentity(card)});
   }
+  function getAutoPackRetryButton() {
+    return [...document.querySelectorAll('.lootbox__footer .lootbox__open-btn')].find(button=>
+      /^Повторить загрузку$/i.test(button.textContent.trim()) && suiteCardActionButtonReady(button));
+  }
+  function autoHandlePackRetry() {
+    const stage=document.querySelector('.packs-stage')?.getAttribute('data-pack-state');
+    const now=Date.now();
+    const button=getAutoPackRetryButton();
+    if(stage==='error' && button){
+      if(!autoPackRetry)autoPackRetry={attempts:0,nextAt:now+AUTO_PACK_RETRY_DELAYS[0],waitingSince:0};
+      const retry=autoPackRetry;
+      if(retry.waitingSince){
+        retry.waitingSince=0;
+        retry.nextAt=now+(AUTO_PACK_RETRY_DELAYS[retry.attempts]||0);
+      }
+      if(retry.attempts>=AUTO_PACK_RETRY_DELAYS.length){
+        autoReportDiagnosticStall('pack_reload_failed',{source:'retry',attempts:retry.attempts});
+        stopAutoOpen('Не удалось загрузить паки после 3 попыток');return true;
+      }
+      setAutoStatus(`Повторная загрузка ${retry.attempts+1}/3…`);
+      if(now>=retry.nextAt){
+        retry.attempts++;
+        retry.waitingSince=now;
+        autoDiagnosticRecord('pack_reload_click',{attempt:retry.attempts,pendingPackId:autoPendingChoice?.packId||''});
+        // The site's retry handler sends lootbox_load, never lootbox_open.
+        button.click();
+      }
+      scheduleAutoLoop(AUTO_DELAY_WAIT_CLOSE);return true;
+    }
+    if(!autoPackRetry)return false;
+    if((stage==='ready' && autoPackReady()) || stage==='idle'){
+      autoDiagnosticRecord('pack_reload_recovered',{attempts:autoPackRetry.attempts,stage});
+      autoPackRetry=null;
+      if(autoPendingChoice && getActiveRow()?.getAttribute('data-pack-id')===autoPendingChoice.packId){
+        autoReportDiagnosticStall('pack_choice_unconfirmed_after_reload',{source:'retry'});
+        stopAutoOpen('Выбор не подтверждён — проверь загруженный пак');return true;
+      }
+      return false;
+    }
+    if(now-(autoPackRetry.waitingSince||autoPackRetry.nextAt)>=AUTO_DIAGNOSTIC_STALL_MS){
+      autoReportDiagnosticStall('pack_reload_failed',{source:'retry',stage,attempts:autoPackRetry.attempts});
+      stopAutoOpen('Повторная загрузка не завершилась — проверь страницу');return true;
+    }
+    setAutoStatus('Жду повторной загрузки паков...');
+    scheduleAutoLoop(AUTO_DELAY_WAIT_CLOSE);return true;
+  }
   function autoCheckChoice() {
     if(!autoPendingChoice)return false;
     const pending=autoPendingChoice;
@@ -9259,6 +9397,7 @@
     }
     cfg.autoOpenEnabled=true; saveCfg();
     autoResolveExpectation('auto_restarted');
+    autoPackRetry=null;
     ensureAutoDiagnosticTimer();
     autoPausedAfterReload=false;
     autoWaitingManual=false;
@@ -9297,6 +9436,7 @@
     else choose();
   }
   function autoBuyPack() {
+    if(autoHandlePackRetry())return;
     const stones=getCurrentStoneBalance();
     if(stones!==null && stones<1600) {
       stopAutoOpen('Не хватает камней');
@@ -9307,6 +9447,11 @@
     selectPack20();
     setTimeout(()=>{
       if(!cfg.autoOpenEnabled){ autoBusy=false; return; }
+      if(autoHandlePackRetry()){ autoBusy=false; return; }
+      const stage=document.querySelector('.packs-stage')?.getAttribute('data-pack-state');
+      if((stage && stage!=='idle') || getAutoPackRetryButton() || hasOpenCardsReady()){
+        autoBusy=false;scheduleAutoLoop(AUTO_DELAY_WAIT_CLOSE);return;
+      }
       const row=getActiveRow();
       autoStartExpectation('cards_after_buy',{
         packIdBefore:row?.getAttribute('data-pack-id')||'',
@@ -9337,6 +9482,7 @@
       return;
     }
     if(!isAutoOpenAvailable()) { stopAutoOpen('Модуль выключен'); return; }
+    if(autoHandlePackRetry())return;
     if(autoCheckChoice())return;
     const stage=document.querySelector('.packs-stage')?.getAttribute('data-pack-state');
     if(stage==='error'){
