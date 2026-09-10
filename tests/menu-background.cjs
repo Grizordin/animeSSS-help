@@ -40,18 +40,23 @@ const nativeCSS=process.argv[3]?fs.readFileSync(process.argv[3],'utf8'):`.ap-mod
     const controls=[...modal.querySelectorAll('a,button')];
     const snapshot=()=>controls.map(e=>{const s=getComputedStyle(e);return [e.textContent,e.getAttribute('href'),s.backgroundColor,s.backgroundImage,s.borderColor,s.borderRadius,s.color,s.padding,s.height];});
     const before=snapshot(),columns=getComputedStyle(wrapper).gridTemplateColumns;
+    const expanded=before.map((entry,i)=>{const value=[...entry];if(controls[i].matches('.ap-menu-link')){value[2]='rgba(0, 0, 0, 0)';value[4]='rgba(0, 0, 0, 0)';}return value;});
+    // Reproduce a video/holder height cap from surrounding site or extension CSS.
+    // The profile menu is taller than the profile-banner-sized media area.
+    const cap=document.createElement('style');cap.textContent='#profilebg{height:420px;max-height:420px}.ap-profile-bg{max-height:420px}';document.head.append(cap);
     let clicks=0;controls[0].addEventListener('click',()=>clicks++);
     applyMenuBackground();
     check(layer.parentElement===modal&&video.parentElement===layer,'native video holder lifted intact');
     check(modal.querySelectorAll('#profilebg').length===1,'no video cloning');
     check(plays===0&&!video.autoplay,'native media controls not overridden');
     check(modal.querySelectorAll('.ap-profile-bg video').length===1,'site selector still finds video');
-    check(JSON.stringify(before)===JSON.stringify(snapshot()),'native control appearance preserved '+JSON.stringify(snapshot().map((v,i)=>JSON.stringify(v)!==JSON.stringify(before[i])?{before:before[i],after:v}:null).filter(Boolean)));
+    check(JSON.stringify(expanded)===JSON.stringify(snapshot()),'only navigation backgrounds and borders made transparent; native labels, colors and geometry preserved');
     check(getComputedStyle(wrapper).gridTemplateColumns===columns,'native layout preserved');
     check(getComputedStyle(wrapper).overflowY==='auto','native scrolling preserved');
     check(getComputedStyle(parent).backgroundColor==='rgba(0, 0, 0, 0)'&&getComputedStyle(wrapper.querySelector('.ap-panel')).backgroundColor==='rgba(0, 0, 0, 0)','both panel backgrounds transparent');
     const covers=()=>{const a=video.getBoundingClientRect(),b=wrapper.getBoundingClientRect();return Math.abs(a.left-b.left)<2&&Math.abs(a.top-b.top)<2&&a.width>=b.width-1&&a.height>=b.height-1;};
     check(covers(),'video covers complete menu');
+    check(getComputedStyle(video).maxHeight==='none'&&getComputedStyle(layer).maxHeight==='none','profile banner height cap removed only inside expanded menu');
     wrapper.scrollTop=wrapper.scrollHeight;check(covers(),'background remains full at bottom of scroll');
     const closeRect=controls[0].getBoundingClientRect();
     const hit=document.elementFromPoint(closeRect.x+closeRect.width/2,closeRect.y+closeRect.height/2);
@@ -64,6 +69,7 @@ const nativeCSS=process.argv[3]?fs.readFileSync(process.argv[3],'utf8'):`.ap-mod
     check(low!==getComputedStyle(heading).textShadow,'clarity responds to settings');
     check(layer.style.getPropertyValue('--suite-menu-bg-dim')==='0.10','dimming reaches full-menu layer');
     cleanupMenuBackground();
+    check(getComputedStyle(video).maxHeight==='420px','native height constraint restored when disabled');
     check(layer.parentElement===parent&&layer.nextSibling===next,'disable restores exact native location');
     check(!modal.classList.contains('tm-fullbg-host')&&!wrapper.classList.contains('tm-fullbg-ready')&&!layer.classList.contains('tm-menu-bg-layer'),'disable cleans classes');
     check(!wrapper.style.getPropertyValue('--suite-menu-text-weight'),'disable cleans tuning');
@@ -74,6 +80,17 @@ const nativeCSS=process.argv[3]?fs.readFileSync(process.argv[3],'utf8'):`.ap-mod
     return {passed};
    })()`);
    total+=result.passed;
+   if(process.argv[3]){
+    const upper=page.locator('.ap-menu:not(.ap-menu--world) .ap-menu-link').first(),lower=page.locator('.ap-menu--world .ap-menu-link').first();
+    const paint=async locator=>locator.evaluate(e=>{const s=getComputedStyle(e);return [s.backgroundColor,s.borderColor];});
+    await upper.hover();const upperPaint=await paint(upper);
+    if(upperPaint[0]==='rgba(0, 0, 0, 0)')throw Error('Upper hover has no dark surface');total++;
+    await lower.hover();if(JSON.stringify(await paint(lower))!==JSON.stringify(upperPaint))throw Error('Upper/lower hover mismatch');total++;
+    if((await paint(upper))[0]!=='rgba(0, 0, 0, 0)')throw Error('Upper button stays opaque after hover');total++;
+    await upper.focus();if(JSON.stringify(await paint(upper))!==JSON.stringify(upperPaint))throw Error('Keyboard focus has no matching surface');total++;
+    await upper.evaluate(e=>e.blur());await page.mouse.move(0,0);
+    await page.locator('.ap-scroll').evaluate(e=>e.scrollTop=0);
+   }
    if(process.argv[3]){const folder=path.join(root,'output','menu-background');fs.mkdirSync(folder,{recursive:true});await page.locator('.lgn').screenshot({path:path.join(folder,'menu-'+width+'.png')});}
    await page.close();
   }
