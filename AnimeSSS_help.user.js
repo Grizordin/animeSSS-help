@@ -2158,13 +2158,35 @@
     }
     /* Redesigned account portal: one native media layer behind the scroller. */
     .ap-modal.tm-fullbg-host > .ap-profile-bg.tm-menu-bg-layer {
+      position: absolute !important;
       z-index: 0 !important;
       inset: 0 !important;
+      width: 100% !important;
+      height: 100% !important;
+      max-width: none !important;
+      max-height: none !important;
+      pointer-events: none !important;
     }
-    .ap-modal.tm-fullbg-host > .tm-menu-bg-layer video {
+    .ap-modal.tm-fullbg-host > .tm-menu-bg-layer video#profilebg {
+      position: absolute !important;
+      inset: 0 !important;
+      width: 100% !important;
+      height: 100% !important;
+      min-width: 100% !important;
+      min-height: 100% !important;
+      max-width: none !important;
+      max-height: none !important;
+      object-fit: cover !important;
+      object-position: center !important;
+      display: block !important;
+      transform: none !important;
+      margin: 0 !important;
+      z-index: 0 !important;
+      pointer-events: none !important;
       opacity: 1 !important;
     }
     .ap-modal.tm-fullbg-host > .tm-menu-bg-layer::after {
+      z-index: 1 !important;
       background: linear-gradient(90deg,
         rgba(0,0,0,var(--suite-menu-bg-dim,.42)),
         rgba(0,0,0,calc(var(--suite-menu-bg-dim,.42) * 1.15))) !important;
@@ -2191,6 +2213,14 @@
     }
     .ap-modal .tm-fullbg-ready .ap-profile-actions .ap-profile-action--main {
       text-shadow: 0 1px 2px rgba(255,255,255,var(--suite-menu-text-shadow-alpha)) !important;
+    }
+    .ap-modal .tm-fullbg-ready .ap-menu-link {
+      background-color: transparent !important;
+      border-color: transparent !important;
+    }
+    .ap-modal .tm-fullbg-ready .ap-menu-link:is(:hover,:focus-visible) {
+      background-color: var(--ap-soft) !important;
+      border-color: var(--ap-line) !important;
     }
     /* Панель настроек */
     #suite-settings-panel * { box-sizing:border-box; }
