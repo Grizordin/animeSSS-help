@@ -14,6 +14,7 @@ const native=`<section class="ps-wallet" aria-label="Ваш баланс"><div c
 const legacy='<div class="ncard-shop__text lootbox__descr d-flex fd-column r-gap-20"><div class="ncard-shop__text-main lootbox__descr-section ta-center"><span>167002</span><i class="diamond"></i></div><a href="/donate/">Пополнить</a></div>';
 const baseCSS='*{box-sizing:border-box}body{margin:0;padding:24px;background:#111;color:#e5eeee;font:14px Arial}.ps-wallet{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:26px;background:#1b2325;border:1px solid #344647;border-radius:18px}.ps-wallet-main,.ps-wallet-actions{display:flex;align-items:center;gap:12px}.ps-wallet-icon{background:#253f39;width:54px;height:54px;border-radius:14px}.ps-label{color:#a6b9bc;font-size:13px;margin-bottom:8px}.ncard-shop__text-caption{font-size:32px;font-weight:bold}.ps-button{padding:14px;border:1px solid #344647;border-radius:10px;color:inherit;text-decoration:none}.ps-button--primary{background:#2d7564}.diamond{display:inline-block;width:16px;height:16px;background:#65b9a1;clip-path:polygon(25% 0,75% 0,100% 35%,50% 100%,0 35%)}@media(max-width:600px){body{padding:12px}.ps-wallet{flex-direction:column;align-items:flex-start;padding:18px}.ps-wallet-actions{flex-wrap:wrap}}';
 const cache=[{amount:1000000,date:Date.now()-10000,description:'Reward'},{amount:-83000,date:Date.now()-20000,description:'Packs'}];
+const historyHTML=process.argv[2]?fs.readFileSync(process.argv[2],'utf8'):'<div class="ps-table-wrap ncard-transactions__table"><table class="ps-history-table"><tbody>'+Array.from({length:20},(_,i)=>'<tr class="new-tr-item" data-ps-flow="expense"><td class="new-tr-amount"><span>- 1600</span></td><td class="new-tr-date" data-ps-label="Баланс">86282</td><td class="new-tr-date" data-ps-label="Дата">11.09.2026 19:20:'+String(54-i).padStart(2,'0')+'</td><td data-ps-label="Описание">Открытие паков карточек</td></tr>').join('')+'</tbody></table></div>';
 let passed=0;const check=(value,message)=>{if(!value)throw Error(message);passed++;};
 (async()=>{
  const browser=await chromium.launch({headless:true,channel:'msedge'});
@@ -36,6 +37,7 @@ let passed=0;const check=(value,message)=>{if(!value)throw Error(message);passed
      if(window.mode==='partial-empty'&&url==='/transactions/page/2/') return {ok:true,text:async()=>'<form>Login</form>'};
      if(window.mode==='hold') return new Promise(resolve=>window.release=()=>resolve({ok:true,text:async()=>'<div id="pagination"></div>'}));
      if(url==='/transactions/') return {ok:true,text:async()=>'<div id="pagination">'+(window.mode.startsWith('partial')?'<a href="/transactions/page/2/">2</a>':'')+'</div>'};
+     if(window.mode==='fixture') return {ok:true,text:async()=>window.historyFixture};
      return {ok:true,text:async()=>window.mode==='empty'?'<form>Login</form>':'<div class="table-responsive ncard-transactions__table"><table><tbody><tr class="new-tr-item"><td class="new-tr-amount"><span>+1000</span></td><td class="new-tr-date">11.09.2026 10:00:00</td><td>Reward</td></tr><tr class="new-tr-item"><td class="new-tr-amount"><span>-200</span></td><td class="new-tr-date">11.09.2026 09:00:00</td><td>Packs</td></tr></tbody></table></div>'};
     };
    },{cache,mode});
@@ -43,6 +45,28 @@ let passed=0;const check=(value,message)=>{if(!value)throw Error(message);passed
    return page;
   }
   const page=await setup();
+  const parserResults=await page.evaluate('(()=>{'+['parseDateSafe','parseTransactions','calculateTotals'].map(extract).join('\n')+`
+   let passed=0;const check=(v,m)=>{if(!v)throw Error(m);passed++;};
+   const html=${JSON.stringify(historyHTML)},rows=parseTransactions(html);
+   check(rows.length===20,'all 20 redesigned operations recognized');
+   rows.forEach((r,i)=>{check(r.amount===-1600,'expense sign '+i);check(r.date>0&&r.description==='Открытие паков карточек','date and description '+i);});
+   check(calculateTotals(rows).spent===32000&&calculateTotals(rows).earned===0,'new history totals');
+   check(rows[0].date===new Date(2026,8,11,19,20,54).getTime(),'date parsed instead of balance');
+   const doc=new DOMParser().parseFromString(html,'text/html'),row=doc.querySelector('tr.new-tr-item');
+   row.prepend(row.querySelector('[data-ps-label="Дата"]'));
+   check(parseTransactions(doc.documentElement.outerHTML)[0].date===rows[0].date,'labeled date works after column reordering');
+   row.querySelector('.new-tr-amount span').textContent='+ 1\\u00a0200';
+   check(parseTransactions(doc.documentElement.outerHTML)[0].amount===1200,'income and grouped amount');
+   doc.querySelector('.ncard-transactions__table').className='ps-table-wrap';
+   check(parseTransactions(doc.documentElement.outerHTML).length===20,'new table class fallback');
+   doc.querySelectorAll('tr.new-tr-item').forEach(r=>r.hidden=true);
+   check(parseTransactions(doc.documentElement.outerHTML).length===20,'visual income/expense filter does not remove operations');
+   const legacy='<div class="table-responsive ncard-transactions__table"><table><tbody><tr class="new-tr-item"><td class="new-tr-amount"><span>+200</span></td><td class="new-tr-date">86282</td><td class="new-tr-date">11.09.2026 19:20:54</td><td>Reward</td></tr></tbody></table></div>';
+   check(parseTransactions(legacy)[0].date===rows[0].date&&parseTransactions(legacy)[0].amount===200,'legacy table still parsed');
+   let rejected=false;try{parseTransactions('<form>Login</form>');}catch{rejected=true;}check(rejected,'login markup still rejected');
+   return passed;
+  })()`);
+  passed+=parserResults;
   await page.waitForFunction(()=>document.querySelector('.cv-stones-wallet__refresh')?.disabled===false && document.querySelector('.earned-diamonds')?.textContent.includes('1'));
   let result=await page.evaluate(()=>({
    wallet:document.querySelector('.ps-wallet').outerHTML,
@@ -94,6 +118,11 @@ let passed=0;const check=(value,message)=>{if(!value)throw Error(message);passed
    check(await page.evaluate(()=>JSON.stringify(store))===before,'failed/unknown recount preserves cache and timestamps '+mode);
    check(await page.locator('.earned-diamonds>span').textContent()==='+1\u00a0000','error restores saved totals '+mode);
   }
+  await page.evaluate(html=>{window.historyFixture=html;window.mode='fixture';document.querySelector('.cv-stones-wallet__refresh').click();},historyHTML);
+  await page.waitForFunction(()=>document.querySelector('.cv-stones-wallet__refresh').disabled===false);
+  check(await page.evaluate(()=>JSON.parse(store.animestars_transactions_cache).length)===20,'new history passes complete recount and persists');
+  check((await page.locator('.spent-diamonds>span').textContent()).replace(/\s/g,'')==='−32000','new history updates displayed spent total');
+  check(await page.evaluate(()=>store.nonPackSpentStones)==='0','recount leaves manual counter unchanged');
   await page.evaluate(()=>cleanupStonesUi());
   check(await page.locator('.cv-stones-wallet,.cv-stones-panel,.cv-stones-progress,#cv-stones-style').count()===0,'cleanup removes all module UI');
   check(await page.locator('.ps-wallet').evaluate(e=>e.outerHTML)===result.wallet,'native wallet intact after cleanup');
