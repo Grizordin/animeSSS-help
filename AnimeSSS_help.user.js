@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.65
+// @version      3.66
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -2202,7 +2202,9 @@
       display: none !important;
     }
     .ap-modal .tm-fullbg-ready > .ap-profile-scene,
-    .ap-modal .tm-fullbg-ready > .ap-profile-panel {
+    .ap-modal .tm-fullbg-ready > .ap-profile-panel,
+    /* Native hero/actions split: clear only the shared actions backing, not its cards. */
+    .ap-modal .tm-fullbg-ready > .ap-profile-scene > .ap-profile-actions {
       background: transparent !important;
     }
     .ap-modal .tm-fullbg-ready :is(.ap-brand,.ap-identity h2,.ap-identity p,
@@ -6634,6 +6636,43 @@
         font-size:13px;font-family:'Segoe UI',Arial,sans-serif;display:none;
         border:1px solid rgba(34,211,238,.35);box-shadow:0 8px 32px rgba(0,0,0,.65);
       }
+      .cv-stones-wallet{
+        margin:16px 0 24px;padding:20px 24px;box-sizing:border-box;
+        background:#1b2325;border:1px solid #344647;border-radius:18px;color:#e5eeee;
+      }
+      .cv-stones-wallet__head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;}
+      .cv-stones-wallet__heading{margin:0;font-size:16px;font-weight:700;color:inherit;}
+      .cv-stones-wallet__hint{margin:5px 0 0;font-size:12px;line-height:1.5;color:#a6b9bc;}
+      .cv-stones-wallet__grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;}
+      .cv-stones-wallet__card{min-width:0;box-sizing:border-box;padding:18px;background:#141b1d;border:1px solid #304041;border-radius:12px;}
+      .cv-stones-wallet__label{display:flex;align-items:center;gap:9px;margin-bottom:14px;font-size:13px;color:#b5cbcd;}
+      .cv-stones-wallet__icon{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;flex-shrink:0;border-radius:10px;background:#253f39;color:#86d9c5;font-size:17px;}
+      .cv-stones-wallet .earned-diamonds,.cv-stones-wallet .spent-diamonds{display:flex!important;gap:8px;font-size:clamp(20px,2.4vw,30px)!important;line-height:1.2;overflow-wrap:anywhere;}
+      .cv-stones-wallet .earned-diamonds>span,.cv-stones-wallet .spent-diamonds>span{min-width:0;}
+      .cv-stones-wallet .earned-diamonds>.diamond,.cv-stones-wallet .spent-diamonds>.diamond{width:18px!important;height:18px!important;margin:0!important;}
+      .cv-stones-wallet .cv-stones-panel{
+        position:static;width:auto;display:block;padding:18px;text-align:left;user-select:auto;
+        background:#141b1d;border:1px solid #304041;border-radius:12px;box-shadow:none;z-index:auto;
+        font:inherit;overflow:visible;
+      }
+      .cv-stones-wallet .cv-stones-panel__header{padding:0;margin-bottom:14px;background:none;color:#b5cbcd;font-size:13px;font-weight:400;cursor:default;}
+      .cv-stones-wallet .cv-stones-panel__total{justify-content:space-between;gap:12px;}
+      .cv-stones-wallet .cv-stones-panel__value{font-size:clamp(20px,2.4vw,30px);line-height:1.2;color:#f0d09d;overflow-wrap:anywhere;min-width:0;}
+      .cv-stones-wallet__controls{display:flex;gap:8px;margin-top:12px;}
+      .cv-stones-wallet .cv-stones-input{width:100%;min-width:0;flex:1;margin:0;padding:9px 10px;border-color:#344e4c;background:#1b2728;color:#e5eeee;font:inherit;font-size:12px;}
+      .cv-stones-wallet .cv-stones-mini-btn,.cv-stones-wallet__refresh{
+        width:auto;height:auto;min-height:34px;margin:0;padding:8px 12px;border:1px solid #3c6059;border-radius:9px;
+        background:#263f39;color:#d8f5ed;font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;
+      }
+      .cv-stones-wallet .cv-stones-mini-btn:hover,.cv-stones-wallet__refresh:hover{background:#31594e;border-color:#609f8e;transform:none;}
+      .cv-stones-wallet :is(button,input):focus-visible{outline:2px solid #87d9c4;outline-offset:3px;}
+      .cv-stones-wallet button:disabled{opacity:.5;cursor:wait;}
+      .cv-stones-wallet .cv-stones-progress{position:static;max-width:none;margin-top:12px;padding:0;background:none;border:0;box-shadow:none;color:#b5cbcd;font:inherit;font-size:12px;}
+      @media(max-width:850px){.cv-stones-wallet__grid{grid-template-columns:repeat(2,minmax(0,1fr));}.cv-stones-wallet .cv-stones-panel{grid-column:1/-1;}}
+      @media(max-width:520px){
+        .cv-stones-wallet{padding:16px;border-radius:14px;}.cv-stones-wallet__head{align-items:flex-start;flex-wrap:wrap;}
+        .cv-stones-wallet__grid{grid-template-columns:minmax(0,1fr);}.cv-stones-wallet__card{padding:16px;}
+      }
     `;
     document.head.appendChild(s);
   }
@@ -6679,6 +6718,9 @@
   function parseTransactions(htmlText) {
     const parser = new DOMParser();
     const doc = parser.parseFromString(htmlText, 'text/html');
+    if(!doc.querySelector('.table-responsive.ncard-transactions__table')){
+      throw new Error('Не найдена таблица истории операций; подсчёт остановлен без изменения кэша');
+    }
     const rows = [...doc.querySelectorAll('.table-responsive.ncard-transactions__table tbody tr.new-tr-item')];
     return rows.map(row => {
       const amountText = row.querySelector('.new-tr-amount span')?.textContent?.trim() ?? '+0';
@@ -6722,8 +6764,9 @@
       }
       return max || 1;
     } catch (e) {
-      console.warn('Не удалось определить количество страниц, используем 1', e);
-      return 1;
+      // A guessed single page could replace the full saved history with a partial recount.
+      console.warn('Не удалось определить количество страниц истории', e);
+      throw e;
     }
   }
 
@@ -6738,11 +6781,13 @@
   function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
   async function updateCacheIncremental({ showProgress = null, maxPages = 1000, forceFull = false, onTotals = null } = {}) {
-    const [lastUpdate, cached, knownLatestDate] = await Promise.all([
+    const [lastUpdate, stored, knownLatestDate] = await Promise.all([
       load(LAST_UPDATE_KEY, '0').then(Number),
       loadJSON(CACHE_KEY, []),
       load(DATE_KEY, '0').then(Number),
     ]);
+    // A full recount is built separately: do not erase saved history before a successful fetch.
+    const cached = forceFull ? [] : stored;
 
     const now = Date.now();
 
@@ -6767,7 +6812,7 @@
         if (transactions.length === 0) break;
       } catch (e) {
         console.error('Ошибка загрузки страницы транзакций:', e);
-        break;
+        throw e;
       }
 
       for (const tr of transactions) {
@@ -6792,6 +6837,7 @@
     }
 
     const merged = [...uniq.values()].sort((a, b) => b.date - a.date);
+    if(forceFull && stored.length && !merged.length) throw new Error('История операций не распознана; сохранённые данные не изменены');
 
     await Promise.all([
       saveJSON(CACHE_KEY, merged),
@@ -6905,70 +6951,100 @@
 
   async function main() {
     try {
-      const container = document.querySelector('.ncard-shop__text.lootbox__descr.d-flex.fd-column.r-gap-20');
+      const wallet = document.querySelector('.ps-wallet');
+      const container = wallet || document.querySelector('.ncard-shop__text.lootbox__descr.d-flex.fd-column.r-gap-20');
       if (!container) return;
-      const captionBlock = container.querySelector('.ncard-shop__text-main.lootbox__descr-section.ta-center');
-      if (!captionBlock) return;
+      const captionBlock = !wallet && container.querySelector('.ncard-shop__text-main.lootbox__descr-section.ta-center');
+      if (!wallet && !captionBlock) return;
 
       const flexWrapper = document.createElement('div');
       flexWrapper.className = 'cv-stones-summary-row';
+      let walletSummary = null;
+      if(wallet){
+        walletSummary = document.createElement('section');
+        walletSummary.className = 'cv-stones-wallet';
+        walletSummary.setAttribute('aria-label','Учёт камней духа');
+        walletSummary.innerHTML = '<div class="cv-stones-wallet__head"><div><h2 class="cv-stones-wallet__heading">Учёт камней духа</h2><p class="cv-stones-wallet__hint">За всё время по сохранённой истории операций</p></div></div>';
+        flexWrapper.classList.add('cv-stones-wallet__grid');
+        walletSummary.appendChild(flexWrapper);
+        wallet.insertAdjacentElement('afterend',walletSummary);
+      }else{
       Object.assign(flexWrapper.style, { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' });
       captionBlock.style.flex = '1';
       captionBlock.style.textAlign = 'center';
       container.insertBefore(flexWrapper, container.firstChild);
       flexWrapper.appendChild(captionBlock);
+      }
 
       const progressBox = mountProgressBox();
+      progressBox.setAttribute('role','status');
+      if(walletSummary){
+        progressBox.classList.remove('suite-floating-ui');
+        walletSummary.appendChild(progressBox);
+      }
 
       const earnedDiv = createSideDiv('earned-diamonds', `+0`, 'rgb(76, 175, 80)');
       const spentDiv = createSideDiv('spent-diamonds', `-0`, 'rgb(244, 67, 54)');
+      if(walletSummary){
+        for(const [value,label,icon,color] of [[earnedDiv,'Получено за всё время','↓','#86d9c5'],[spentDiv,'Потрачено за всё время','↑','#efb4aa']]){
+          const card = document.createElement('div');
+          card.className = 'cv-stones-wallet__card';
+          const title = document.createElement('div');
+          title.className = 'cv-stones-wallet__label';
+          title.innerHTML = '<span class="cv-stones-wallet__icon" aria-hidden="true">'+icon+'</span>';
+          title.appendChild(document.createTextNode(label));
+          value.querySelector('span').style.color = color;
+          card.append(title,value);
+          const hint = document.createElement('p');
+          hint.className = 'cv-stones-wallet__hint';
+          hint.textContent = value === earnedDiv ? 'Все начисления из истории операций' : 'Все списания, включая покупку паков';
+          card.appendChild(hint);
+          flexWrapper.appendChild(card);
+        }
+      }else{
       flexWrapper.insertBefore(earnedDiv, captionBlock);
       flexWrapper.appendChild(spentDiv);
+      }
 
+      const formatStones = value => Number(value).toLocaleString('ru-RU');
       const updateTotalsUI = (totals) => {
-        earnedDiv.querySelector('span').textContent = `+${totals.earned}`;
-        spentDiv.querySelector('span').textContent = `-${totals.spent}`;
+        earnedDiv.querySelector('span').textContent = `+${formatStones(totals.earned)}`;
+        spentDiv.querySelector('span').textContent = `−${formatStones(totals.spent)}`;
       };
 
       const refreshBtn = document.createElement('button');
-      refreshBtn.innerHTML = '🔄';
-      refreshBtn.className = 'cv-stones-floating-btn';
-      refreshBtn.title = 'Сбросить и пересчитать кэш';
+      refreshBtn.type = 'button';
+      refreshBtn.textContent = walletSummary ? 'Пересчитать историю' : '🔄';
+      refreshBtn.className = walletSummary ? 'cv-stones-wallet__refresh' : 'cv-stones-floating-btn';
+      refreshBtn.title = 'Заново загрузить историю операций и пересчитать суммы';
 
       // Вся логика клика обёрнута в withButtonLock — двойной клик невозможен
       refreshBtn.addEventListener('click', withButtonLock(refreshBtn, async () => {
         try {
           showStonesProgress(progressBox, 'ИДЕТ ПОДСЧЕТ КАМНЕЙ');
 
-          await Promise.all([
-            save(CACHE_KEY, '[]'),
-            save(DATE_KEY, '0'),
-            save(LAST_UPDATE_KEY, (Date.now() - 2 * DAY_MS).toString()),
-          ]);
-
           const maxPages = await getMaxPageCount();
-          await updateCacheIncremental({
+          const transactions = await updateCacheIncremental({
             showProgress: (page, total) => { showStonesProgress(progressBox, `Подсчитано: ${page} / ${total}`); },
             maxPages,
             forceFull: true,
             onTotals: updateTotalsUI,
           });
+          updateTotalsUI(calculateTotals(transactions));
         } catch (e) {
           console.error(e);
+          updateTotalsUI(calculateTotals(await loadJSON(CACHE_KEY, [])));
           showStonesProgress(progressBox, 'Ошибка подсчета камней');
         } finally {
           hideStonesProgress(progressBox);
         }
       }));
 
-      document.body.appendChild(refreshBtn);
-      suiteKeepInViewport(refreshBtn, {margin:8, constrainSize:false});
-
-      showStonesProgress(progressBox, 'ИДЕТ ПОДСЧЕТ КАМНЕЙ');
-      const maxPages = await getMaxPageCount();
-      const transactions = await updateCacheIncremental({ maxPages, forceFull: false, onTotals: updateTotalsUI });
-      hideStonesProgress(progressBox, 300);
-      updateTotalsUI(calculateTotals(transactions));
+      if(walletSummary) walletSummary.querySelector('.cv-stones-wallet__head').appendChild(refreshBtn);
+      else{
+        document.body.appendChild(refreshBtn);
+        suiteKeepInViewport(refreshBtn, {margin:8, constrainSize:false});
+      }
 
       const extraBox = document.createElement('div');
       extraBox.className = 'cv-stones-panel';
@@ -6990,6 +7066,8 @@
       resetBtn.textContent = '🗑';
       resetBtn.className = 'cv-stones-mini-btn';
       resetBtn.title = 'Обнулить значение';
+      resetBtn.type = 'button';
+      resetBtn.setAttribute('aria-label','Обнулить расходы не на паки');
       totalWrapper.appendChild(resetBtn);
 
       extraBox.appendChild(totalWrapper);
@@ -6997,14 +7075,31 @@
       const input = document.createElement('input');
       input.type = 'number';
       input.placeholder = 'Введите число';
+      input.setAttribute('aria-label','Сумма расходов не на паки');
+      input.step = '1';
       input.className = 'cv-stones-input';
       extraBox.appendChild(input);
 
       const addBtn = document.createElement('button');
       addBtn.textContent = '+';
+      addBtn.type = 'button';
+      addBtn.setAttribute('aria-label','Добавить расходы не на паки');
       addBtn.className = 'cv-stones-mini-btn';
       extraBox.appendChild(addBtn);
 
+      if(walletSummary){
+        extraTitle.classList.add('cv-stones-wallet__label');
+        const icon = document.createElement('span');
+        icon.className = 'cv-stones-wallet__icon';icon.textContent = '◇';icon.setAttribute('aria-hidden','true');
+        extraTitle.prepend(icon);
+        const note = document.createElement('p');
+        note.className = 'cv-stones-wallet__hint';note.textContent = 'Ручной учёт · отдельно от итогов истории';
+        const controls = document.createElement('div');
+        controls.className = 'cv-stones-wallet__controls';
+        addBtn.textContent = 'Добавить';
+        controls.append(input,addBtn);extraBox.append(note,controls);
+        flexWrapper.appendChild(extraBox);
+      }else{
       document.body.appendChild(extraBox);
       const savedStonesPos=loadStonesPanelPos();
       if(savedStonesPos){
@@ -7013,23 +7108,42 @@
         extraBox.style.top=savedStonesPos.top+'px';
       }
       makeDraggable(extraBox,extraTitle,saveStonesPanelPos);
+      }
 
-      async function loadExtra() { extraTotal.textContent = String(+await load(EXTRA_KEY, '0') || 0); }
+      async function loadExtra() { extraTotal.textContent = formatStones(+await load(EXTRA_KEY, '0') || 0); }
       async function addExtra() {
         const current = +await load(EXTRA_KEY, '0') || 0;
-        const toAdd = parseInt(input.value, 10) || 0;
+        const toAdd = Number(input.value);
         const newVal = current + toAdd;
+        if(!Number.isSafeInteger(toAdd) || !toAdd || !Number.isSafeInteger(newVal) || newVal < 0) return;
         await save(EXTRA_KEY, newVal.toString());
-        extraTotal.textContent = String(newVal);
+        extraTotal.textContent = formatStones(newVal);
         input.value = '';
       }
       async function resetExtra() { await save(EXTRA_KEY, '0'); extraTotal.textContent = '0'; }
 
-      addBtn.addEventListener('click', addExtra);
-      resetBtn.addEventListener('click', resetExtra);
-      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') addExtra(); });
+      const lockedAddExtra = withButtonLock(addBtn,addExtra);
+      addBtn.addEventListener('click', lockedAddExtra);
+      resetBtn.addEventListener('click', withButtonLock(addBtn,resetExtra));
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter'){e.preventDefault();lockedAddExtra();} });
 
-      loadExtra();
+      await loadExtra();
+      if(!flexWrapper.isConnected) return;
+      updateTotalsUI(calculateTotals(await loadJSON(CACHE_KEY, [])));
+      // Share the same lock with manual recount to avoid overlapping history scans.
+      await withButtonLock(refreshBtn,async () => {
+        showStonesProgress(progressBox, 'ИДЕТ ПОДСЧЕТ КАМНЕЙ');
+        try{
+          const maxPages = await getMaxPageCount();
+          const transactions = await updateCacheIncremental({ maxPages, forceFull: false, onTotals: updateTotalsUI });
+          updateTotalsUI(calculateTotals(transactions));
+          hideStonesProgress(progressBox, 300);
+        }catch(e){
+          updateTotalsUI(calculateTotals(await loadJSON(CACHE_KEY, [])));
+          showStonesProgress(progressBox, 'Не удалось обновить историю. Показаны сохранённые данные.');
+          console.error('Ошибка подсчета камней:',e);
+        }
+      })();
     } catch (e) {
       console.error('Ошибка в основном скрипте:', e);
     }
@@ -7039,6 +7153,7 @@
   }
 
   function cleanupStonesUi(){
+    document.querySelectorAll('.cv-stones-wallet').forEach(el=>el.remove());
     const container = document.querySelector('.ncard-shop__text.lootbox__descr.d-flex.fd-column.r-gap-20');
     const captionBlock = container?.querySelector('.ncard-shop__text-main.lootbox__descr-section.ta-center');
     const parent = captionBlock?.parentElement;
@@ -7854,6 +7969,7 @@
     window.__suiteBrickFillCleanup=()=>{
       brickCleanup.splice(0).forEach(fn=>{try{fn();}catch(e){}});
       document.getElementById('stone-brick-panel')?.remove();
+      document.getElementById('suite-brick-embedded-style')?.remove();
       window.__suiteBrickFillInstalled=false;
     };
     function brickOn(target,type,handler,opts){
@@ -8220,7 +8336,7 @@
     function el(tag,{style='',text=''}={}){const e=document.createElement(tag);if(style)e.style.cssText=style;if(text)e.textContent=text;return e;}
     function sep(){return el('div',{style:'height:1px;background:rgba(255,255,255,0.07);margin:1px 0;'});}
     function makeBrickBtn(text,bg,hover){
-      const b=document.createElement('button');b.textContent=text;
+      const b=document.createElement('button');b.type='button';b.textContent=text;
       b.style.cssText=`padding:8px 0;border:none;border-radius:7px;background:${bg};color:#fff;font-weight:700;font-size:13px;cursor:pointer;transition:background .15s`;
       b.addEventListener('mouseenter',()=>{if(!b.disabled)b.style.filter='brightness(.92)';});
       b.addEventListener('mouseleave',()=>{b.style.filter='';});
@@ -8229,11 +8345,13 @@
     function updateBrickCfg(settings,rank,key,value){if(!settings[rank])settings[rank]=defaultRankCfg();settings[rank][key]=value;saveBrickSettings(settings);}
     function makeBrickCriterion({label,hint,enabled,value,onToggle,onChange}){
       const wrap=el('div',{style:'display:flex;flex-direction:column;gap:5px;'});
+      wrap.className='suite-brick-criterion';
       const row1=document.createElement('label');row1.style.cssText='display:flex;align-items:center;gap:7px;cursor:pointer;';
       const chk=document.createElement('input');chk.type='checkbox';chk.checked=enabled;chk.style.cssText='width:15px;height:15px;cursor:pointer;accent-color:#6b46c1;';
       row1.append(chk,el('span',{style:'font-weight:600;',text:label}));
       const row2=el('div',{style:'display:flex;align-items:center;gap:6px;padding-left:22px;'});
       const inp=document.createElement('input');inp.type='number';inp.min='0';inp.step='1';inp.value=value;
+      inp.setAttribute('aria-label',label.replace(/^[^А-Яа-я]+/,'')+' — порог');
       inp.style.cssText='width:72px;height:28px;padding:3px 7px;border:1px solid rgba(255,255,255,.15);border-radius:6px;background:rgba(0,0,0,.35);color:#fff;outline:none;font-size:13px;box-sizing:border-box;';
       const setDim=en=>{inp.disabled=!en;row2.style.opacity=en?'1':'0.4';};setDim(enabled);
       chk.addEventListener('change',()=>{setDim(chk.checked);onToggle(chk.checked);});
@@ -8243,6 +8361,7 @@
     }
     function makeBrickWishlistSection(settings){
       const wrap=el('div',{style:'display:flex;flex-direction:column;gap:5px;'});
+      wrap.className='suite-brick-wishlist';
       const row=document.createElement('label');row.style.cssText='display:flex;align-items:center;gap:7px;cursor:pointer;';
       const chk=document.createElement('input');chk.type='checkbox';chk.checked=!!settings.excludeWishlist;chk.style.cssText='width:15px;height:15px;cursor:pointer;accent-color:#6b46c1;';
       row.append(chk,el('span',{style:'font-weight:600;',text:'🔒 Исключать желаемое'}));
@@ -8252,28 +8371,39 @@
     }
     function makeBrickTargetRow(settings){
       const wrap=el('div',{style:'display:flex;flex-direction:column;gap:5px;'});
+      wrap.className='suite-brick-target';
       wrap.appendChild(el('div',{style:'font-weight:600;',text:'⚡ Цель энергии'}));
       const row=el('div',{style:'display:flex;align-items:center;gap:6px;'});
       row.appendChild(el('span',{style:'font-size:11px;color:#718096;flex:1;',text:'0 = ручной режим'}));
       const inp=document.createElement('input');inp.type='number';inp.min='0';inp.step='1';inp.value=Math.max(0,parseInt(settings.targetEnergy,10)||0);
+      inp.setAttribute('aria-label','Цель энергии');
       inp.style.cssText='width:82px;height:28px;padding:3px 7px;border:1px solid rgba(255,255,255,.15);border-radius:6px;background:rgba(0,0,0,.35);color:#fff;outline:none;font-size:13px;box-sizing:border-box;';
       inp.addEventListener('change',()=>{settings.targetEnergy=Math.max(0,parseInt(inp.value,10)||0);inp.value=settings.targetEnergy;saveBrickSettings(settings);});
       row.appendChild(inp);wrap.appendChild(row);return wrap;
     }
     function renderBrickBody(body){
+      if(!body?.isConnected || brickAbort.signal.aborted)return;
       body.innerHTML='';
       const settings=loadBrickSettings(),activeRank=getActiveRank(),rankCfg=settings[activeRank]||defaultRankCfg();
       const rankName=activeRank===''?'Все':activeRank.toUpperCase();
+      const embedded=body.parentElement.classList.contains('suite-brick-embedded');
+      const criteria=embedded?el('div'):body,options=embedded?el('div'):body;
+      if(embedded){
+        criteria.className='suite-brick-criteria';options.className='suite-brick-options';body.append(criteria,options);
+        document.getElementById('suite-brick-rank').textContent=`Ранг: ${rankName}`;
+      }else{
       body.appendChild(el('div',{style:'font-size:11px;color:#718096;font-weight:600;letter-spacing:.04em;text-transform:uppercase;',text:`Ранг: ${rankName}`}));
       body.appendChild(sep());
-      body.appendChild(makeBrickCriterion({label:'❤️ Хотят получить',hint:'меньше →',enabled:rankCfg.wantEnabled,value:rankCfg.wantLimit,onToggle:v=>updateBrickCfg(settings,activeRank,'wantEnabled',v),onChange:v=>updateBrickCfg(settings,activeRank,'wantLimit',v)}));
-      body.appendChild(makeBrickCriterion({label:'📋 Дубли на руках',hint:'больше →',enabled:rankCfg.dupEnabled,value:rankCfg.dupLimit,onToggle:v=>updateBrickCfg(settings,activeRank,'dupEnabled',v),onChange:v=>updateBrickCfg(settings,activeRank,'dupLimit',v)}));
-      body.appendChild(makeBrickCriterion({label:'👥 Владельцев',hint:'больше →',enabled:rankCfg.ownersEnabled,value:rankCfg.ownersLimit,onToggle:v=>updateBrickCfg(settings,activeRank,'ownersEnabled',v),onChange:v=>updateBrickCfg(settings,activeRank,'ownersLimit',v)}));
-      body.appendChild(sep());
-      body.appendChild(makeBrickWishlistSection(settings));
-      body.appendChild(makeBrickTargetRow(settings));
-      body.appendChild(sep());
+      }
+      criteria.appendChild(makeBrickCriterion({label:'❤️ Хотят получить',hint:'меньше →',enabled:rankCfg.wantEnabled,value:rankCfg.wantLimit,onToggle:v=>updateBrickCfg(settings,activeRank,'wantEnabled',v),onChange:v=>updateBrickCfg(settings,activeRank,'wantLimit',v)}));
+      criteria.appendChild(makeBrickCriterion({label:'👥 Владеют',hint:'больше →',enabled:rankCfg.ownersEnabled,value:rankCfg.ownersLimit,onToggle:v=>updateBrickCfg(settings,activeRank,'ownersEnabled',v),onChange:v=>updateBrickCfg(settings,activeRank,'ownersLimit',v)}));
+      criteria.appendChild(makeBrickCriterion({label:'📋 Дубли на руках',hint:'больше →',enabled:rankCfg.dupEnabled,value:rankCfg.dupLimit,onToggle:v=>updateBrickCfg(settings,activeRank,'dupEnabled',v),onChange:v=>updateBrickCfg(settings,activeRank,'dupLimit',v)}));
+      if(!embedded)body.appendChild(sep());
+      options.appendChild(makeBrickWishlistSection(settings));
+      options.appendChild(makeBrickTargetRow(settings));
+      if(!embedded)body.appendChild(sep());
       const btnRow=el('div',{style:'display:flex;gap:6px;'});
+      btnRow.className='suite-brick-actions';
       const btnMain=makeBrickBtn('🧱 В кирпич','#6b46c1','#553c9a');
       btnMain.id='stone-brick-main-btn';
       btnMain.style.flex='1';
@@ -8284,15 +8414,17 @@
       });
       const btnRefresh=makeBrickBtn('🔄','#2d3748','#1a202c');
       btnRefresh.title='Обновить кэш вишлиста';
+      btnRefresh.setAttribute('aria-label','Обновить вишлист и наполнить кирпич');
       btnRefresh.style.width='34px';
       btnRefresh.style.flex='none';
       btnRefresh.addEventListener('click',()=>clickMatchingBrickCards(true));
-      btnRow.append(btnMain,btnRefresh);body.appendChild(btnRow);
+      btnRow.append(btnMain,btnRefresh);options.appendChild(btnRow);
       const cache=loadBrickCache();
       const wishlistUser=suiteGetCurrentUserName();
       if(cache&&settings.excludeWishlist&&wishlistUser&&isBrickCacheValid(cache,wishlistUser)){
         const age=Math.round((Date.now()-cache.ts)/60000);
-        body.appendChild(el('div',{style:'font-size:10px;color:#4a5568;text-align:center;',text:`Кэш вишлиста: ${cache.images.length} карт · ${age} мин. назад`}));
+        const cacheHint=el('div',{style:'font-size:10px;color:#4a5568;text-align:center;',text:`Кэш вишлиста: ${cache.images.length} карт · ${age} мин. назад`});
+        cacheHint.className='suite-brick-cache-hint';body.appendChild(cacheHint);
       }
       setBrickReady(getFutureEnergy()>0&&brickReadyToTrade);
       updateBrickButton(false);
@@ -8309,25 +8441,62 @@
     function makeBrickPanelDraggable(panel,handle){
       makeDraggable(panel,handle,saveBrickPanelPos);
     }
+    function injectBrickEmbeddedStyle(){
+      if(document.getElementById('suite-brick-embedded-style'))return;
+      const style=document.createElement('style');style.id='suite-brick-embedded-style';
+      style.textContent=`
+        #stone-brick-panel.suite-brick-embedded{position:static;width:100%;min-width:0;box-sizing:border-box;padding:12px 0;border-block:1px solid var(--cg-line,#343c3e);color:var(--cg-text,#dbe5e3);font:inherit;font-size:12px;}
+        #stone-brick-panel.suite-brick-embedded .suite-brick-header{display:flex;align-items:center;gap:10px;margin-bottom:12px;font-size:12px;font-weight:600;}
+        #stone-brick-panel.suite-brick-embedded #suite-brick-rank{margin-left:auto;color:var(--cg-muted,#9eaeac);font-size:11px;font-weight:400;}
+        #stone-brick-panel.suite-brick-embedded #stone-brick-body{display:flex;flex-direction:column;gap:12px;padding:0;}
+        #stone-brick-panel.suite-brick-embedded :is(.suite-brick-criteria,.suite-brick-options){display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;align-items:center;}
+        #stone-brick-panel.suite-brick-embedded .suite-brick-criterion{padding:10px 12px;border:1px solid var(--cg-line,#343c3e);border-radius:9px;background:var(--cg-soft,#242b2d);min-width:0;}
+        #stone-brick-panel.suite-brick-embedded :is(.suite-brick-wishlist,.suite-brick-target,.suite-brick-actions){min-width:0;}
+        #stone-brick-panel.suite-brick-embedded input[type=checkbox]{appearance:auto;width:15px;height:15px;min-width:15px;padding:0;margin:0;accent-color:var(--cg-accent,#91c6ac)!important;}
+        #stone-brick-panel.suite-brick-embedded input[type=number]{width:78px!important;max-width:100%;min-width:0;height:32px!important;margin:0;padding:4px 8px!important;border:1px solid var(--cg-line,#343c3e)!important;border-radius:7px;background:var(--cg-surface,#1d2224)!important;color:var(--cg-text,#dbe5e3)!important;font:inherit!important;box-sizing:border-box;}
+        #stone-brick-panel.suite-brick-embedded :is(.suite-brick-criterion>div>span,.suite-brick-target>div>span,.suite-brick-wishlist>div,.suite-brick-cache-hint){color:var(--cg-muted,#9eaeac)!important;overflow-wrap:anywhere;}
+        #stone-brick-panel.suite-brick-embedded button{min-height:34px;margin:0;padding:7px 10px!important;border:1px solid var(--cg-line,#343c3e)!important;border-radius:8px!important;background:var(--cg-soft,#242b2d)!important;color:var(--cg-text,#dbe5e3)!important;font:inherit!important;cursor:pointer;white-space:normal;}
+        #stone-brick-panel.suite-brick-embedded #stone-brick-main-btn{background:var(--cg-action,#dbe5e3)!important;color:var(--cg-on-action,#25312e)!important;font-weight:600!important;}
+        #stone-brick-panel.suite-brick-embedded #stone-brick-main-btn[data-mode=trade]{background:var(--cg-accent,#91c6ac)!important;}
+        #stone-brick-panel.suite-brick-embedded button:hover{filter:brightness(1.08);}
+        #stone-brick-panel.suite-brick-embedded button:disabled{opacity:.55;cursor:not-allowed;}
+        #stone-brick-panel.suite-brick-embedded :is(button,input):focus-visible{outline:2px solid var(--cg-accent,#91c6ac)!important;outline-offset:2px;}
+        #stone-brick-panel.suite-brick-embedded .suite-brick-toggle{padding:0 8px!important;min-height:26px;}
+        @media(max-width:700px){#stone-brick-panel.suite-brick-embedded :is(.suite-brick-criteria,.suite-brick-options){grid-template-columns:minmax(0,1fr);gap:10px;}#stone-brick-panel.suite-brick-embedded .suite-brick-header{flex-wrap:wrap;}}
+      `;
+      (document.head||document.documentElement).appendChild(style);
+    }
     function buildBrickPanel(){
       if(document.getElementById('stone-brick-panel'))return;
+      const rankRow=document.querySelector('.stone__inner .cg-filters .cg-filter-row');
       const panel=document.createElement('div');panel.id='stone-brick-panel';
       panel.style.cssText='position:fixed;top:80px;right:20px;z-index:999;width:270px;background:rgba(12,12,22,.98);color:#e2e8f0;border-radius:12px;box-shadow:0 8px 40px rgba(0,0,0,.7);font-family:sans-serif;font-size:13px;user-select:none;border:1px solid rgba(255,255,255,.09);overflow:hidden;';
       const header=document.createElement('div');header.style.cssText='padding:9px 14px;background:linear-gradient(90deg,#4c1d95,#6b46c1);cursor:move;font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:space-between;';
       const headerTitle=document.createElement('span');headerTitle.textContent='🧱 Наполнение кирпича';
       appendCrown(headerTitle);
       const toggleBtn=document.createElement('button');toggleBtn.textContent='−';toggleBtn.style.cssText='background:transparent;border:none;color:#fff;cursor:pointer;font-size:18px;line-height:1;padding:0 2px;';
+      toggleBtn.type='button';toggleBtn.setAttribute('aria-label','Свернуть настройки наполнения кирпича');toggleBtn.setAttribute('aria-expanded','true');toggleBtn.setAttribute('aria-controls','stone-brick-body');
       header.append(headerTitle,toggleBtn);
       const body=document.createElement('div');body.id='stone-brick-body';body.style.cssText='padding:12px 14px;display:flex;flex-direction:column;gap:10px;';
-      panel.append(header,body);document.body.appendChild(panel);
+      panel.append(header,body);
+      if(rankRow){
+        injectBrickEmbeddedStyle();panel.className='suite-brick-embedded';panel.removeAttribute('style');
+        header.removeAttribute('style');header.className='suite-brick-header';body.removeAttribute('style');
+        toggleBtn.removeAttribute('style');toggleBtn.className='suite-brick-toggle';
+        const rankCaption=el('span');rankCaption.id='suite-brick-rank';header.insertBefore(rankCaption,toggleBtn);
+        rankRow.insertAdjacentElement('afterend',panel);
+      }else document.body.appendChild(panel);
       let collapsed=false;toggleBtn.addEventListener('click',()=>{
         collapsed=!collapsed;
-        suiteApplyCollapsibleState(panel,collapsed,()=>{
+        const apply=()=>{
           body.style.display=collapsed?'none':'flex';
           toggleBtn.textContent=collapsed?'+':'−';
-        });
+          toggleBtn.setAttribute('aria-expanded',String(!collapsed));
+          toggleBtn.setAttribute('aria-label',(collapsed?'Развернуть':'Свернуть')+' настройки наполнения кирпича');
+        };
+        if(rankRow)apply();else suiteApplyCollapsibleState(panel,collapsed,apply);
       });
-      makeBrickPanelDraggable(panel,header);applyBrickPanelPos(panel);renderBrickBody(body);
+      if(!rankRow){makeBrickPanelDraggable(panel,header);applyBrickPanelPos(panel);}renderBrickBody(body);
       brickOn(document,'click',e=>{
         if(e.target.closest('.stone__rank-item')) setTimeout(()=>renderBrickBody(body),500);
       },true);
