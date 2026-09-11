@@ -27,7 +27,14 @@ const nativeCSS=process.argv[3]?fs.readFileSync(process.argv[3],'utf8'):`.ap-mod
     const doc=new DOMParser().parseFromString(html,'text/html');
     doc.querySelectorAll('script,iframe,link').forEach(e=>e.remove());
     doc.querySelectorAll('*').forEach(e=>[...e.attributes].filter(a=>/^on|^(src|srcset)$/i.test(a.name)).forEach(a=>e.removeAttribute(a.name)));
-    document.querySelector('.lgn').append(doc.querySelector('.lgn__inner'));
+    const wrapper=doc.querySelector('.lgn__inner'),layer=doc.querySelector('.ap-profile-bg');
+    // A captured menu may already contain the helper's lifted media layer. Restore
+    // the current native hero placement before testing enable/disable symmetry.
+    if(layer&&!wrapper.contains(layer)) (wrapper.querySelector('.ap-profile-hero')||wrapper.querySelector('.ap-profile-scene')).prepend(layer);
+    wrapper.classList.remove('tm-fullbg-ready');
+    [...wrapper.style].filter(k=>k.startsWith('--suite-menu-')).forEach(k=>wrapper.style.removeProperty(k));
+    if(layer){layer.classList.remove('tm-menu-bg-layer');layer.style.removeProperty('--suite-menu-bg-dim');}
+    document.querySelector('.lgn').append(wrapper);
     const video=document.querySelector('video');
     video.poster='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800"><defs><linearGradient id="g"><stop stop-color="#84334d"/><stop offset="1" stop-color="#28576c"/></linearGradient></defs><rect width="1200" height="800" fill="url(#g)"/><circle cx="750" cy="200" r="280" fill="#b98054" opacity=".5"/></svg>');
    },{html});
@@ -40,10 +47,14 @@ const nativeCSS=process.argv[3]?fs.readFileSync(process.argv[3],'utf8'):`.ap-mod
     const controls=[...modal.querySelectorAll('a,button')];
     const snapshot=()=>controls.map(e=>{const s=getComputedStyle(e);return [e.textContent,e.getAttribute('href'),s.backgroundColor,s.backgroundImage,s.borderColor,s.borderRadius,s.color,s.padding,s.height];});
     const before=snapshot(),columns=getComputedStyle(wrapper).gridTemplateColumns;
+    const actions=wrapper.querySelector('.ap-profile-hero + .ap-profile-actions');
+    const actionsBefore=actions&&getComputedStyle(actions).backgroundColor;
+    const wallet=actions?.querySelector('.ap-wallet'),walletBefore=wallet&&[wallet.outerHTML,getComputedStyle(wallet).backgroundColor,getComputedStyle(wallet).borderColor];
     const expanded=before.map((entry,i)=>{const value=[...entry];if(controls[i].matches('.ap-menu-link')){value[2]='rgba(0, 0, 0, 0)';value[4]='rgba(0, 0, 0, 0)';}return value;});
     // Reproduce a video/holder height cap from surrounding site or extension CSS.
     // The profile menu is taller than the profile-banner-sized media area.
     const cap=document.createElement('style');cap.textContent='#profilebg{height:420px;max-height:420px}.ap-profile-bg{max-height:420px}';document.head.append(cap);
+    const nativeMaxHeight=getComputedStyle(video).maxHeight;
     let clicks=0;controls[0].addEventListener('click',()=>clicks++);
     applyMenuBackground();
     check(layer.parentElement===modal&&video.parentElement===layer,'native video holder lifted intact');
@@ -53,6 +64,10 @@ const nativeCSS=process.argv[3]?fs.readFileSync(process.argv[3],'utf8'):`.ap-mod
     check(JSON.stringify(expanded)===JSON.stringify(snapshot()),'only navigation backgrounds and borders made transparent; native labels, colors and geometry preserved');
     check(getComputedStyle(wrapper).gridTemplateColumns===columns,'native layout preserved');
     check(getComputedStyle(wrapper).overflowY==='auto','native scrolling preserved');
+    if(actions){
+      check(getComputedStyle(actions).backgroundColor==='rgba(0, 0, 0, 0)','new actions wrapper no longer hides lower-left background');
+      if(wallet)check(JSON.stringify([wallet.outerHTML,getComputedStyle(wallet).backgroundColor,getComputedStyle(wallet).borderColor])===JSON.stringify(walletBefore),'native wallet and guarantee preserved');
+    }
     check(getComputedStyle(parent).backgroundColor==='rgba(0, 0, 0, 0)'&&getComputedStyle(wrapper.querySelector('.ap-panel')).backgroundColor==='rgba(0, 0, 0, 0)','both panel backgrounds transparent');
     const covers=()=>{const a=video.getBoundingClientRect(),b=wrapper.getBoundingClientRect();return Math.abs(a.left-b.left)<2&&Math.abs(a.top-b.top)<2&&a.width>=b.width-1&&a.height>=b.height-1;};
     check(covers(),'video covers complete menu');
@@ -69,11 +84,12 @@ const nativeCSS=process.argv[3]?fs.readFileSync(process.argv[3],'utf8'):`.ap-mod
     check(low!==getComputedStyle(heading).textShadow,'clarity responds to settings');
     check(layer.style.getPropertyValue('--suite-menu-bg-dim')==='0.10','dimming reaches full-menu layer');
     cleanupMenuBackground();
-    check(getComputedStyle(video).maxHeight==='420px','native height constraint restored when disabled');
+    check(getComputedStyle(video).maxHeight===nativeMaxHeight,'native height constraint restored when disabled');
     check(layer.parentElement===parent&&layer.nextSibling===next,'disable restores exact native location');
     check(!modal.classList.contains('tm-fullbg-host')&&!wrapper.classList.contains('tm-fullbg-ready')&&!layer.classList.contains('tm-menu-bg-layer'),'disable cleans classes');
     check(!wrapper.style.getPropertyValue('--suite-menu-text-weight'),'disable cleans tuning');
     check(JSON.stringify(before)===JSON.stringify(snapshot()),'native control appearance restored');
+    if(actions)check(getComputedStyle(actions).backgroundColor===actionsBefore,'native actions background restored when disabled');
     cfg.modMenuBg=false;applyMenuBackground();check(layer.parentElement===parent,'disabled module does nothing');
     cfg.modMenuBg=true;applyMenuBackground();check(layer.parentElement===modal&&plays===0,'reenable keeps same native video');
     wrapper.scrollTop=0;
