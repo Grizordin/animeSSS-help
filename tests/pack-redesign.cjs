@@ -30,6 +30,7 @@ const renderStatsTab=()=>{}; const suiteClampToViewport=()=>{};let statsPanel=nu
 const PACK20_COUNT=20,PACK20_STONES=1600,GUARANTEE_STONES=144000;
 let autoPendingChoice=null,autoLastChosenPackId='',autoManualPackId='',autoWaitingManual=false,autoBusy=false,autoOpenSuppressGuard=false;
 let autoOpenedCount=0,autoExpectation=null,status='',stopped=false,reported=0,scheduled=0;
+let autoRunGeneration=0;const autoCountedPackIds=new Set(),watchAutoChoice=()=>{},clearAutoChoiceWatch=()=>{};
 const AUTO_DIAGNOSTIC_STALL_MS=10000,AUTO_DELAY_WAIT_CLOSE=350,AUTO_DELAY_RARE_VIEW=3000,AUTO_DELAY_AFTER_PICK=650;
 const autoStartExpectation=(kind,d)=>{autoExpectation={kind,...d};};
 const autoResolveExpectation=()=>{autoExpectation=null;};
