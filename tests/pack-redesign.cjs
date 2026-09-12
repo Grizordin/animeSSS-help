@@ -21,6 +21,8 @@ const functions=['parseStat','getRareFactor','stretchToOne','calcCardValue','cal
 const fallback=`<style>.lootbox__card{position:relative;min-width:0}.lootbox__card>img{width:100%;height:auto;aspect-ratio:288/432}.card-stats{display:grid;position:absolute;left:0;right:0;bottom:0}.card-stats>span{display:flex;justify-content:center}</style><div class="packs-page"><div class="packs-guarantees"><span class="lootbox__counter__s">1620</span></div><span class="lootbox__balance">239082</span><div class="packs-stage" data-pack-state="ready"><div class="lootbox__row" data-pack-id="107214619"><div class="lootbox__list">${[[1046,5,181,1],[3276,19,385,0],[2488,15,260,1]].map((nums,i)=>`<div class="lootbox__card ${i!==1?'anime-cards__owned-by-user':''}" data-rank="${['e','d','c'][i]}" data-id="${i}"><img alt="Card"><div class="card-stats">${nums.map(n=>`<span><b class="pack-stat-full">${n}</b><b class="pack-stat-short">${n}</b><b class="pack-stat-tiny">${n}</b></span>`).join('')}</div></div>`).join('')}</div></div></div></div>`;
 const html=process.argv[2]?fs.readFileSync(process.argv[2],'utf8'):fallback;
 const setup=String.raw`
+${extract('autoDiagnosticVisibleElapsed')}
+let suiteHealthVisibleSince=0;
 const cfg={modStats:true,modGuarantee:true,modCardValue:true,modBestCard:true,modNeon:true,autoOpenEnabled:true,autoOpenTarget:0};
 let passed=0;function check(v,msg){if(!v)throw Error(msg);passed++;}
 const neonStateMap=new WeakMap();

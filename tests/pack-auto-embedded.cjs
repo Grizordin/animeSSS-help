@@ -18,6 +18,8 @@ const functions=['createAutoOpenPanel','injectAutoEmbeddedStyle','updateAutoOpen
 const css=source.match(/globalStyle\.textContent = `([\s\S]*?)`;/)[1];
 const html=process.argv[2]?fs.readFileSync(process.argv[2],'utf8'):'<div class="packs-page"><div class="lootbox"><div class="packs-shop-heading"><h2>Выберите набор паков</h2></div><div class="lootbox__middle">20 паков · 1600 камней</div><div class="packs-stage" data-pack-state="ready"></div></div></div>';
 const setup=String.raw`
+${extract('autoDiagnosticVisibleElapsed')}
+let suiteHealthVisibleSince=0;
 let passed=0;const check=(v,m)=>{if(!v)throw Error(m);passed++;};
 let autoPanel=null,autoRunInput=null,autoTargetInput=null,autoStatusEl=null,autoCountEl=null;
 let autoPendingChoice=null,autoChoiceObserver=null,autoChoiceTimer=null,autoRunGeneration=0;
