@@ -78,6 +78,7 @@ let passed=0;const check=(v,m)=>{if(!v)throw Error(m);passed++;};
    await page.evaluate('(()=>{'+['suiteReadInventoryCount','suiteInventoryStats','suiteCardActionButtonReady','suiteConfirmCardAction','initRemelt'].map(extract).join('\n')+'\nwindow.initRemelt=initRemelt;initRemelt();})()');return page;
   }
   const ui=await setup();
+  check(await ui.evaluate(()=>document.getElementById('remelt-panel').getBoundingClientRect().top-document.querySelector('.rf-filter-row').getBoundingClientRect().bottom>=11),'visible gap below rank row');
   check(await ui.locator('#remelt-panel-body > .suite-remelt-rank-notice').textContent()==='ВНИМАНИЕ: настройки для каждого ранга свои.','rank warning at bottom');
   check(await ui.evaluate(()=>{const s=getComputedStyle(document.getElementById('remelt-panel'));return s.borderLeftWidth==='3px'&&s.backgroundImage.includes('linear-gradient');}),'subtle accent matches auto pack style');
   check(await ui.locator('.rf-filter-row + #remelt-panel + .card-filter-form__controls').count()===1,'panel below ranks, above search');
