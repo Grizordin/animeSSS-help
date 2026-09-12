@@ -50,6 +50,9 @@ const nativeCSS=process.argv[3]?fs.readFileSync(process.argv[3],'utf8'):`.ap-mod
     const actions=wrapper.querySelector('.ap-profile-hero + .ap-profile-actions');
     const actionsBefore=actions&&getComputedStyle(actions).backgroundColor;
     const wallet=actions?.querySelector('.ap-wallet'),walletBefore=wallet&&[wallet.outerHTML,getComputedStyle(wallet).backgroundColor,getComputedStyle(wallet).borderColor];
+    const surfaces=[...wrapper.querySelectorAll('.ap-wallet,.ap-menu-link .ap-count')];
+    const surfaceSnapshot=()=>surfaces.map(e=>{const s=getComputedStyle(e);return [e.outerHTML,s.backgroundColor,s.backgroundImage,s.opacity,s.color,s.borderColor,s.borderRadius,s.padding,s.fontSize];});
+    const surfacesBefore=surfaceSnapshot();
     const expanded=before.map((entry,i)=>{const value=[...entry];if(controls[i].matches('.ap-menu-link')){value[2]='rgba(0, 0, 0, 0)';value[4]='rgba(0, 0, 0, 0)';}return value;});
     // Reproduce a video/holder height cap from surrounding site or extension CSS.
     // The profile menu is taller than the profile-banner-sized media area.
@@ -66,8 +69,13 @@ const nativeCSS=process.argv[3]?fs.readFileSync(process.argv[3],'utf8'):`.ap-mod
     check(getComputedStyle(wrapper).overflowY==='auto','native scrolling preserved');
     if(actions){
       check(getComputedStyle(actions).backgroundColor==='rgba(0, 0, 0, 0)','new actions wrapper no longer hides lower-left background');
-      if(wallet)check(JSON.stringify([wallet.outerHTML,getComputedStyle(wallet).backgroundColor,getComputedStyle(wallet).borderColor])===JSON.stringify(walletBefore),'native wallet and guarantee preserved');
+      if(wallet)check(wallet.outerHTML===walletBefore[0]&&getComputedStyle(wallet).borderColor===walletBefore[2],'native wallet content, guarantee and border preserved');
     }
+    surfaces.forEach((e,i)=>{
+      const after=surfaceSnapshot()[i],expected=[...surfacesBefore[i]];
+      expected[1]=e.matches('.ap-wallet')?'rgba(37, 34, 43, 0.22)':'rgba(37, 34, 43, 0.2)';expected[2]='none';
+      check(JSON.stringify(after)===JSON.stringify(expected),'only wallet/counter backing changes, not text opacity or native geometry');
+    });
     check(getComputedStyle(parent).backgroundColor==='rgba(0, 0, 0, 0)'&&getComputedStyle(wrapper.querySelector('.ap-panel')).backgroundColor==='rgba(0, 0, 0, 0)','both panel backgrounds transparent');
     const covers=()=>{const a=video.getBoundingClientRect(),b=wrapper.getBoundingClientRect();return Math.abs(a.left-b.left)<2&&Math.abs(a.top-b.top)<2&&a.width>=b.width-1&&a.height>=b.height-1;};
     check(covers(),'video covers complete menu');
@@ -89,6 +97,7 @@ const nativeCSS=process.argv[3]?fs.readFileSync(process.argv[3],'utf8'):`.ap-mod
     check(!modal.classList.contains('tm-fullbg-host')&&!wrapper.classList.contains('tm-fullbg-ready')&&!layer.classList.contains('tm-menu-bg-layer'),'disable cleans classes');
     check(!wrapper.style.getPropertyValue('--suite-menu-text-weight'),'disable cleans tuning');
     check(JSON.stringify(before)===JSON.stringify(snapshot()),'native control appearance restored');
+    check(JSON.stringify(surfacesBefore)===JSON.stringify(surfaceSnapshot()),'native wallet/counter backgrounds restored when disabled');
     if(actions)check(getComputedStyle(actions).backgroundColor===actionsBefore,'native actions background restored when disabled');
     cfg.modMenuBg=false;applyMenuBackground();check(layer.parentElement===parent,'disabled module does nothing');
     cfg.modMenuBg=true;applyMenuBackground();check(layer.parentElement===modal&&plays===0,'reenable keeps same native video');
