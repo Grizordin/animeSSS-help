@@ -8164,33 +8164,69 @@
       },true);
     }
     function initBrickEntryPage(){
-      // One navigation on entry, only for "all ranks". Never fight manual input.
-      let timer=null,done=false,stableKey='',stableAt=0;
-      const deadline=Date.now()+8000;
+      // Initial HTML can contain an empty/stale pager. Refresh through the site's
+      // own read-only filter first, then navigate using its confirmed page count.
+      let timer=null,done=false,phase='ready',before=null,targetPage=null;
+      const deadline=Date.now()+60000;
+      const snapshot=()=>{
+        const forge=document.getElementById('celestialForge');
+        const select=getPageSelect();
+        const counter=forge?.querySelector('#info_filter_page')?.textContent.match(/^\s*(\d+)\s*\/\s*(\d+)\s*$/);
+        const list=forge?.querySelector('.stone__inventory-list');
+        return {forge,select,list,first:list?.firstChild,option:select?.firstChild,
+          current:counter?Number(counter[1]):null,last:counter?Number(counter[2]):null};
+      };
       const cancel=()=>{
         done=true;clearTimeout(timer);
         for(const type of ['click','input','change'])document.removeEventListener(type,onInteraction,true);
       };
       const onInteraction=e=>{
-        if(e.target.closest?.('.stone__inner,#stone-brick-panel,#choose_stone_filter_page'))cancel();
+        if(e.isTrusted && e.target.closest?.('#celestialForge,#stone-brick-panel'))cancel();
+      };
+      const request=(page,nextPhase,state)=>{
+        const pageWindow=getPageWindow();
+        if(typeof pageWindow?.CelestianFilterAjax!=='function')return false;
+        before=state;phase=nextPhase;targetPage=page;
+        // Calling the native filter also works when the empty select is disabled.
+        pageWindow.CelestianFilterAjax(page);
+        return true;
       };
       const check=()=>{
         if(done)return;
-        if(brickAbort.signal.aborted||brickBusy||brickTradePending||Date.now()>=deadline){cancel();return;}
+        if(brickAbort.signal.aborted||brickBusy||brickTradePending){cancel();return;}
+        if(Date.now()>=deadline){
+          cancel();
+          suiteSelfDiagnosticIssue('suite','brick_entry_page_not_confirmed',{phase,targetPage,currentPage:getCurrentPage(),lastPage:getLastPage()});
+          return;
+        }
         const rank=document.querySelector('.stone__rank-item--active');
         if(rank && (rank.dataset.rank??'').toLowerCase()!==''){cancel();return;}
-        const sel=getPageSelect(),last=getLastPage(),current=getCurrentPage();
-        if(rank && sel && !sel.disabled && last>0 && current>0
-          && document.getElementById('celestialForge')?.dataset.filterBusy!=='true'){
-          const key=`${current}:${last}`;
-          if(key!==stableKey){stableKey=key;stableAt=Date.now();}
-          else if(Date.now()-stableAt>=200){
-            cancel();
-            if(last>1 && current!==last)goToPage(last);
-            return;
+        const state=snapshot();
+        if(rank && state.forge?.dataset.initialized==='true' && state.forge.dataset.filterBusy!=='true'){
+          try{
+            if(phase==='ready')request(1,'refresh',state);
+            else if(before && (state.list!==before.list || state.first!==before.first || state.option!==before.option)
+              && state.current!==null && state.last!==null){
+              // The select's value alone changes before AJAX, so it is not proof.
+              if(state.last===0){
+                cancel();
+                if(phase==='last_page')suiteSelfDiagnosticIssue('suite','brick_entry_page_not_confirmed',{phase,targetPage,currentPage:state.current,lastPage:0});
+                return;
+              }
+              if(state.current===state.last){cancel();return;}
+              if(phase==='refresh' && state.last>1 && state.select && !state.select.disabled){
+                request(state.last,'last_page',state);
+              }else if(phase==='last_page'){
+                cancel();
+                suiteSelfDiagnosticIssue('suite','brick_entry_page_not_confirmed',{phase,targetPage,currentPage:state.current,lastPage:state.last});
+                return;
+              }
+            }
+          }catch(error){
+            cancel();suiteSelfDiagnosticIssue('suite','brick_entry_page_not_confirmed',{phase,targetPage,error});return;
           }
-        }else stableKey='';
-        timer=setTimeout(check,100);
+        }
+        timer=setTimeout(check,150);
       };
       for(const type of ['click','input','change'])document.addEventListener(type,onInteraction,true);
       brickCleanup.push(cancel);
@@ -9129,7 +9165,7 @@
       if(document.getElementById('suite-remelt-embedded-style'))return;
       const style=document.createElement('style');style.id='suite-remelt-embedded-style';
       style.textContent=`
-        #remelt-panel.suite-remelt-embedded{position:static;width:100%;min-width:0;box-sizing:border-box;padding:12px 14px;border:1px solid var(--rf-line,#443c36);border-left:3px solid var(--rf-accent,#e6b694);border-radius:12px;background:linear-gradient(110deg,rgba(230,182,148,.09),transparent 55%),var(--rf-surface,#24201d);color:var(--rf-text,#eee5dd);font:inherit;font-size:12px;}
+        #remelt-panel.suite-remelt-embedded{position:static;width:100%;min-width:0;box-sizing:border-box;margin-top:12px;padding:12px 14px;border:1px solid var(--rf-line,#443c36);border-left:3px solid var(--rf-accent,#e6b694);border-radius:12px;background:linear-gradient(110deg,rgba(230,182,148,.09),transparent 55%),var(--rf-surface,#24201d);color:var(--rf-text,#eee5dd);font:inherit;font-size:12px;}
         #remelt-panel.suite-remelt-embedded .suite-remelt-header{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;font-size:13px;font-weight:600;}
         #remelt-panel.suite-remelt-embedded .suite-remelt-header>span:first-child{color:var(--rf-accent,#e6b694);}
         #remelt-panel.suite-remelt-embedded .suite-remelt-rank-notice{padding-top:9px;border-top:1px solid var(--rf-line,#443c36);color:var(--rf-muted,#b5a596);overflow-wrap:anywhere;}
