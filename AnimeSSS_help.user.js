@@ -6718,17 +6718,18 @@
   function parseTransactions(htmlText) {
     const parser = new DOMParser();
     const doc = parser.parseFromString(htmlText, 'text/html');
-    if(!doc.querySelector('.table-responsive.ncard-transactions__table')){
+    const table = doc.querySelector('.ncard-transactions__table, table.ps-history-table');
+    if(!table){
       throw new Error('Не найдена таблица истории операций; подсчёт остановлен без изменения кэша');
     }
-    const rows = [...doc.querySelectorAll('.table-responsive.ncard-transactions__table tbody tr.new-tr-item')];
+    const rows = [...table.querySelectorAll('tbody tr.new-tr-item')];
     return rows.map(row => {
       const amountText = row.querySelector('.new-tr-amount span')?.textContent?.trim() ?? '+0';
       const amount = parseInt(amountText.replace(/[^\d\-+]/g, ''), 10) || 0;
       const dayPart = row.querySelectorAll('.new-tr-date')[0]?.textContent?.trim() ?? '';
       const datePart = row.querySelectorAll('.new-tr-date')[1]?.textContent?.trim() ?? '';
-      const dateStr = datePart || dayPart;
-      const description = row.querySelector('td:last-child')?.textContent?.trim() ?? '';
+      const dateStr = row.querySelector('[data-ps-label="Дата"]')?.textContent?.trim() || datePart || dayPart;
+      const description = (row.querySelector('[data-ps-label="Описание"]') || row.querySelector('td:last-child'))?.textContent?.trim() ?? '';
       const date = parseDateSafe(dateStr);
       return { amount, date, description };
     }).filter(t => t.date > 0);
