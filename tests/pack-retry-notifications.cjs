@@ -42,6 +42,8 @@ vm.runInContext(map+extract('cptResolve')+`
 `,context);
 const names=['suiteCardActionButtonReady','getActiveRow','getCardsFromActiveRow','hasOpenCardsReady','autoPackReady','getAutoPackRetryButton','autoHandlePackRetry','autoBeginChoice','autoCheckChoice','autoBuyPack','autoOpenStep','getCurrentStoneBalance','setupBuyButtonGuard','clickBuyButton'];
 const setup=String.raw`
+let suiteHealthVisibleSince=0;
+${extract('autoDiagnosticVisibleElapsed')}
 let passed=0;const check=(v,m)=>{if(!v)throw Error(m);passed++;};
 let now=100000;Date.now=()=>now;
 let cfg={autoOpenEnabled:true,autoOpenTarget:0,modGuard:true};

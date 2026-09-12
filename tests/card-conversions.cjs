@@ -68,8 +68,16 @@ for(const [response,expected] of [[{error:'Rejected'},'server_rejected'],[{},'in
   reply=response;outcome='failure';attachExchange(button,'create_energy',['1'],()=>{});
   const result=await suiteConfirmCardAction({button,action:'create_energy',ids:['1']});
   check(!result.ok&&result.reason===expected,'failure not success: '+expected);
+  check(result.response.status===200,'response status retained');
+  if(expected==='server_rejected')check(result.response.error==='Rejected','server reason retained');
   check(handlers.size===0,'failure listener cleanup');
 }
+reply={error:'<b>Отказ</b> token=SECRET user_hash=HASH',message:'x'.repeat(900),card:{secret:'PRIVATE'}};
+outcome='failure';attachExchange(button,'create_energy',['1'],()=>{});
+const sanitized=await suiteConfirmCardAction({button,action:'create_energy',ids:['1']});
+check(sanitized.response.error.includes('Отказ'),'readable reason');
+check(!JSON.stringify(sanitized).includes('SECRET')&&!JSON.stringify(sanitized).includes('HASH'),'credentials removed');
+check(sanitized.response.message.length===400&&!JSON.stringify(sanitized).includes('PRIVATE'),'bounded whitelisted fields');
 outcome='timeout';attachExchange(button,'create_energy',['1'],()=>{});
 let result=await suiteConfirmCardAction({button,action:'create_energy',ids:['1'],timeoutMs:25});
 check(!result.ok&&result.uncertain,'timeout is uncertain');check(handlers.size===0,'timeout listener cleanup');
@@ -119,6 +127,7 @@ check(!notices.some(x=>x.includes('Цель выполнена')),'brick waits f
 await delayed;check(notices.some(x=>x.includes('Цель выполнена')),'brick delayed UI confirms');
 resetBrick();reply={error:'No'};outcome='failure';await clickMatchingBrickCards();
 check(!notices.some(x=>x.includes('Цель выполнена')),'server rejection never counts brick goal');
+check(issues.at(-1)[2].response.error==='No'&&issues.at(-1)[2].remainingSlots===1,'brick incident contains response and remaining basket');
 resetBrick();reply={new_energy:101};outcome='timeout';const startClicks=clicks;await clickMatchingBrickCards();
 check(brickTradeUncertain&&!notices.some(x=>x.includes('Цель выполнена')),'uncertain brick stops');
 await clickMatchingBrickCards();check(clicks===startClicks+1,'no blind repeat after timeout');
@@ -150,6 +159,7 @@ resetRemelt();reply={card:{image:'/test.webp',name:'Test'}};outcome='late-ui';aw
 check(notices.some(x=>x.includes('Готово: 1/1')),'remelt waits for delayed UI');
 resetRemelt();reply={error:'No'};outcome='failure';await runRemelt();
 check(!notices.some(x=>x.includes('Переплавка 1/')||x.includes('Готово:')),'rejected remelt not counted');
+check(issues.at(-1)[2].response.error==='No'&&issues.at(-1)[2].remainingSlots===3,'remelt incident contains response and remaining slots');
 resetRemelt();outcome='timeout';const startClicks=clicks;await runRemelt();
 check(remeltUncertain,'uncertain remelt blocked');await runRemelt();check(clicks===startClicks+1,'no repeated destructive request');
 resetRemelt();document.getElementById('autoRemeltToggle').checked=true;const old=clicks;await runRemelt();check(clicks===old,'site auto mode excluded');

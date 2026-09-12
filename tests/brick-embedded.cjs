@@ -46,6 +46,8 @@ let passed=0;const check=(v,m)=>{if(!v)throw Error(m);passed++;};
    return page;
   }
   const page=await setup();
+  check(await page.locator('#stone-brick-body > .suite-brick-rank-notice').textContent()==='ВНИМАНИЕ: настройки для каждого ранга свои.','rank warning at bottom');
+  check(await page.evaluate(()=>{const s=getComputedStyle(document.getElementById('stone-brick-panel'));return s.borderLeftWidth==='3px'&&s.backgroundImage.includes('linear-gradient');}),'subtle accent matches auto pack style');
   check(await page.locator('.cg-filter-row + #stone-brick-panel + .cg-search').count()===1,'under ranks before native search');
   check(await page.locator('.suite-brick-criteria > .suite-brick-criterion').count()===3,'first row has three criteria');
   const labels=await page.locator('.suite-brick-criteria label').allTextContents();check(labels[0].includes('Хотят')&&labels[1].includes('Владеют')&&labels[2].includes('Дубли'),'requested criterion order');

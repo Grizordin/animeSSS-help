@@ -1380,12 +1380,13 @@
       }
 
       const valueCandidates = [...document.querySelectorAll('.lootbox__card,.trade__main-item')]
-        .filter(card => card.querySelectorAll('.card-stats span').length >= 4);
+        .filter(card => card.querySelectorAll('.card-stats span').length >= 4
+          && (!card.matches('.lootbox__card') || (autoPackReady() && card.closest('.lootbox__row')===getActiveRow())));
       if(cfg.modCardValue && valueCandidates.length && !valueCandidates.some(card => card.querySelector('.card-value'))){
         report('suite', 'card_value_not_rendered', { candidateCount:valueCandidates.length });
       }
       const activePackRow = isPackPage ? getActiveRow() : null;
-      if(cfg.modCardValue && cfg.modBestCard && activePackRow?.querySelector('.lootbox__card .card-value')
+      if(cfg.modCardValue && cfg.modBestCard && autoPackReady() && activePackRow?.querySelector('.lootbox__card .card-value')
         && !activePackRow.querySelector('.lootbox__card.cv-best-card')){
         report('suite', 'best_card_not_highlighted', { cardCount:activePackRow.querySelectorAll('.lootbox__card').length });
       }
@@ -2588,7 +2589,15 @@
       }
     }
   `;
-  document.head.appendChild(globalStyle);
+  function suiteAttachGlobalStyle(style){
+    // Network hooks may start before <head>; do not delay or restart the script.
+    if(document.head){document.head.appendChild(style);return;}
+    const observer=new MutationObserver(()=>{
+      if(document.head){observer.disconnect();document.head.appendChild(style);}
+    });
+    observer.observe(document,{childList:true,subtree:true});
+  }
+  suiteAttachGlobalStyle(globalStyle);
 
   // ============================================================
   //  РАНГИ И ПАРАМЕТРЫ ЦЕННОСТИ
@@ -7958,16 +7967,27 @@
       };
       const onComplete=(_event,xhr)=>{
         if(xhr!==request)return;
-        if(xhr.status<200 || xhr.status>=300){finish({ok:false,reason:'http_error',uncertain:true});return;}
+        // Whitelist short textual fields only: never send HTML, cards or raw response bodies.
+        const text=value=>typeof value==='string' ? value
+          .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi,' ')
+          .replace(/<[^>]*>/g,' ')
+          .replace(/((?:user_?hash|dle_login_hash|cookie|authorization|token|password|secret)["']?\s*[:=]\s*["']?)[^\s&,;"'<>]+/gi,'$1[redacted]')
+          .replace(/\bBearer\s+\S+/gi,'Bearer [redacted]')
+          .replace(/\s+/g,' ').trim().slice(0,400) : '';
+        const response={status:Number(xhr.status)||0};
+        if(xhr.status<200 || xhr.status>=300){finish({ok:false,reason:'http_error',uncertain:true,response});return;}
         let data=xhr.responseJSON;
         if(!data){try{data=JSON.parse(xhr.responseText);}catch(e){}}
-        if(data?.error){finish({ok:false,reason:'server_rejected'});return;}
+        response.format=data&&typeof data==='object'?'json':'non_json';
+        response.error=text(data?.error);
+        response.message=text(data?.message);
+        if(data?.error){finish({ok:false,reason:'server_rejected',response});return;}
         if(action==='create_energy' && /^\d+$/.test(String(data?.new_energy??''))){
-          finish({ok:true,newEnergy:Number(data.new_energy)});return;
+          finish({ok:true,newEnergy:Number(data.new_energy),response});return;
         }
         if(action==='remelt_card' && data?.card && typeof data.card.image==='string' && data.card.image
-          && typeof data.card.name==='string' && data.card.name){finish({ok:true});return;}
-        finish({ok:false,reason:'invalid_response',uncertain:true});
+          && typeof data.card.name==='string' && data.card.name){finish({ok:true,response});return;}
+        finish({ok:false,reason:'invalid_response',uncertain:true,response});
       };
       try{target.on('ajaxSend'+namespace,onSend).on('ajaxComplete'+namespace,onComplete);}
       catch(e){finish({ok:false,reason:'observer_unavailable'});return;}
@@ -8143,6 +8163,39 @@
         finally{jumpPending=false;}
       },true);
     }
+    function initBrickEntryPage(){
+      // One navigation on entry, only for "all ranks". Never fight manual input.
+      let timer=null,done=false,stableKey='',stableAt=0;
+      const deadline=Date.now()+8000;
+      const cancel=()=>{
+        done=true;clearTimeout(timer);
+        for(const type of ['click','input','change'])document.removeEventListener(type,onInteraction,true);
+      };
+      const onInteraction=e=>{
+        if(e.target.closest?.('.stone__inner,#stone-brick-panel,#choose_stone_filter_page'))cancel();
+      };
+      const check=()=>{
+        if(done)return;
+        if(brickAbort.signal.aborted||brickBusy||brickTradePending||Date.now()>=deadline){cancel();return;}
+        const rank=document.querySelector('.stone__rank-item--active');
+        if(rank && (rank.dataset.rank??'').toLowerCase()!==''){cancel();return;}
+        const sel=getPageSelect(),last=getLastPage(),current=getCurrentPage();
+        if(rank && sel && !sel.disabled && last>0 && current>0
+          && document.getElementById('celestialForge')?.dataset.filterBusy!=='true'){
+          const key=`${current}:${last}`;
+          if(key!==stableKey){stableKey=key;stableAt=Date.now();}
+          else if(Date.now()-stableAt>=200){
+            cancel();
+            if(last>1 && current!==last)goToPage(last);
+            return;
+          }
+        }else stableKey='';
+        timer=setTimeout(check,100);
+      };
+      for(const type of ['click','input','change'])document.addEventListener(type,onInteraction,true);
+      brickCleanup.push(cancel);
+      timer=setTimeout(check,100);
+    }
     function parseCardStats(card){
       return suiteInventoryStats(card);
     }
@@ -8204,6 +8257,7 @@
       if(!suiteCardActionButtonReady(btn)){brickNotify('⚠️ Кнопка обмена пока недоступна');return {ok:false};}
       const energy=getFutureEnergy();
       const ids=[...(getBasket()?.querySelectorAll('.stone__main-item[data-id]')||[])].map(el=>el.dataset.id);
+      const pageBefore=getCurrentPage();
       brickTradePending=true;updateBrickButton(true);
       try{
         const result=await suiteConfirmCardAction({button:btn,action:'create_energy',ids,signal:brickAbort.signal});
@@ -8214,7 +8268,14 @@
         }
         if(brickAbort.signal.aborted)return {ok:false};
         brickTradeUncertain=!!result.uncertain||result.ok;
-        suiteSelfDiagnosticIssue('suite','brick_exchange_not_confirmed',{reason:result.reason||'ui_not_settled',selectedCount:ids.length,energy});
+        suiteSelfDiagnosticIssue('suite','brick_exchange_not_confirmed',{
+          reason:result.reason||'ui_not_settled',selectedCount:ids.length,energy,
+          response:result.response||null,confirmedByServer:!!result.ok,uncertain:brickTradeUncertain,
+          visibility:document.visibilityState,pageBefore,page:getCurrentPage(),rank:getActiveRank(),
+          remainingSlots:getUsedSlots(),futureEnergy:getFutureEnergy(),expectedBalance:result.newEnergy??null,
+          displayedBalance:document.getElementById('now_energy')?.textContent.replace(/\D/g,'').slice(0,20)||null,
+          filterBusy:document.getElementById('celestialForge')?.dataset.filterBusy==='true'
+        });
         brickNotify('⚠️ Обмен не подтверждён. Проверь баланс и карты; автоматическая работа остановлена.');
         return {ok:false};
       }finally{brickTradePending=false;updateBrickButton(false);}
@@ -8449,6 +8510,8 @@
         const cacheHint=el('div',{style:'font-size:10px;color:#4a5568;text-align:center;',text:`Кэш вишлиста: ${cache.images.length} карт · ${age} мин. назад`});
         cacheHint.className='suite-brick-cache-hint';body.appendChild(cacheHint);
       }
+      const rankNotice=el('p',{text:'ВНИМАНИЕ: настройки для каждого ранга свои.',style:'margin:0;font-size:11px;line-height:1.5;'});
+      rankNotice.className='suite-brick-rank-notice';body.appendChild(rankNotice);
       setBrickReady(getFutureEnergy()>0&&brickReadyToTrade);
       updateBrickButton(false);
     }
@@ -8468,8 +8531,10 @@
       if(document.getElementById('suite-brick-embedded-style'))return;
       const style=document.createElement('style');style.id='suite-brick-embedded-style';
       style.textContent=`
-        #stone-brick-panel.suite-brick-embedded{position:static;width:100%;min-width:0;box-sizing:border-box;padding:12px 0;border-block:1px solid var(--cg-line,#343c3e);color:var(--cg-text,#dbe5e3);font:inherit;font-size:12px;}
-        #stone-brick-panel.suite-brick-embedded .suite-brick-header{display:flex;align-items:center;gap:10px;margin-bottom:12px;font-size:12px;font-weight:600;}
+        #stone-brick-panel.suite-brick-embedded{position:static;width:100%;min-width:0;box-sizing:border-box;padding:12px 14px;border:1px solid var(--cg-line,#343c3e);border-left:3px solid var(--cg-accent,#91c6ac);border-radius:12px;background:linear-gradient(110deg,rgba(145,198,172,.09),transparent 55%),var(--cg-surface,#1d2224);color:var(--cg-text,#dbe5e3);font:inherit;font-size:12px;}
+        #stone-brick-panel.suite-brick-embedded .suite-brick-header{display:flex;align-items:center;gap:10px;margin-bottom:12px;font-size:13px;font-weight:600;}
+        #stone-brick-panel.suite-brick-embedded .suite-brick-header>span:first-child{color:var(--cg-accent,#91c6ac);}
+        #stone-brick-panel.suite-brick-embedded .suite-brick-rank-notice{padding-top:9px;border-top:1px solid var(--cg-line,#343c3e);color:var(--cg-muted,#9eaeac);overflow-wrap:anywhere;}
         #stone-brick-panel.suite-brick-embedded #suite-brick-rank{margin-left:auto;color:var(--cg-muted,#9eaeac);font-size:11px;font-weight:400;}
         #stone-brick-panel.suite-brick-embedded #stone-brick-body{display:flex;flex-direction:column;gap:12px;padding:0;}
         #stone-brick-panel.suite-brick-embedded :is(.suite-brick-criteria,.suite-brick-options){display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;align-items:center;}
@@ -8529,6 +8594,7 @@
 
     buildBrickPanel();
     initBrickRankWatcher();
+    initBrickEntryPage();
   }
 
   // ============================================================
@@ -8960,7 +9026,13 @@
           if(!result.ok || !await waitAfterRemelt(ids,activeRank)){
             if(remeltAbort.signal.aborted)break;
             remeltUncertain=!!result.uncertain||result.ok;
-            suiteSelfDiagnosticIssue('suite','remelt_not_confirmed',{reason:result.reason||'ui_not_settled',selectedCount:ids.length,rank:activeRank});
+            suiteSelfDiagnosticIssue('suite','remelt_not_confirmed',{
+              reason:result.reason||'ui_not_settled',selectedCount:ids.length,rank:activeRank,
+              response:result.response||null,confirmedByServer:!!result.ok,uncertain:remeltUncertain,
+              visibility:document.visibilityState,expectedPage,currentPage:getRemeltCurrentPage(),
+              activeRank:getRemeltActiveRank(),remainingSlots:getRemeltFilledSlotCount(),
+              filterChanged:getRemeltFilterContext()!==runContext
+            });
             remeltNotify('⚠️ Переплавка не подтверждена. Проверь карты; автоматическая работа остановлена.');
             break;
           }
@@ -9044,6 +9116,8 @@
       targetInput.addEventListener('change',()=>{settings.targetCount=Math.max(0,parseInt(targetInput.value,10)||0);targetInput.value=settings.targetCount;saveRemeltSettings(settings);});
       targetWrap.appendChild(targetInput);options.appendChild(targetWrap);
       const btn=makeRemeltBtn('🔥 Переплавка','#c2410c');btn.id='remelt-main-btn';btn.style.width='100%';btn.addEventListener('click',runRemelt);options.appendChild(btn);
+      const rankNotice=remeltEl('p',{text:'ВНИМАНИЕ: настройки для каждого ранга свои.',style:'margin:0;font-size:11px;line-height:1.5;'});
+      rankNotice.className='suite-remelt-rank-notice';body.appendChild(rankNotice);
       updateRemeltButton(false);
     }
     function saveRemeltPanelPos(left,top){gmStoreSet(REMELT_POS_KEY,{left,top});}
@@ -9055,8 +9129,10 @@
       if(document.getElementById('suite-remelt-embedded-style'))return;
       const style=document.createElement('style');style.id='suite-remelt-embedded-style';
       style.textContent=`
-        #remelt-panel.suite-remelt-embedded{position:static;width:100%;min-width:0;box-sizing:border-box;padding:12px 0;border-block:1px solid var(--rf-line,#443c36);color:var(--rf-text,#eee5dd);font:inherit;font-size:12px;}
-        #remelt-panel.suite-remelt-embedded .suite-remelt-header{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;font-size:12px;font-weight:600;}
+        #remelt-panel.suite-remelt-embedded{position:static;width:100%;min-width:0;box-sizing:border-box;padding:12px 14px;border:1px solid var(--rf-line,#443c36);border-left:3px solid var(--rf-accent,#e6b694);border-radius:12px;background:linear-gradient(110deg,rgba(230,182,148,.09),transparent 55%),var(--rf-surface,#24201d);color:var(--rf-text,#eee5dd);font:inherit;font-size:12px;}
+        #remelt-panel.suite-remelt-embedded .suite-remelt-header{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;font-size:13px;font-weight:600;}
+        #remelt-panel.suite-remelt-embedded .suite-remelt-header>span:first-child{color:var(--rf-accent,#e6b694);}
+        #remelt-panel.suite-remelt-embedded .suite-remelt-rank-notice{padding-top:9px;border-top:1px solid var(--rf-line,#443c36);color:var(--rf-muted,#b5a596);overflow-wrap:anywhere;}
         #remelt-panel.suite-remelt-embedded #suite-remelt-rank{margin-left:auto;color:var(--rf-muted,#b5a596);font-size:11px;font-weight:400;}
         #remelt-panel.suite-remelt-embedded #remelt-panel-body{display:flex;flex-direction:column;gap:12px;padding:0;}
         #remelt-panel.suite-remelt-embedded :is(.suite-remelt-criteria,.suite-remelt-options){display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;align-items:center;}
@@ -9460,12 +9536,14 @@
   function autoDiagnosticLikelyCauses(snapshot,expectation) {
     const causes=[];
     if(!snapshot.online)causes.push('browser_offline');
-    if(!snapshot.buyButton.present)causes.push('buy_button_missing_or_site_markup_changed');
-    else{
-      if(snapshot.buyButton.disabled)causes.push('buy_button_disabled');
-      if(snapshot.buyButton.display==='none'||snapshot.buyButton.visibility==='hidden')causes.push('buy_button_hidden');
+    if(expectation?.kind==='cards_after_buy'){
+      if(!snapshot.buyButton.present)causes.push('buy_button_missing_or_site_markup_changed');
+      else{
+        if(snapshot.buyButton.disabled)causes.push('buy_button_disabled');
+        if(snapshot.buyButton.display==='none'||snapshot.buyButton.visibility==='hidden')causes.push('buy_button_hidden');
+      }
+      if(!snapshot.selectedPack20)causes.push('pack_20_not_selected');
     }
-    if(!snapshot.selectedPack20)causes.push('pack_20_not_selected');
     if(snapshot.visibleLoaders.length)causes.push('site_loader_still_visible');
     if(expectation?.kind==='cards_after_buy'&&snapshot.cardCount===0)causes.push('buy_click_did_not_produce_cards');
     if(expectation?.kind==='best_card_highlight'&&snapshot.cardCount>0&&snapshot.valuedCardCount===0)causes.push('card_values_not_rendered');
@@ -9490,21 +9568,38 @@
       recentActions:autoDiagnosticActions.slice(-AUTO_DIAGNOSTIC_HISTORY_MAX)
     });
   }
+  function autoDiagnosticVisibleElapsed(startedAt) {
+    if(document.visibilityState==='hidden')return 0;
+    return Date.now()-Math.max(startedAt,suiteHealthVisibleSince);
+  }
+  function autoReconcileDiagnosticExpectation() {
+    // Passive reconciliation confirms/counts an already completed choice, never clicks.
+    if(autoPendingChoice)autoCheckChoice({passive:true});
+    if(!autoExpectation)return;
+    const kind=autoExpectation.kind;
+    const stage=document.querySelector('.packs-stage')?.getAttribute('data-pack-state');
+    if(stage==='error')return;
+    if(kind==='cards_after_buy' && hasOpenCardsReady())autoResolveExpectation('cards_appeared');
+    else if(kind==='pack_animation_ready' && (autoPackReady() || stage==='idle'))autoResolveExpectation('pack_stage_ready');
+    else if(kind==='best_card_highlight' && (!hasOpenCardsReady() || (autoPackReady() && getVisibleBestCards().length)))autoResolveExpectation('highlight_wait_finished');
+  }
   function autoCheckDiagnosticProgress(source='loop') {
     if(!cfg.autoOpenEnabled||!isAutoOpenAvailable()||autoWaitingManual){
       autoSchedulerMissingSinceAt=0;
       autoBusySinceAt=0;
       return;
     }
+    autoReconcileDiagnosticExpectation();
+    if(!cfg.autoOpenEnabled || document.visibilityState==='hidden')return;
     const now=Date.now();
     if(autoBusy){
       if(!autoBusySinceAt)autoBusySinceAt=now;
-      if(now-autoBusySinceAt>=AUTO_DIAGNOSTIC_STALL_MS){
+      if(autoDiagnosticVisibleElapsed(autoBusySinceAt)>=AUTO_DIAGNOSTIC_STALL_MS){
         autoReportDiagnosticStall('auto_open_busy_stalled',{source,busyForMs:now-autoBusySinceAt});
         autoBusySinceAt=now;
       }
     }else autoBusySinceAt=0;
-    if(!autoPackRetry&&autoExpectation&&!autoExpectation.reported&&now-autoExpectation.startedAt>=AUTO_DIAGNOSTIC_STALL_MS){
+    if(!autoPackRetry&&autoExpectation&&!autoExpectation.reported&&autoDiagnosticVisibleElapsed(autoExpectation.startedAt)>=AUTO_DIAGNOSTIC_STALL_MS){
       autoExpectation.reported=true;
       const code=autoExpectation.kind==='cards_after_buy'?'pack_cards_not_appeared'
         :autoExpectation.kind==='pack_close_after_card'?'pack_did_not_close_after_card_pick'
@@ -9514,7 +9609,7 @@
     }
     if(!autoBusy&&!autoLoopTimer&&!autoExpectation){
       if(!autoSchedulerMissingSinceAt)autoSchedulerMissingSinceAt=now;
-      if(now-autoSchedulerMissingSinceAt>=AUTO_DIAGNOSTIC_STALL_MS){
+      if(autoDiagnosticVisibleElapsed(autoSchedulerMissingSinceAt)>=AUTO_DIAGNOSTIC_STALL_MS){
         autoReportDiagnosticStall('auto_open_loop_stalled',{source,stalledForMs:now-autoSchedulerMissingSinceAt});
         autoSchedulerMissingSinceAt=now;
       }
@@ -9731,7 +9826,7 @@
       return false;
     }
     if(passive)return true;
-    if(stage==='error' || Date.now()-pending.startedAt>=AUTO_DIAGNOSTIC_STALL_MS){
+    if(stage==='error' || autoDiagnosticVisibleElapsed(pending.startedAt)>=AUTO_DIAGNOSTIC_STALL_MS){
       autoReportDiagnosticStall('pack_did_not_close_after_card_pick',{source:'choice_confirmation',stage:stage||'legacy'});
       stopAutoOpen('Выбор не подтверждён — проверь пак или окно подтверждения');
       return true;

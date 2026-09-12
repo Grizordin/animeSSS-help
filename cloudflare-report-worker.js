@@ -301,10 +301,40 @@ async function storeTelemetryBatch(env, payload, meta) {
   ).run();
 
   const duplicate = !result.meta?.changes;
+  // Re-run even for a duplicate batch: a previous invocation may have stored the
+  // batch and failed before indexing its incidents. Event keys make this idempotent.
+  for (const event of safeEvents) {
+    if (event?.event === 'self_diagnostic_incident') {
+      await registerSelfDiagnosticIncident(env.TELEMETRY_DB, event, payload, batchId, meta.time);
+    }
+  }
   const shouldNotify = !duplicate && quizIncident
     ? await registerQuizIncident(env.TELEMETRY_DB, quizIncident, batchId, meta.time)
     : false;
   return { duplicate, quizIncident: shouldNotify ? quizIncident : null };
+}
+
+async function registerSelfDiagnosticIncident(db, event, payload, batchId, receivedAt) {
+  const identity = JSON.stringify([
+    payload.installId || '', payload.sessionId || '', payload.nick || 'unknown', payload.module,
+    event.id || event
+  ]);
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(identity));
+  const incidentKey = 'self:' + Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+  const details = sanitizeTelemetryValue({
+    ...event, nick:payload.nick || 'unknown', version:payload.version,
+    path:payload.path, sessionId:payload.sessionId
+  });
+  await db.prepare(`
+    INSERT OR IGNORE INTO telemetry_incidents (
+      incident_key, batch_id, received_at, module, incident_type, nick, details_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    incidentKey, batchId, receivedAt,
+    limit(payload.module || 'suite', 40),
+    limit(event.data?.code || 'self_diagnostic_incident', 80),
+    limit(payload.nick || 'unknown', 120), JSON.stringify(details)
+  ).run();
 }
 
 function sanitizeTelemetryValue(value, key = '', depth = 0) {
