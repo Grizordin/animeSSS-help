@@ -46,6 +46,7 @@ let passed=0;const check=(v,m)=>{if(!v)throw Error(m);passed++;};
 let now=100000;Date.now=()=>now;
 let cfg={autoOpenEnabled:true,autoOpenTarget:0,modGuard:true};
 let autoPackRetry=null,autoPendingChoice=null,autoLastChosenPackId='',autoOpenedCount=0,autoBusy=false,autoExpectation=null;
+let autoRunGeneration=0;const autoCountedPackIds=new Set(),watchAutoChoice=()=>{},clearAutoChoiceWatch=()=>{};
 const AUTO_PACK_RETRY_DELAYS=[2000,5000,10000],AUTO_DIAGNOSTIC_STALL_MS=10000,AUTO_DELAY_WAIT_CLOSE=350,AUTO_DELAY_BEFORE_BUY=180,AUTO_DELAY_AFTER_BUY=1000,AUTO_DELAY_WAIT_HIGHLIGHT=500;
 let status='',reports=[],records=[],stops=[],scheduled=0,bought=0,selected=0,chosen=0,confirms=0;
 const setAutoStatus=s=>status=s;
@@ -70,7 +71,7 @@ button.addEventListener('click',()=>{
  else bought++;
 });
 function reset(){
- cfg.autoOpenEnabled=true;cfg.autoOpenTarget=0;autoPackRetry=null;autoPendingChoice=null;autoLastChosenPackId='';autoOpenedCount=0;autoBusy=false;autoExpectation=null;
+ cfg.autoOpenEnabled=true;cfg.autoOpenTarget=0;autoPackRetry=null;autoPendingChoice=null;autoLastChosenPackId='';autoOpenedCount=0;autoBusy=false;autoExpectation=null;autoCountedPackIds.clear();
  reports=[];records=[];stops=[];scheduled=0;bought=0;selected=0;chosen=0;loads=0;timer=null;activeCost=100;
  stage.dataset.packState='error';row.dataset.packId='old';row.style.display='none';button.disabled=false;button.style.display='';button.textContent='Повторить загрузку';
 }

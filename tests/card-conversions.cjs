@@ -124,9 +124,9 @@ check(brickTradeUncertain&&!notices.some(x=>x.includes('Цель выполне�
 await clickMatchingBrickCards();check(clicks===startClicks+1,'no blind repeat after timeout');
 `;
 const remeltScope=src.slice(src.indexOf('  function initRemelt'));
-const remeltFns=['getRemeltPageSelect','getRemeltCurrentPage','getRemeltActiveRank','getRemeltNeedCount','parseRemeltCardStats','getRemeltCardImage','isRemeltCardAvailable','getRemeltCards','filterRemeltCards','getRemeltStartBtn','isRemeltVisible','getRemeltActiveWrapper','getRemeltFilledSlotCount','waitForRemeltSlotsFilled','waitForRemeltStartBtn','waitAfterRemelt','runRemelt'].map(n=>extract(n,remeltScope)).join('\n');
+const remeltFns=['getRemeltPageSelect','getRemeltCurrentPage','isRemeltPageReady','getRemeltFilterContext','restoreRemeltPage','getRemeltActiveRank','getRemeltNeedCount','parseRemeltCardStats','getRemeltCardImage','isRemeltCardAvailable','getRemeltCards','filterRemeltCards','getRemeltStartBtn','isRemeltVisible','getRemeltActiveWrapper','getRemeltFilledSlotCount','waitForRemeltSlotsFilled','waitForRemeltStartBtn','waitAfterRemelt','runRemelt'].map(n=>extract(n,remeltScope)).join('\n');
 const remeltTests=String.raw`
-const remeltAbort=new AbortController();let remeltBusy=false,remeltUncertain=false,remeltHadSuccessfulRun=false;
+const remeltAbort=new AbortController();let remeltBusy=false,remeltUncertain=false,remeltHadSuccessfulRun=false,remeltUserNavigation=false;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms)),remeltNotify=t=>notices.push(t),updateRemeltButton=()=>{};
 const warnCardStatsDemandRequired=()=>false,suiteGetCurrentUserName=()=>'',getRemeltLockedImages=async()=>new Set();
 const defaultRankCfg=()=>({wantEnabled:true,wantLimit:50,ownersEnabled:true,ownersLimit:500});

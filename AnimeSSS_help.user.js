@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.66
+// @version      3.67
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -8528,6 +8528,7 @@
     window.__suiteRemeltCleanup=()=>{
       remeltCleanup.splice(0).forEach(fn=>{try{fn();}catch(e){}});
       document.getElementById('remelt-panel')?.remove();
+      document.getElementById('suite-remelt-embedded-style')?.remove();
       window.__suiteRemeltInstalled=false;
     };
     function remeltOn(target,type,handler,opts){
@@ -8578,38 +8579,89 @@
       showToast(clean);
     }
     function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
-    function getRemeltPageSelect(){return document.getElementById('choose_remelt_filter_page')||document.querySelector('.remelt__pagination select, .remelt__filter select[name*="page"], select[id*="remelt"][id*="page"], select[id*="filter_page"], select[name*="page"]');}
+    function getRemeltPageSelect(){return document.querySelector('.rf-inventory-panel #choose_filter_page')||document.getElementById('choose_remelt_filter_page')||document.querySelector('.remelt__pagination select, .remelt__filter select[name*="page"], select[id*="remelt"][id*="page"], select[id*="filter_page"], select[name*="page"]');}
     function getRemeltLastPage(){const sel=getRemeltPageSelect();if(!sel||!sel.options.length)return null;return parseInt(sel.options[sel.options.length-1].value,10);}
-    function getRemeltCurrentPage(){const sel=getRemeltPageSelect();if(!sel)return null;const n=parseInt(sel.value,10);return isNaN(n)?null:n;}
+    function getRemeltCurrentPage(){
+      // The select changes before AJAX finishes. The counter describes the rendered page.
+      const counter=document.querySelector('.rf-inventory-panel #info_filter_page, #info_filter_page');
+      const match=counter?.textContent.match(/^\s*(\d+)\s*\/\s*(\d+)\s*$/);
+      if(match)return Number(match[1])||null;
+      const sel=getRemeltPageSelect();if(!sel)return null;const n=parseInt(sel.value,10);return n>0?n:null;
+    }
+    function isRemeltPageReady(page){
+      const sel=getRemeltPageSelect();
+      if(page===null)return !sel&&!document.getElementById('info_filter_page');
+      return getRemeltCurrentPage()===page && (!sel||Number(sel.value)===page);
+    }
+    function getRemeltFilterContext(){
+      return JSON.stringify([getRemeltActiveRank(),document.querySelector('.remelt__lock-item--active')?.dataset.locked||'',
+        document.getElementById('remelt_search')?.value||'',document.querySelector('.rf-sort select, .sort-block .category-type')?.value||'']);
+    }
+    function getRemeltInventorySnapshot(){
+      const list=document.querySelector('.remelt__inventory-list');
+      return {list,first:list?.firstElementChild,signature:getRemeltInventorySignature()};
+    }
     function remeltGoToPage(pageNum){
       const sel=getRemeltPageSelect(),last=getRemeltLastPage();
-      if(!sel||!last||pageNum<1||pageNum>last)return false;
+      if(remeltAbort.signal.aborted||!sel||sel.disabled||!last||pageNum<1||pageNum>last)return false;
       sel.value=String(pageNum);
-      sel.dispatchEvent(new Event('change',{bubbles:true}));
+      remeltOwnPageChange=true;
+      try{sel.dispatchEvent(new Event('change',{bubbles:true}));}finally{remeltOwnPageChange=false;}
       return true;
     }
     function getRemeltInventorySignature(){
       return getRemeltCards().map(c=>c.dataset.id||c.getAttribute('data-id')||getRemeltCardImage(c)).join('|');
     }
-    function waitForRemeltInventoryUpdate(timeoutMs=2800){
+    function waitForRemeltInventoryUpdate(timeoutMs=2800,{before=getRemeltInventorySnapshot(),page=null,rank=getRemeltActiveRank()}={}){
       return new Promise(resolve=>{
-        const before=getRemeltInventorySignature();let done=false;
-        const finish=ok=>{if(done)return;done=true;obs.disconnect();clearInterval(poll);clearTimeout(fallback);resolve(ok);};
-        const changed=()=>getRemeltInventorySignature()!==before;
-        const check=()=>{if(remeltAbort.signal.aborted)finish(false);else if(changed())finish(true);};
+        let done=false,stableSince=0,lastState='';
+        const finish=ok=>{if(done)return;done=true;obs.disconnect();clearInterval(poll);clearTimeout(fallback);remeltAbort.signal.removeEventListener('abort',cancel);resolve(ok);};
+        const cancel=()=>finish(false);
+        const check=()=>{
+          if(remeltAbort.signal.aborted||getRemeltActiveRank()!==rank){finish(false);return;}
+          const now=getRemeltInventorySnapshot(),current=getRemeltCurrentPage();
+          const changed=now.list!==before.list||now.first!==before.first||now.signature!==before.signature;
+          if(!changed||!isRemeltPageReady(page===null?current:page)){stableSince=0;return;}
+          const state=current+'|'+now.signature;
+          if(!stableSince||state!==lastState){lastState=state;stableSince=Date.now();}
+          else if(Date.now()-stableSince>=160)finish(true);
+        };
         const obs=new MutationObserver(check);
-        obs.observe(document.body,{childList:true,subtree:true,characterData:true});
+        obs.observe(document.querySelector('.rf-inventory-panel')||document.body,{childList:true,subtree:true,characterData:true});
         const poll=setInterval(check,80);
         const fallback=setTimeout(()=>finish(false),timeoutMs);
+        remeltAbort.signal.addEventListener('abort',cancel,{once:true});queueMicrotask(check);
       });
+    }
+    async function navigateRemeltPage(page,rank=getRemeltActiveRank()){
+      const before=getRemeltInventorySnapshot();
+      if(!remeltGoToPage(page))return false;
+      // Snapshot is taken before dispatch: also detects synchronous/identical replacements.
+      return waitForRemeltInventoryUpdate(8000,{before,page,rank});
     }
     async function remeltGoToLastPage(){
       const last=getRemeltLastPage();
       const cur=getRemeltCurrentPage();
       if(!last||last<=1||cur===last)return false;
       remeltNotify(`⬇️ Иду на последнюю стр. ${last}…`);
-      if(!remeltGoToPage(last))return false;
-      return await waitForRemeltInventoryUpdate(8000)?true:null;
+      return await navigateRemeltPage(last)?true:null;
+    }
+    async function restoreRemeltPage(page,context){
+      if(remeltAbort.signal.aborted||remeltUserNavigation||getRemeltFilterContext()!==context)return false;
+      if(page===null)return isRemeltPageReady(null);
+      const last=getRemeltLastPage();
+      if(!last)return false;
+      const target=Math.min(page,last),current=getRemeltCurrentPage();
+      if(isRemeltPageReady(target))return true;
+      // Only repair a known post-exchange reset; never follow an arbitrary page jump.
+      if(current!==1)return false;
+      remeltNotify(`↩️ Сайт сбросил страницу. Возвращаюсь на стр. ${target}…`);
+      const ok=await navigateRemeltPage(target);
+      if(ok&&!remeltUserNavigation&&getRemeltFilterContext()===context){
+        suiteTelemetryLog('suite','remelt_page_restored',{from:current,previous:page,target,last});return true;
+      }
+      suiteSelfDiagnosticIssue('suite','remelt_page_restore_failed',{previous:page,current:getRemeltCurrentPage(),target,last});
+      return false;
     }
     function getRemeltActiveRank(){
       const btn=document.querySelector('.remelt__rank-item--active,[class*="rank-item--active"]');
@@ -8625,7 +8677,10 @@
         if(!clicked||clicked===lastRank)return;
         jumpPending=true;lastRank=clicked;
         try{
-          if(await waitForRemeltInventoryUpdate(8000))await remeltGoToLastPage();
+          const before=getRemeltInventorySnapshot();
+          // Let the site's target/bubble handlers activate the clicked rank first.
+          await sleep(0);
+          if(await waitForRemeltInventoryUpdate(8000,{before,rank:clicked})&&!remeltBusy)await remeltGoToLastPage();
           const body=document.getElementById('remelt-panel-body');
           if(body)renderRemeltBody(body);
         }finally{jumpPending=false;}
@@ -8765,6 +8820,13 @@
     }
 
     let remeltBusy=false,remeltHadSuccessfulRun=false,remeltUncertain=false;
+    let remeltOwnPageChange=false,remeltUserNavigation=false;
+    remeltOn(document,'change',e=>{
+      if(remeltBusy&&!remeltOwnPageChange&&(e.target===getRemeltPageSelect()||e.target.matches('.rf-sort select,#remelt_search')))remeltUserNavigation=true;
+    },true);
+    remeltOn(document,'click',e=>{
+      if(remeltBusy&&e.target.closest('.remelt__rank-item,.remelt__lock-item,.remelt__search-btn,#prev_filter_page,#next_filter_page'))remeltUserNavigation=true;
+    },true);
     function updateRemeltButton(busy=false){
       const btn=document.getElementById('remelt-main-btn');if(!btn)return;
       const isBusy=busy||remeltBusy||remeltUncertain;
@@ -8780,7 +8842,8 @@
       const settings=loadRemeltSettings();
       const target=Math.max(0,parseInt(settings.targetCount,10)||0);
       if(target<=0){remeltNotify('⛔ Укажи количество переплавок больше 0');return;}
-      remeltBusy=true;updateRemeltButton(true);
+      remeltBusy=true;remeltUserNavigation=false;updateRemeltButton(true);
+      const runContext=getRemeltFilterContext();
       try{
         let lockedImages=new Set();
         if(settings.excludeWishlist){
@@ -8792,9 +8855,14 @@
             remeltNotify('⚠️ Ник не найден, исключение желаемого пропущено');
           }
         }
+        if(remeltUserNavigation||getRemeltFilterContext()!==runContext)return;
         if(!remeltHadSuccessfulRun && await remeltGoToLastPage()===null){remeltNotify('⚠️ Список карт не обновился. Работа остановлена.');return;}
+        let expectedPage=getRemeltCurrentPage();
+        const pageSafe=()=>!remeltUserNavigation&&getRemeltFilterContext()===runContext&&isRemeltPageReady(expectedPage);
+        const pageStop=()=>remeltNotify('⚠️ Страница или фильтры изменились. Автоплавка остановлена; проверь выбранные карты.');
         let done=0;
         while(done<target&&!remeltAbort.signal.aborted){
+          if(!pageSafe()){pageStop();break;}
           const activeRank=getRemeltActiveRank();
           const need=getRemeltNeedCount(activeRank);
           const rankCfg=settings[activeRank]||defaultRankCfg();
@@ -8803,6 +8871,7 @@
           let pageNo=getRemeltCurrentPage();
           let pageStartFilled=getRemeltFilledSlotCount();
           while(getRemeltFilledSlotCount()<need&&!remeltAbort.signal.aborted){
+            if(!pageSafe()){pageStop();return;}
             if(getRemeltActiveRank()!==activeRank||document.getElementById('autoRemeltToggle')?.checked){stopped=true;break;}
             const cards=filterRemeltCards(rankCfg,activeRank,takenMap,lockedImages);
             const cur=getRemeltCurrentPage();
@@ -8810,8 +8879,8 @@
               if(cur!==null&&cur>1){
                 const addedOnPage=Math.max(0,getRemeltFilledSlotCount()-pageStartFilled);
                 remeltNotify(`⬇️ Стр. ${cur}: добавлено ${addedOnPage} карт → иду на ${cur-1}…`);
-                remeltGoToPage(cur-1);
-                if(!await waitForRemeltInventoryUpdate(8000)){remeltNotify('⚠️ Список карт не обновился. Работа остановлена.');stopped=true;break;}
+                if(!await navigateRemeltPage(cur-1,activeRank)){remeltNotify('⚠️ Список карт не обновился. Работа остановлена.');stopped=true;break;}
+                expectedPage=cur-1;
                 pageNo=getRemeltCurrentPage();
                 pageStartFilled=getRemeltFilledSlotCount();
                 continue;
@@ -8823,6 +8892,7 @@
               pageStartFilled=getRemeltFilledSlotCount();
             }
             for(const card of cards){
+              if(!pageSafe()){pageStop();return;}
               if(remeltAbort.signal.aborted || getRemeltActiveRank()!==activeRank || document.getElementById('autoRemeltToggle')?.checked){stopped=true;break;}
               if(getRemeltFilledSlotCount()>=need)break;
               const beforeFilled=getRemeltFilledSlotCount();
@@ -8857,6 +8927,7 @@
             continue;
           }
           const startBtn=await waitForRemeltStartBtn();
+          if(!pageSafe()){pageStop();break;}
           if(!startBtn || getRemeltActiveRank()!==activeRank || document.getElementById('autoRemeltToggle')?.checked){remeltNotify('⛔ Переплавка сейчас недоступна');break;}
           const wrapper=getRemeltActiveWrapper(activeRank);
           if(!wrapper){remeltNotify('⛔ Поле переплавки изменилось');break;}
@@ -8874,6 +8945,10 @@
           done++;
           remeltHadSuccessfulRun=true;
           remeltNotify(`✅ Переплавка ${done}/${target}`);
+          if(!await restoreRemeltPage(expectedPage,runContext)){
+            remeltNotify(`⚠️ Не удалось подтвердить страницу. Выполнено ${done}/${target}; автоплавка остановлена.`);break;
+          }
+          expectedPage=getRemeltCurrentPage();
           getRemeltCards().forEach(c=>{delete c.dataset.suiteRemeltPicked;});
           await sleep(500);
         }
@@ -8885,7 +8960,7 @@
     function remeltEl(tag,{style='',text=''}={}){const e=document.createElement(tag);if(style)e.style.cssText=style;if(text)e.textContent=text;return e;}
     function remeltSep(){return remeltEl('div',{style:'height:1px;background:rgba(255,255,255,0.07);margin:1px 0;'});}
     function makeRemeltBtn(text,bg){
-      const b=document.createElement('button');b.textContent=text;
+      const b=document.createElement('button');b.type='button';b.textContent=text;
       b.style.cssText=`padding:8px 0;border:none;border-radius:7px;background:${bg};color:#fff;font-weight:700;font-size:13px;cursor:pointer;transition:filter .15s`;
       b.onmouseenter=()=>{if(!b.disabled)b.style.filter='brightness(.92)';};
       b.onmouseleave=()=>{b.style.filter='';};
@@ -8894,11 +8969,13 @@
     function updateRemeltCfg(settings,rank,key,value){if(!settings[rank])settings[rank]=defaultRankCfg();settings[rank][key]=value;saveRemeltSettings(settings);}
     function makeRemeltCriterion({label,hint,enabled,value,onToggle,onChange}){
       const wrap=remeltEl('div',{style:'display:flex;flex-direction:column;gap:5px;'});
+      wrap.className='suite-remelt-criterion';
       const row1=document.createElement('label');row1.style.cssText='display:flex;align-items:center;gap:7px;cursor:pointer;';
       const chk=document.createElement('input');chk.type='checkbox';chk.checked=enabled;chk.style.cssText='width:15px;height:15px;cursor:pointer;accent-color:#c2410c;';
       row1.append(chk,remeltEl('span',{style:'font-weight:600;',text:label}));
       const row2=remeltEl('div',{style:'display:flex;align-items:center;gap:6px;padding-left:22px;'});
       const inp=document.createElement('input');inp.type='number';inp.min='0';inp.step='1';inp.value=value;
+      inp.setAttribute('aria-label',label.replace(/^[^А-Яа-я]+/,'')+' — порог');
       inp.style.cssText='width:72px;height:28px;padding:3px 7px;border:1px solid rgba(255,255,255,.15);border-radius:6px;background:rgba(0,0,0,.35);color:#fff;outline:none;font-size:13px;box-sizing:border-box;';
       const setDim=en=>{inp.disabled=!en;row2.style.opacity=en?'1':'0.4';};setDim(enabled);
       chk.addEventListener('change',()=>{setDim(chk.checked);onToggle(chk.checked);});
@@ -8908,6 +8985,7 @@
     }
     function makeRemeltWishlistSection(settings){
       const wrap=remeltEl('div',{style:'display:flex;flex-direction:column;gap:5px;'});
+      wrap.className='suite-remelt-wishlist';
       const row=document.createElement('label');row.style.cssText='display:flex;align-items:center;gap:7px;cursor:pointer;';
       const chk=document.createElement('input');chk.type='checkbox';chk.checked=!!settings.excludeWishlist;chk.style.cssText='width:15px;height:15px;cursor:pointer;accent-color:#c2410c;';
       row.append(chk,remeltEl('span',{style:'font-weight:600;',text:'🔒 Исключать желаемое'}));
@@ -8916,23 +8994,34 @@
       wrap.append(row,hint);return wrap;
     }
     function renderRemeltBody(body){
+      if(!body?.isConnected||remeltAbort.signal.aborted)return;
       body.innerHTML='';
       const settings=loadRemeltSettings(),rank=getRemeltActiveRank(),rankCfg=settings[rank]||defaultRankCfg();
-      body.appendChild(remeltEl('div',{style:'font-size:11px;color:#718096;font-weight:600;letter-spacing:.04em;text-transform:uppercase;',text:`Ранг: ${rank.toUpperCase()} · карт на переплавку: ${getRemeltNeedCount(rank)}`}));
+      const embedded=body.parentElement.classList.contains('suite-remelt-embedded');
+      const criteria=embedded?remeltEl('div'):body,options=embedded?remeltEl('div'):body;
+      const rankText=`Ранг: ${rank.toUpperCase()} · карт на переплавку: ${getRemeltNeedCount(rank)}`;
+      if(embedded){
+        criteria.className='suite-remelt-criteria';options.className='suite-remelt-options';body.append(criteria,options);
+        document.getElementById('suite-remelt-rank').textContent=rankText;
+      }else{
+      body.appendChild(remeltEl('div',{style:'font-size:11px;color:#718096;font-weight:600;letter-spacing:.04em;text-transform:uppercase;',text:rankText}));
       body.appendChild(remeltSep());
-      body.appendChild(makeRemeltCriterion({label:'❤️ Хотят получить',hint:'меньше →',enabled:rankCfg.wantEnabled,value:rankCfg.wantLimit,onToggle:v=>updateRemeltCfg(settings,rank,'wantEnabled',v),onChange:v=>updateRemeltCfg(settings,rank,'wantLimit',v)}));
-      body.appendChild(makeRemeltCriterion({label:'📋 Дубли на руках',hint:'больше →',enabled:rankCfg.dupEnabled,value:rankCfg.dupLimit,onToggle:v=>updateRemeltCfg(settings,rank,'dupEnabled',v),onChange:v=>updateRemeltCfg(settings,rank,'dupLimit',v)}));
-      body.appendChild(makeRemeltCriterion({label:'👥 Владельцев',hint:'больше →',enabled:rankCfg.ownersEnabled,value:rankCfg.ownersLimit,onToggle:v=>updateRemeltCfg(settings,rank,'ownersEnabled',v),onChange:v=>updateRemeltCfg(settings,rank,'ownersLimit',v)}));
-      body.appendChild(remeltSep());
-      body.appendChild(makeRemeltWishlistSection(settings));
-      body.appendChild(remeltSep());
+      }
+      criteria.appendChild(makeRemeltCriterion({label:'❤️ Хотят получить',hint:'меньше →',enabled:rankCfg.wantEnabled,value:rankCfg.wantLimit,onToggle:v=>updateRemeltCfg(settings,rank,'wantEnabled',v),onChange:v=>updateRemeltCfg(settings,rank,'wantLimit',v)}));
+      criteria.appendChild(makeRemeltCriterion({label:'👥 Владеют',hint:'больше →',enabled:rankCfg.ownersEnabled,value:rankCfg.ownersLimit,onToggle:v=>updateRemeltCfg(settings,rank,'ownersEnabled',v),onChange:v=>updateRemeltCfg(settings,rank,'ownersLimit',v)}));
+      criteria.appendChild(makeRemeltCriterion({label:'📋 Дубли на руках',hint:'больше →',enabled:rankCfg.dupEnabled,value:rankCfg.dupLimit,onToggle:v=>updateRemeltCfg(settings,rank,'dupEnabled',v),onChange:v=>updateRemeltCfg(settings,rank,'dupLimit',v)}));
+      if(!embedded)body.appendChild(remeltSep());
+      options.appendChild(makeRemeltWishlistSection(settings));
+      if(!embedded)body.appendChild(remeltSep());
       const targetWrap=remeltEl('div',{style:'display:flex;flex-direction:column;gap:5px;'});
+      targetWrap.className='suite-remelt-target';
       targetWrap.appendChild(remeltEl('div',{style:'font-weight:600;',text:'🔥 Количество переплавок'}));
       const targetInput=document.createElement('input');targetInput.type='number';targetInput.min='1';targetInput.step='1';targetInput.value=Math.max(0,parseInt(settings.targetCount,10)||0);
+      targetInput.setAttribute('aria-label','Количество переплавок');
       targetInput.style.cssText='width:100%;height:30px;padding:3px 8px;border:1px solid rgba(255,255,255,.15);border-radius:6px;background:rgba(0,0,0,.35);color:#fff;outline:none;font-size:13px;box-sizing:border-box;';
       targetInput.addEventListener('change',()=>{settings.targetCount=Math.max(0,parseInt(targetInput.value,10)||0);targetInput.value=settings.targetCount;saveRemeltSettings(settings);});
-      targetWrap.appendChild(targetInput);body.appendChild(targetWrap);
-      const btn=makeRemeltBtn('🔥 Переплавка','#c2410c');btn.id='remelt-main-btn';btn.style.width='100%';btn.addEventListener('click',runRemelt);body.appendChild(btn);
+      targetWrap.appendChild(targetInput);options.appendChild(targetWrap);
+      const btn=makeRemeltBtn('🔥 Переплавка','#c2410c');btn.id='remelt-main-btn';btn.style.width='100%';btn.addEventListener('click',runRemelt);options.appendChild(btn);
       updateRemeltButton(false);
     }
     function saveRemeltPanelPos(left,top){gmStoreSet(REMELT_POS_KEY,{left,top});}
@@ -8940,31 +9029,70 @@
     function makeRemeltPanelDraggable(panel,handle){
       makeDraggable(panel,handle,saveRemeltPanelPos);
     }
+    function injectRemeltEmbeddedStyle(){
+      if(document.getElementById('suite-remelt-embedded-style'))return;
+      const style=document.createElement('style');style.id='suite-remelt-embedded-style';
+      style.textContent=`
+        #remelt-panel.suite-remelt-embedded{position:static;width:100%;min-width:0;box-sizing:border-box;padding:12px 0;border-block:1px solid var(--rf-line,#443c36);color:var(--rf-text,#eee5dd);font:inherit;font-size:12px;}
+        #remelt-panel.suite-remelt-embedded .suite-remelt-header{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;font-size:12px;font-weight:600;}
+        #remelt-panel.suite-remelt-embedded #suite-remelt-rank{margin-left:auto;color:var(--rf-muted,#b5a596);font-size:11px;font-weight:400;}
+        #remelt-panel.suite-remelt-embedded #remelt-panel-body{display:flex;flex-direction:column;gap:12px;padding:0;}
+        #remelt-panel.suite-remelt-embedded :is(.suite-remelt-criteria,.suite-remelt-options){display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;align-items:center;}
+        #remelt-panel.suite-remelt-embedded .suite-remelt-criterion{padding:10px 12px;border:1px solid var(--rf-line,#443c36);border-radius:9px;background:var(--rf-soft,#2b2622);min-width:0;}
+        #remelt-panel.suite-remelt-embedded :is(.suite-remelt-target,.suite-remelt-wishlist){min-width:0;}
+        #remelt-panel.suite-remelt-embedded input[type=checkbox]{appearance:auto;width:15px;height:15px;min-width:15px;padding:0;margin:0;accent-color:var(--rf-accent,#e6b694)!important;}
+        #remelt-panel.suite-remelt-embedded input[type=number]{width:78px!important;max-width:100%;min-width:0;height:32px!important;margin:0;padding:4px 8px!important;border:1px solid var(--rf-line,#443c36)!important;border-radius:7px;background:var(--rf-surface,#24201d)!important;color:var(--rf-text,#eee5dd)!important;font:inherit!important;box-sizing:border-box;}
+        #remelt-panel.suite-remelt-embedded .suite-remelt-target input{width:100%!important;}
+        #remelt-panel.suite-remelt-embedded :is(.suite-remelt-criterion>div>span,.suite-remelt-wishlist>div){color:var(--rf-muted,#b5a596)!important;overflow-wrap:anywhere;}
+        #remelt-panel.suite-remelt-embedded button{min-height:34px;margin:0;padding:7px 10px!important;border:1px solid var(--rf-line,#443c36)!important;border-radius:8px!important;background:var(--rf-soft,#2b2622)!important;color:var(--rf-text,#eee5dd)!important;font:inherit!important;cursor:pointer;white-space:normal;}
+        #remelt-panel.suite-remelt-embedded #remelt-main-btn{background:var(--rf-rank-ui,var(--rf-action,#885939))!important;color:#fff!important;font-weight:600!important;}
+        #remelt-panel.suite-remelt-embedded button:hover{filter:brightness(1.08);}
+        #remelt-panel.suite-remelt-embedded button:disabled{opacity:.55;cursor:not-allowed;}
+        #remelt-panel.suite-remelt-embedded :is(button,input):focus-visible{outline:2px solid var(--rf-accent,#e6b694)!important;outline-offset:2px;}
+        #remelt-panel.suite-remelt-embedded .suite-remelt-toggle{padding:0 8px!important;min-height:26px;}
+        @media(max-width:700px){#remelt-panel.suite-remelt-embedded :is(.suite-remelt-criteria,.suite-remelt-options){grid-template-columns:minmax(0,1fr);gap:10px;}}
+      `;
+      (document.head||document.documentElement).appendChild(style);
+    }
     function buildRemeltPanel(){
       if(document.getElementById('remelt-panel'))return;
+      const rankRow=document.querySelector('.rf-inventory-panel .rf-filters .rf-filter-row');
       const panel=document.createElement('div');panel.id='remelt-panel';
       panel.style.cssText='position:fixed;top:80px;right:20px;z-index:999;width:270px;background:rgba(12,12,22,.98);color:#e2e8f0;border-radius:12px;box-shadow:0 8px 40px rgba(0,0,0,.7);font-family:sans-serif;font-size:13px;user-select:none;border:1px solid rgba(255,255,255,.09);overflow:hidden;';
       const header=document.createElement('div');header.style.cssText='padding:9px 14px;background:linear-gradient(90deg,#7c2d12,#c2410c);cursor:move;font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:space-between;';
       const title=document.createElement('span');title.textContent='🔥 Переплавка';
       appendCrown(title);
       const toggle=document.createElement('button');toggle.textContent='−';toggle.style.cssText='background:transparent;border:none;color:#fff;cursor:pointer;font-size:18px;line-height:1;padding:0 2px;';
+      toggle.type='button';toggle.setAttribute('aria-label','Свернуть настройки переплавки');toggle.setAttribute('aria-expanded','true');toggle.setAttribute('aria-controls','remelt-panel-body');
       header.append(title,toggle);
       const body=document.createElement('div');body.id='remelt-panel-body';body.style.cssText='padding:12px 14px;display:flex;flex-direction:column;gap:10px;';
-      panel.append(header,body);document.body.appendChild(panel);
+      panel.append(header,body);
+      if(rankRow){
+        injectRemeltEmbeddedStyle();panel.className='suite-remelt-embedded';panel.removeAttribute('style');
+        header.removeAttribute('style');header.className='suite-remelt-header';body.removeAttribute('style');
+        toggle.removeAttribute('style');toggle.className='suite-remelt-toggle';
+        const rankCaption=remeltEl('span');rankCaption.id='suite-remelt-rank';header.insertBefore(rankCaption,toggle);
+        rankRow.insertAdjacentElement('afterend',panel);
+      }else document.body.appendChild(panel);
       let collapsed=false;toggle.addEventListener('click',()=>{
         collapsed=!collapsed;
-        suiteApplyCollapsibleState(panel,collapsed,()=>{
+        const apply=()=>{
           body.style.display=collapsed?'none':'flex';
           toggle.textContent=collapsed?'+':'−';
-        });
+          toggle.setAttribute('aria-expanded',String(!collapsed));
+          toggle.setAttribute('aria-label',(collapsed?'Развернуть':'Свернуть')+' настройки переплавки');
+        };
+        if(rankRow)apply();else suiteApplyCollapsibleState(panel,collapsed,apply);
       });
-      makeRemeltPanelDraggable(panel,header);
+      if(!rankRow){makeRemeltPanelDraggable(panel,header);
       const pos=loadRemeltPanelPos();if(pos){const margin=8;const left=Math.min(Math.max(margin,pos.left),Math.max(margin,window.innerWidth-panel.offsetWidth-margin));const top=Math.min(Math.max(margin,pos.top),Math.max(margin,window.innerHeight-panel.offsetHeight-margin));panel.style.right='auto';panel.style.left=left+'px';panel.style.top=top+'px';}
+      }
       renderRemeltBody(body);
     }
     buildRemeltPanel();
     initRemeltRankWatcher();
-    setTimeout(()=>remeltGoToLastPage(),700);
+    const initialPageTimer=setTimeout(()=>{if(!remeltBusy&&!remeltAbort.signal.aborted)remeltGoToLastPage();},700);
+    remeltCleanup.push(()=>clearTimeout(initialPageTimer));
   }
 
   // ============================================================
@@ -9210,6 +9338,8 @@
   let autoLoopTimer=null, autoOpenedCount=Number(cfg.autoOpenedCount)||0, autoWaitingManual=false, autoBusy=false;
   let autoLastChosenPackId='', autoManualPackId='';
   let autoPendingChoice=null;
+  let autoChoiceObserver=null,autoChoiceTimer=null,autoRunGeneration=0;
+  const autoCountedPackIds=new Set();
   let autoPackRetry=null;
   const AUTO_PACK_RETRY_DELAYS=[2000,5000,10000];
   let autoPausedAfterReload=false;
@@ -9388,6 +9518,8 @@
     saveCfg();
   }
   function resetAutoOpenedCount() {
+    if(autoPendingChoice){stopAutoOpen('Сначала дождись подтверждения выбранной карты');return;}
+    stopAutoOpen('Счётчик сброшен');
     autoOpenedCount=0;
     cfg.autoOpenedCount=0;
     saveCfg();
@@ -9397,17 +9529,13 @@
     if(!cfg.autoOpenEnabled || autoPausedAfterReload) return;
     cfg.autoOpenEnabled=false;
     autoPausedAfterReload=true;
-    const limit=Number(cfg.autoOpenTarget)||0;
-    if(limit>0 && autoOpenedCount>=limit) {
-      resetAutoOpenedCount();
-    } else {
-      saveCfg();
-    }
+    saveCfg();
     if(hasActivePremium()) savePremiumDesiredSettings();
     if(autoRunInput) autoRunInput.checked=false;
     updateAutoOpenPanel();
   }
   function stopAutoOpen(reason='Остановлено') {
+    autoRunGeneration++;
     autoResolveExpectation('auto_stopped');
     cfg.autoOpenEnabled=false; saveCfg();
     if(autoRunInput) autoRunInput.checked=false;
@@ -9416,7 +9544,7 @@
     autoOpenSuppressGuard=false;
     autoPausedAfterReload=false;
     autoLastChosenPackId=''; autoManualPackId='';
-    autoPendingChoice=null;
+    // A dispatched choice may finish after Stop. Keep its confirmation and count it once.
     setAutoStatus(reason);
     autoPackRetry=null;
     updateAutoCount();
@@ -9493,10 +9621,26 @@
       && !row.querySelector('.lootbox__list.step1,.lootbox__list.packs-slot-reveal');
   }
   function autoBeginChoice(card) {
+    if(autoPendingChoice)return false;
     const row=card.closest('.lootbox__row[data-pack-id]');
+    if(!row?.getAttribute('data-pack-id'))return false;
     autoLastChosenPackId=row?.getAttribute('data-pack-id')||'';
     autoPendingChoice={row,packId:autoLastChosenPackId,cardId:card.getAttribute('data-id'),startedAt:Date.now()};
     autoStartExpectation('pack_close_after_card',{packId:autoLastChosenPackId,card:getAutoCardIdentity(card)});
+    watchAutoChoice();
+    return true;
+  }
+  function clearAutoChoiceWatch(){
+    autoChoiceObserver?.disconnect();autoChoiceObserver=null;
+    clearTimeout(autoChoiceTimer);autoChoiceTimer=null;
+  }
+  function watchAutoChoice(){
+    clearAutoChoiceWatch();
+    if(!autoPendingChoice)return;
+    // Only observe while an actual choice is pending, including a stopped run.
+    autoChoiceObserver=new MutationObserver(()=>autoCheckChoice({passive:true}));
+    autoChoiceObserver.observe(document.querySelector('.lootbox')||document.querySelector('.packs-stage')||document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['data-pack-id','data-pack-state']});
+    autoChoiceTimer=setTimeout(()=>{clearAutoChoiceWatch();autoCheckChoice({passive:true});},AUTO_DIAGNOSTIC_STALL_MS);
   }
   function getAutoPackRetryButton() {
     return [...document.querySelectorAll('.lootbox__footer .lootbox__open-btn')].find(button=>
@@ -9544,20 +9688,27 @@
     setAutoStatus('Жду повторной загрузки паков...');
     scheduleAutoLoop(AUTO_DELAY_WAIT_CLOSE);return true;
   }
-  function autoCheckChoice() {
+  function autoCheckChoice({passive=false}={}) {
     if(!autoPendingChoice)return false;
     const pending=autoPendingChoice;
     const stage=document.querySelector('.packs-stage')?.getAttribute('data-pack-state');
     if(stage!=='error' && (!pending.row?.isConnected || pending.row.getAttribute('data-pack-id')!==pending.packId)){
       // The site's successful choose handler removes the old pack id before loadPacks.
       autoPendingChoice=null;
+      clearAutoChoiceWatch();
       autoResolveExpectation('card_pick_confirmed_by_pack_change');
-      autoOpenedCount++;
+      if(!autoCountedPackIds.has(pending.packId)){
+        autoCountedPackIds.add(pending.packId);
+        if(autoCountedPackIds.size>200)autoCountedPackIds.delete(autoCountedPackIds.values().next().value);
+        autoOpenedCount++;
+      }
       saveAutoOpenedCount(); updateAutoCount();
       const limit=Number(cfg.autoOpenTarget)||0;
       if(limit>0 && autoOpenedCount>=limit){stopAutoOpen('Готово');return true;}
+      if(passive&&cfg.autoOpenEnabled)scheduleAutoLoop(AUTO_DELAY_AFTER_PICK);
       return false;
     }
+    if(passive)return true;
     if(stage==='error' || Date.now()-pending.startedAt>=AUTO_DIAGNOSTIC_STALL_MS){
       autoReportDiagnosticStall('pack_did_not_close_after_card_pick',{source:'choice_confirmation',stage:stage||'legacy'});
       stopAutoOpen('Выбор не подтверждён — проверь пак или окно подтверждения');
@@ -9595,13 +9746,14 @@
       setAutoStatus('Включи ценность и подсветку');
       return;
     }
+    autoRunGeneration++;
     cfg.autoOpenEnabled=true; saveCfg();
     autoResolveExpectation('auto_restarted');
     autoPackRetry=null;
     ensureAutoDiagnosticTimer();
     autoPausedAfterReload=false;
     autoWaitingManual=false;
-    autoPendingChoice=null;
+    if(autoPendingChoice)watchAutoChoice();
     autoLastChosenPackId='';
     autoOpenSuppressGuard=false;
     autoBusy=false;
@@ -9611,15 +9763,17 @@
   }
   function autoClickBestCard(card) {
     autoBusy=true;
+    const generation=autoRunGeneration;
     const extraDelay=needsAutoRareViewDelay(card)?AUTO_DELAY_RARE_VIEW:0;
     setAutoStatus('Выбираю лучшую карту...');
     if(extraDelay)setAutoStatus('Редкая карта, пауза 3 сек...');
     const choose=()=>{
+      if(generation!==autoRunGeneration)return;
       if(!cfg.autoOpenEnabled){ autoBusy=false; return; }
       if(!autoPackReady() || !card.isConnected || card.closest('.lootbox__row')!==getActiveRow()){
         autoBusy=false; scheduleAutoLoop(AUTO_DELAY_WAIT_CLOSE); return;
       }
-      autoBeginChoice(card);
+      if(!autoBeginChoice(card)){autoBusy=false;return;}
       autoDiagnosticRecord('card_click',{packId:autoLastChosenPackId,card:getAutoCardIdentity(card)});
       autoOpenSuppressGuard=true;
       try {
@@ -9643,9 +9797,11 @@
       return;
     }
     autoBusy=true;
+    const generation=autoRunGeneration;
     setAutoStatus('Покупаю пак...');
     selectPack20();
     setTimeout(()=>{
+      if(generation!==autoRunGeneration)return;
       if(!cfg.autoOpenEnabled){ autoBusy=false; return; }
       if(autoHandlePackRetry()){ autoBusy=false; return; }
       const stage=document.querySelector('.packs-stage')?.getAttribute('data-pack-state');
@@ -9727,6 +9883,7 @@
     pauseAutoOpenAfterReload();
     autoPanel=document.createElement('div');
     autoPanel.id='cv-auto-open-panel';
+    const heading=document.querySelector('.packs-page .packs-shop-heading');
     autoPanel.style.cssText=[
       'position:fixed',
       'left:14px',
@@ -9746,6 +9903,7 @@
     ].join(';');
 
     const hdr=document.createElement('div');
+    hdr.className='cv-auto-header';
     hdr.style.cssText=[
       'display:flex',
       'align-items:center',
@@ -9760,6 +9918,7 @@
     const close=document.createElement('button');
     close.type='button';
     close.textContent='×';
+    close.setAttribute('aria-label','Выключить модуль автооткрытия');
     close.style.cssText=[
       'background:none',
       'border:none',
@@ -9778,6 +9937,7 @@
     hdr.append(title,close);
 
     const body=document.createElement('div');
+    body.className='cv-auto-body';
     body.style.cssText=[
       'padding:12px 14px',
       'display:flex',
@@ -9788,6 +9948,7 @@
       'overscroll-behavior:contain'
     ].join(';');
     const runRow=document.createElement('div');
+    runRow.className='cv-auto-run';
     runRow.style.cssText=[
       'display:flex',
       'align-items:center',
@@ -9799,6 +9960,7 @@
     const runToggle=document.createElement('label'); runToggle.className='suite-toggle';
     autoRunInput=document.createElement('input');
     autoRunInput.type='checkbox';
+    autoRunInput.setAttribute('aria-label','Работа автооткрытия');
     autoRunInput.checked=!!cfg.autoOpenEnabled;
     const runSlider=document.createElement('span'); runSlider.className='suite-slider';
     runToggle.append(autoRunInput,runSlider); runRow.append(runLabel,runToggle);
@@ -9811,9 +9973,11 @@
       'font-size:11px',
       'color:#64748b'
     ].join(';');
-    countWrap.textContent='Количество паков (0 = без лимита и сброс)';
+    countWrap.className='cv-auto-target';
+    countWrap.textContent='Лимит открытий · 0 = без лимита';
     autoTargetInput=document.createElement('input');
     autoTargetInput.type='number';
+    autoTargetInput.setAttribute('aria-label','Лимит открытий');
     autoTargetInput.min='0';
     autoTargetInput.step='1';
     autoTargetInput.value=Number(cfg.autoOpenTarget)||0;
@@ -9831,6 +9995,7 @@
     countWrap.appendChild(autoTargetInput);
 
     autoStatusEl=document.createElement('div');
+    autoStatusEl.className='cv-auto-status';autoStatusEl.setAttribute('role','status');
     autoStatusEl.style.cssText=[
       'min-height:18px',
       'padding:7px 8px',
@@ -9842,10 +10007,20 @@
       'border:1px solid rgba(255,255,255,.06)'
     ].join(';');
     autoCountEl=document.createElement('div');
+    autoCountEl.className='cv-auto-count';
     autoCountEl.style.cssText='font-size:11px;color:#67e8f9;text-align:right;font-weight:700';
-    body.append(runRow,countWrap,autoStatusEl,autoCountEl);
+    const progress=document.createElement('div');progress.className='cv-auto-progress';
+    const progressLabel=document.createElement('span');progressLabel.textContent='Открыто паков';
+    const reset=document.createElement('button');reset.type='button';reset.className='cv-auto-reset';reset.textContent='Сбросить';reset.title='Остановить автооткрытие и начать отсчёт заново';
+    reset.addEventListener('click',resetAutoOpenedCount);
+    progress.append(progressLabel,autoCountEl,reset);
+    body.append(runRow,countWrap,progress,autoStatusEl);
     autoPanel.append(hdr,body);
-    document.body.appendChild(autoPanel);
+    if(heading){
+      injectAutoEmbeddedStyle();autoPanel.classList.add('cv-auto-embedded');
+      autoPanel.removeAttribute('style');hdr.removeAttribute('style');body.removeAttribute('style');runRow.removeAttribute('style');
+      heading.insertAdjacentElement('afterend',autoPanel);
+    }else document.body.appendChild(autoPanel);
     ensureAutoDiagnosticTimer();
 
     autoRunInput.addEventListener('change',()=>{
@@ -9855,20 +10030,18 @@
     });
     autoTargetInput.addEventListener('change',()=>{
       const nextTarget=Math.max(0,parseInt(autoTargetInput.value,10)||0);
-      const currentTarget=Number(cfg.autoOpenTarget)||0;
-      const shouldReset=nextTarget===0 || nextTarget!==currentTarget;
       cfg.autoOpenTarget=nextTarget;
       autoTargetInput.value=cfg.autoOpenTarget;
-      if(shouldReset) resetAutoOpenedCount();
-      else { saveCfg(); updateAutoCount(); }
+      saveCfg(); updateAutoCount();
+      if(nextTarget>0&&autoOpenedCount>=nextTarget&&cfg.autoOpenEnabled)stopAutoOpen('Лимит достигнут');
     });
 
-    if(cfg.autoPanelLeft!==null && cfg.autoPanelTop!==null){
+    if(!heading&&cfg.autoPanelLeft!==null && cfg.autoPanelTop!==null){
       autoPanel.style.transform='none';
       autoPanel.style.left=cfg.autoPanelLeft+'px';
       autoPanel.style.top=cfg.autoPanelTop+'px';
     }
-    makeDraggable(autoPanel,hdr,(left,top)=>{ cfg.autoPanelLeft=left; cfg.autoPanelTop=top; saveCfg(); });
+    if(!heading)makeDraggable(autoPanel,hdr,(left,top)=>{ cfg.autoPanelLeft=left; cfg.autoPanelTop=top; saveCfg(); });
     updateAutoOpenPanel();
     if(cfg.autoOpenEnabled && isAutoOpenAvailable()) scheduleAutoLoop(300);
   }
@@ -9879,7 +10052,33 @@
     if(autoRunInput) autoRunInput.checked=!!cfg.autoOpenEnabled;
     setAutoStatus(cfg.autoOpenEnabled?'Работает':(autoPausedAfterReload?'Пауза после перезагрузки':'Остановлено'));
     updateAutoCount();
-    if(autoPanel.style.display!=='none') requestAnimationFrame(()=>suiteClampToViewport(autoPanel,{margin:8,constrainSize:true}));
+    if(autoPanel.style.display!=='none'&&!autoPanel.classList.contains('cv-auto-embedded')) requestAnimationFrame(()=>suiteClampToViewport(autoPanel,{margin:8,constrainSize:true}));
+  }
+  function injectAutoEmbeddedStyle(){
+    if(document.getElementById('cv-auto-embedded-style'))return;
+    const style=document.createElement('style');style.id='cv-auto-embedded-style';
+    style.textContent=`
+      #cv-auto-open-panel.cv-auto-embedded{position:static;width:100%;min-width:0;box-sizing:border-box;border:1px solid var(--bdc,#303030);border-radius:var(--pack-radius,18px);background:var(--bg-2,#1b1b1b);color:var(--tt,#eee);text-align:left;overflow:hidden;}
+      #cv-auto-open-panel.cv-auto-embedded .cv-auto-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;border-bottom:1px solid var(--bdc,#303030);color:var(--tt,#eee);}
+      #cv-auto-open-panel.cv-auto-embedded .cv-auto-body{display:grid;grid-template-columns:minmax(120px,.7fr) minmax(160px,1fr) minmax(180px,1fr);gap:14px;padding:18px;align-items:center;}
+      #cv-auto-open-panel.cv-auto-embedded .cv-auto-run{display:flex;align-items:center;justify-content:space-between;gap:12px;}
+      #cv-auto-open-panel.cv-auto-embedded :is(.cv-auto-run>span,.cv-auto-target,.cv-auto-progress>span){color:var(--tt-2,#aaa)!important;font-size:12px!important;}
+      #cv-auto-open-panel.cv-auto-embedded .cv-auto-target input{height:38px;background:var(--bg,#111)!important;color:var(--tt,#eee)!important;border-color:var(--bdc,#303030)!important;}
+      #cv-auto-open-panel.cv-auto-embedded .cv-auto-progress{display:grid;grid-template-columns:1fr auto;gap:6px 12px;align-items:center;min-width:0;}
+      #cv-auto-open-panel.cv-auto-embedded .cv-auto-count{grid-row:2;grid-column:1;text-align:left!important;font-size:22px!important;color:var(--accent,#9e294f)!important;overflow-wrap:anywhere;}
+      #cv-auto-open-panel.cv-auto-embedded .cv-auto-reset{grid-column:2;grid-row:1/3;background:var(--bg,#111);color:var(--tt,#eee);border:1px solid var(--bdc,#303030);padding:8px 10px;border-radius:8px;font:inherit;font-size:12px;cursor:pointer;}
+      #cv-auto-open-panel.cv-auto-embedded .cv-auto-status{grid-column:1/-1;background:var(--bg,#111)!important;color:var(--tt-2,#aaa)!important;border-color:var(--bdc,#303030)!important;padding:10px 12px!important;}
+      #cv-auto-open-panel.cv-auto-embedded .suite-toggle{width:38px;height:22px;flex-basis:38px;}
+      #cv-auto-open-panel.cv-auto-embedded .suite-slider{width:38px;height:22px;background:var(--bdc,#303030);border:0;box-shadow:none;}
+      #cv-auto-open-panel.cv-auto-embedded .suite-slider:before{width:18px;height:18px;background:var(--tt-2,#aaa);border:0;box-shadow:none;}
+      #cv-auto-open-panel.cv-auto-embedded .suite-slider:after{display:none;}
+      #cv-auto-open-panel.cv-auto-embedded .suite-toggle input:checked+.suite-slider{background:var(--accent,#9e294f);box-shadow:none;}
+      #cv-auto-open-panel.cv-auto-embedded .suite-toggle input:checked+.suite-slider:before{transform:translateX(16px);background:#fff;box-shadow:none;}
+      #cv-auto-open-panel.cv-auto-embedded .suite-toggle input:focus-visible+.suite-slider{outline-color:var(--accent,#9e294f);}
+      #cv-auto-open-panel.cv-auto-embedded :is(button,input):focus-visible{outline:2px solid var(--accent,#9e294f)!important;outline-offset:3px;}
+      @media(max-width:700px){#cv-auto-open-panel.cv-auto-embedded .cv-auto-body{grid-template-columns:minmax(0,1fr);padding:14px;}#cv-auto-open-panel.cv-auto-embedded .cv-auto-run{padding-bottom:10px;border-bottom:1px solid var(--bdc,#303030);}}
+    `;
+    (document.head||document.documentElement).appendChild(style);
   }
 
   // ============================================================
