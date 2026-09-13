@@ -15,7 +15,7 @@ function extract(name) {
   }
   throw Error('Cannot extract ' + name);
 }
-const functions = ['addNeonToCard','clearNeonFromCard','getNeonCardType','applyNeonToCard',
+const functions = ['addNeonToCard','clearNeonFromCard','syncTradeWantNeon','getNeonCardType','applyNeonToCard',
   'isPackCard','handleNeonEntry','setupNeonObservers','cleanupNeonUi','applyNeonAnimationSetting']
   .map(extract).join('\n');
 const css = source.match(/globalStyle\.textContent = `([\s\S]*?)`;/)[1];
@@ -31,7 +31,7 @@ const html = process.argv[2] ? fs.readFileSync(process.argv[2], 'utf8')
       const page = await browser.newPage();
       await page.route('**/*', route => route.abort());
       await page.setViewportSize({width,height:900});
-      await page.setContent('<!doctype html><html><head></head><body><section class="to-inventory-panel"><button id="wantFilter" class="tabs__item tabs__want__card" data-want="1" aria-pressed="false">Хочет</button><div id="inventory"></div></section></body></html>');
+      await page.setContent('<!doctype html><html><head></head><body><section class="to-inventory-panel"><button id="wantFilter" class="tabs__item tabs__want__card" data-want="1" aria-pressed="false">Хочет</button><div class="trade__inventory" aria-busy="false"><div id="inventory" class="trade__inventory-list"></div></div></section></body></html>');
       await page.evaluate(({html,css}) => {
         const parsed = new DOMParser().parseFromString(html,'text/html');
         for (const [kind,id] of [['user__have__card','owned'],['user__donthave__card','absent']]) {
@@ -61,7 +61,7 @@ const html = process.argv[2] ? fs.readFileSync(process.argv[2], 'utf8')
         document.querySelector('#absent').classList.add('cv-neon-outline','cv-neon-green');
       }, {html,css});
       await page.addScriptTag({content: `let cfg={modNeon:true,modNeonAnimation:true};
-        let neonObserver,neonMutationObserver;let neonObservedSet=new WeakSet(),neonStateMap=new WeakMap();
+        let neonObserver,neonMutationObserver;let neonObservedSet=new WeakSet(),neonStateMap=new WeakMap(),tradeWantNeonState=new WeakMap();
         ${functions}\nsetupNeonObservers();`});
       await page.waitForFunction(() => document.querySelector('#owned.cv-neon-orange') && !document.querySelector('#absent').classList.contains('cv-neon-outline'));
       check(true,'missing recipient card does not get green; old green removed');
@@ -86,7 +86,18 @@ const html = process.argv[2] ? fs.readFileSync(process.argv[2], 'utf8')
         outside.innerHTML='<div class="trade__inventory-item user__donthave__card" id="otherCard"></div>';
         document.body.append(outside);
       });
+      await page.waitForFunction(() => tradeWantNeonState.get(document.querySelector('.to-inventory-panel'))?.active);
+      check(await page.evaluate(() => !document.querySelector('#inventory .cv-neon-green')), 'enabling filter does not color old cards before loading starts');
+      await page.evaluate(() => document.querySelector('.trade__inventory').setAttribute('aria-busy','true'));
+      await page.waitForFunction(() => tradeWantNeonState.get(document.querySelector('.to-inventory-panel'))?.busy);
+      await page.evaluate(() => {
+        const list=document.querySelector('#inventory');list.replaceChildren(...[...list.children].map(el=>el.cloneNode(true)));
+      });
+      await page.waitForFunction(() => tradeWantNeonState.get(document.querySelector('.to-inventory-panel'))?.updated);
+      check(await page.evaluate(() => !document.querySelector('#inventory .cv-neon-green')), 'new cards wait while inventory is busy');
+      await page.evaluate(() => document.querySelector('.trade__inventory').setAttribute('aria-busy','false'));
       await page.waitForFunction(() => document.querySelector('#owned.cv-neon-green') && document.querySelector('#absent.cv-neon-green'));
+      check(true,'green appears after updated list finishes loading');
       check(await page.evaluate(() => !document.querySelector('#otherCard.cv-neon-outline')), 'filter only affects its own inventory panel');
       check(await page.evaluate(() => document.querySelector('#owned.user__have__card') && !document.querySelector('#owned.cv-neon-orange')), 'active want filter overlays orange without altering ownership');
       await page.evaluate(() => {
@@ -102,6 +113,10 @@ const html = process.argv[2] ? fs.readFileSync(process.argv[2], 'utf8')
       await page.evaluate(() => {
         const button=document.querySelector('#wantFilter');button.removeAttribute('aria-pressed');
       });
+      await page.waitForFunction(() => tradeWantNeonState.get(document.querySelector('.to-inventory-panel'))?.active);
+      await page.evaluate(() => {
+        const list=document.querySelector('#inventory');list.replaceChildren(...[...list.children].map(el=>el.cloneNode(true)));
+      });
       await page.waitForFunction(() => document.querySelector('#absent.cv-neon-green'));
       check(true,'legacy class-only active filter');
       await page.evaluate(() => document.querySelector('#wantFilter').classList.remove('tabs__item__want--active'));
@@ -110,6 +125,16 @@ const html = process.argv[2] ? fs.readFileSync(process.argv[2], 'utf8')
       await page.evaluate(() => {
         const old=document.querySelector('#wantFilter'),next=old.cloneNode(true);
         next.setAttribute('aria-pressed','true');old.replaceWith(next);
+      });
+      await page.waitForFunction(() => tradeWantNeonState.get(document.querySelector('.to-inventory-panel'))?.active);
+      // Failed request: busy ends but the old list is retained.
+      await page.evaluate(() => document.querySelector('.trade__inventory').setAttribute('aria-busy','true'));
+      await page.waitForFunction(() => tradeWantNeonState.get(document.querySelector('.to-inventory-panel'))?.busy);
+      await page.evaluate(() => document.querySelector('.trade__inventory').setAttribute('aria-busy','false'));
+      await page.waitForFunction(() => !tradeWantNeonState.get(document.querySelector('.to-inventory-panel'))?.busy);
+      check(await page.evaluate(() => !document.querySelector('#inventory .cv-neon-green')), 'failed reload never marks the unchanged old list');
+      await page.evaluate(() => {
+        const list=document.querySelector('#inventory');list.replaceChildren(...[...list.children].map(el=>el.cloneNode(true)));
       });
       await page.waitForFunction(() => document.querySelector('#absent.cv-neon-green'));
       check(true,'replacement filter refreshes existing cards');
