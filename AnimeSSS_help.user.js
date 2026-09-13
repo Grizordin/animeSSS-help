@@ -1784,6 +1784,14 @@
       #cv-pack-tools .cv-pack-metrics { column-gap:18px; }
     }
     /* Бейдж лучшей карты — внизу карты */
+    .cv-best-reasons {
+      display:grid;grid-template-columns:repeat(var(--cv-reason-columns,3),minmax(0,1fr));
+      column-gap:14px;align-items:end;margin:0 0 10px;padding:0;
+      color:#a7efbd;font:600 11px/1.35 "Segoe UI",Arial,sans-serif;text-align:center;
+    }
+    .cv-best-reasons > span { min-width:0;overflow-wrap:anywhere; }
+    .cv-best-reasons .cv-best-reason { padding:3px 4px; }
+    @media(max-width:540px){.cv-best-reasons{font-size:10px;margin-bottom:8px}}
     .cv-best-badge {
       position:absolute;bottom:42px;left:50%;transform:translateX(-50%);z-index:999;
       background:#15803d;color:#bbf7d0;font-size:11px;font-weight:800;
@@ -2954,8 +2962,7 @@
     tryRecordAllCards(getActiveRow());
     if(cfg.modCardValue&&cfg.modBestCard) highlightBestCard();
     else {
-      document.querySelectorAll('.cv-best-badge').forEach(b=>b.remove());
-      document.querySelectorAll('.cv-best-card').forEach(c=>c.classList.remove('cv-best-card'));
+      syncBestCardHighlights([]);
     }
   }
 
@@ -2984,7 +2991,7 @@
     ]],
     ['При равенстве', [
       ['tie', 'Если оценки одинаковые', [['manual','Оставить ручной выбор'],['dups','Меньше дублей'],['want','Больше желающих'],['owners','Меньше владельцев'],['random','Случайная карта']], 'Что делать, если лучшие карты одинаковы по ценности. «Случайная карта» выбирает одну из них наугад. Если другой критерий не помог — выбор остаётся ручным.'],
-      ['explain', 'Показывать причину выбора', 'check', 'Показывать короткое объяснение, почему эта карта выбрана лучшей.']
+      ['explain', 'Показывать причину выбора', 'check', 'Показывать короткую причину над лучшей картой. Полная подсказка остаётся при наведении.']
     ]]
   ];
   }
@@ -3102,6 +3109,40 @@
     const result=selectBestCardEntries(entries,settings,state);
     syncBestCardHighlights(result.entries.map(e=>e.card),settings.custom && settings.explain?result.reason:'');
   }
+  function syncBestCardReasons(cards,reason) {
+    const row=cards[0]?.closest('.lootbox__row[data-pack-id]');
+    const list=row?.querySelector('.lootbox__list');
+    document.querySelectorAll('.cv-best-reasons').forEach(bar=>{
+      if(!reason || !list || bar.parentElement!==row)bar.remove();
+    });
+    if(!reason || !list)return;
+    const all=[...list.children].filter(card=>card.matches('.lootbox__card'));
+    if(!all.length)return;
+    let bar=row.querySelector('.cv-best-reasons');
+    if(!bar){bar=document.createElement('div');bar.className='cv-best-reasons';list.before(bar);}
+    // A sibling row keeps labels outside card clipping, click targets and nth-child animation rules.
+    const columns=String(all.length),gap=getComputedStyle(list).columnGap;
+    if(bar.style.getPropertyValue('--cv-reason-columns')!==columns)bar.style.setProperty('--cv-reason-columns',columns);
+    const spacing=gap && gap!=='normal'?gap:'14px';
+    if(bar.style.columnGap!==spacing)bar.style.columnGap=spacing;
+    const selected=new Set(cards);
+    const short=reason.split(' · ').slice(0,2).map(text=>({
+      'Наибольшая ценность':'Выше ценность',
+      'Случайный выбор среди равных':'Случайно из равных',
+      'Равенство: ручной выбор':'Равная ценность',
+      'Приоритет S, ASS и +':'Редкий ранг',
+      'У A больше желающих':'Больше желающих'
+    })[text]||text).join(' · ');
+    const signature=JSON.stringify([row.getAttribute('data-pack-id'),all.map(c=>selected.has(c)),short,reason]);
+    if(bar.dataset.signature===signature)return;
+    bar.dataset.signature=signature;
+    bar.replaceChildren(...all.map(card=>{
+      const label=document.createElement('span');
+      if(selected.has(card)){label.className='cv-best-reason';label.textContent=short;label.title=reason;}
+      else label.setAttribute('aria-hidden','true');
+      return label;
+    }));
+  }
   function syncBestCardHighlights(cards,reason='') {
     const selected=new Set(cards);
     document.querySelectorAll('.cv-best-card').forEach(card=>{
@@ -3125,6 +3166,7 @@
       if(reason && badge.title!==reason)badge.title=reason;
       else if(!reason && badge.hasAttribute('title'))badge.removeAttribute('title');
     });
+    syncBestCardReasons(cards,reason);
   }
 
   // ============================================================

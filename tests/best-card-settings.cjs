@@ -9,7 +9,7 @@ function extract(name){
   const code=lines.slice(0,n).join('\n');try{new vm.Script('('+code+')');return code;}catch{}
  }throw Error('Cannot extract '+name);
 }
-const names=['getBestCardDefaults','getBestCardSettingGroups','normalizeBestCardSettings','getBestCardPolicy','isBestCardRare','getBestCardPriorityValue','selectBestCardEntries','highlightBestCard','syncBestCardHighlights','parseStat','getRareFactor','stretchToOne','calcCardValue','calcBadCardValue','calcTradeSValue','getCardRank','isGoldSCard','computeCardValue','getActiveRow','getPackTools','insertStatsButton','placePackStatsButton','cleanupStatsUi','cleanupBestCardSettingsUi','openBestCardSettings','autoClickBestCard'];
+const names=['getBestCardDefaults','getBestCardSettingGroups','normalizeBestCardSettings','getBestCardPolicy','isBestCardRare','getBestCardPriorityValue','selectBestCardEntries','highlightBestCard','syncBestCardHighlights','syncBestCardReasons','parseStat','getRareFactor','stretchToOne','calcCardValue','calcBadCardValue','calcTradeSValue','getCardRank','isGoldSCard','computeCardValue','getActiveRow','getPackTools','insertStatsButton','placePackStatsButton','cleanupStatsUi','cleanupBestCardSettingsUi','openBestCardSettings','autoClickBestCard'];
 const constants=source.slice(source.indexOf('  const rankMap ='),source.indexOf('  const todayKey ='));
 const css=source.match(/globalStyle\.textContent = `([\s\S]*?)`;/)[1];
 const setup=`
