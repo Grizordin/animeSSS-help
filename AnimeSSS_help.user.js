@@ -4143,6 +4143,29 @@
     card.querySelectorAll('.lock-trade-btn').forEach(btn => btn.style.removeProperty('display'));
   }
 
+  let tradeWantNeonState=new WeakMap();
+
+  function syncTradeWantNeon(panel,listUpdated=false){
+    const filter=panel.querySelector('.tabs__want__card');
+    const pressed=filter?.getAttribute('aria-pressed');
+    const active=pressed === 'true' || (pressed == null && !!filter?.classList.contains('tabs__item__want--active'));
+    const busy=panel.querySelector('.trade__inventory')?.getAttribute('aria-busy') === 'true';
+    let state=tradeWantNeonState.get(panel);
+    if(!state){
+      state={active,busy,ready:active && !busy,updated:false};
+      tradeWantNeonState.set(panel,state);
+    }else if(state.active !== active || (busy && !state.busy)){
+      state.ready=false;
+      state.updated=false;
+    }
+    state.active=active;
+    state.busy=busy;
+    if(listUpdated)state.updated=true;
+    if(!active || busy)state.ready=false;
+    else if(state.updated)state.ready=true;
+    return state.ready;
+  }
+
   function getNeonCardType(card){
     if(card.querySelector('i.fal.fa-trophy-alt'))return 'violet';
     if(card.querySelector('i.fal.fa-lock'))return 'red';
@@ -4150,9 +4173,8 @@
     // In trade inventory, user__donthave__card only means the recipient lacks it,
     // not that it is on their wishlist. Never infer wishlist status from absence.
     if(card.matches('.trade__inventory-item')){
-      const filter=card.closest('.to-inventory-panel')?.querySelector('.tabs__want__card');
-      const pressed=filter?.getAttribute('aria-pressed');
-      if(pressed === 'true' || (pressed == null && filter?.classList.contains('tabs__item__want--active')))return 'green';
+      const panel=card.closest('.to-inventory-panel');
+      if(panel && syncTradeWantNeon(panel))return 'green';
     }
     if(card.classList.contains('anime-cards__owned-by-user-want'))return 'green';
     if(card.classList.contains('anime-cards__owned-by-user')
@@ -4202,6 +4224,7 @@
     );
 
     const scan=()=>{
+      document.querySelectorAll('.to-inventory-panel').forEach(panel=>syncTradeWantNeon(panel));
       document.querySelectorAll('.anime-cards__item,.trade__main-item,.trade__inventory-item').forEach(card=>{
         if(neonObservedSet.has(card)||isExcluded(card)) return;
         neonObserver.observe(card);
@@ -4212,28 +4235,39 @@
     neonMutationObserver=new MutationObserver(mutations=>{
       scan();
       const tradePanels=new Set();
+      const updatedLists=new Set();
       mutations.forEach(mutation=>{
         const target=mutation.target;
         const filterChanged=mutation.type === 'attributes' && target.matches?.('.tabs__want__card');
         const filterReplaced=mutation.type === 'childList' && [...mutation.addedNodes,...mutation.removedNodes]
           .some(node=>node.matches?.('.tabs__want__card') || node.querySelector?.('.tabs__want__card'));
-        if(filterChanged || filterReplaced){
+        const listUpdated=mutation.type === 'childList' && [...mutation.addedNodes,...mutation.removedNodes]
+          .some(node=>node.matches?.('.trade__inventory-item,.trade__inventory-list') || node.querySelector?.('.trade__inventory-item'));
+        const busyChanged=mutation.type === 'attributes' && mutation.attributeName === 'aria-busy'
+          && target.matches?.('.trade__inventory');
+        if(filterChanged || filterReplaced || listUpdated || busyChanged){
           const panel=target.closest?.('.to-inventory-panel');
-          if(panel)tradePanels.add(panel);
+          if(panel){
+            tradePanels.add(panel);
+            if(listUpdated)updatedLists.add(panel);
+          }
         }
         if(mutation.type !== 'attributes' || mutation.attributeName !== 'class') return;
         const card = mutation.target.closest?.('.anime-cards__item,.trade__main-item,.trade__inventory-item');
         if(card && !isExcluded(card)) applyNeonToCard(card);
       });
-      tradePanels.forEach(panel=>panel.querySelectorAll('.trade__inventory-item').forEach(card=>{
-        if(!isExcluded(card))applyNeonToCard(card);
-      }));
+      tradePanels.forEach(panel=>{
+        syncTradeWantNeon(panel,updatedLists.has(panel));
+        panel.querySelectorAll('.trade__inventory-item').forEach(card=>{
+          if(!isExcluded(card))applyNeonToCard(card);
+        });
+      });
     });
     neonMutationObserver.observe(document.body,{
       childList:true,
       subtree:true,
       attributes:true,
-      attributeFilter:['class','aria-pressed']
+      attributeFilter:['class','aria-pressed','aria-busy']
     });
     scan();
   }
@@ -4245,6 +4279,7 @@
     neonMutationObserver = null;
     neonObservedSet = new WeakSet();
     neonStateMap = new WeakMap();
+    tradeWantNeonState = new WeakMap();
     document.querySelectorAll('.neon-outline-wrapper').forEach(el=>el.remove());
     document.querySelectorAll(
       '.cv-neon-outline,.cv-neon-green,.cv-neon-orange,'
