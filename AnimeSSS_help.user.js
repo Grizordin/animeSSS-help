@@ -4147,8 +4147,14 @@
     if(card.querySelector('i.fal.fa-trophy-alt'))return 'violet';
     if(card.querySelector('i.fal.fa-lock'))return 'red';
     if(card.querySelector('i.fal.fa-exchange, i.fal.fa-arrow-right-arrow-left'))return 'blue';
-    if(card.classList.contains('anime-cards__owned-by-user-want')
-      || card.matches('.trade__inventory-item.user__donthave__card'))return 'green';
+    // In trade inventory, user__donthave__card only means the recipient lacks it,
+    // not that it is on their wishlist. Never infer wishlist status from absence.
+    if(card.matches('.trade__inventory-item')){
+      const filter=card.closest('.to-inventory-panel')?.querySelector('.tabs__want__card');
+      const pressed=filter?.getAttribute('aria-pressed');
+      if(pressed === 'true' || (pressed == null && filter?.classList.contains('tabs__item__want--active')))return 'green';
+    }
+    if(card.classList.contains('anime-cards__owned-by-user-want'))return 'green';
     if(card.classList.contains('anime-cards__owned-by-user')
       || card.matches('.trade__inventory-item.user__have__card'))return 'orange';
     return '';
@@ -4205,17 +4211,29 @@
 
     neonMutationObserver=new MutationObserver(mutations=>{
       scan();
+      const tradePanels=new Set();
       mutations.forEach(mutation=>{
+        const target=mutation.target;
+        const filterChanged=mutation.type === 'attributes' && target.matches?.('.tabs__want__card');
+        const filterReplaced=mutation.type === 'childList' && [...mutation.addedNodes,...mutation.removedNodes]
+          .some(node=>node.matches?.('.tabs__want__card') || node.querySelector?.('.tabs__want__card'));
+        if(filterChanged || filterReplaced){
+          const panel=target.closest?.('.to-inventory-panel');
+          if(panel)tradePanels.add(panel);
+        }
         if(mutation.type !== 'attributes' || mutation.attributeName !== 'class') return;
         const card = mutation.target.closest?.('.anime-cards__item,.trade__main-item,.trade__inventory-item');
         if(card && !isExcluded(card)) applyNeonToCard(card);
       });
+      tradePanels.forEach(panel=>panel.querySelectorAll('.trade__inventory-item').forEach(card=>{
+        if(!isExcluded(card))applyNeonToCard(card);
+      }));
     });
     neonMutationObserver.observe(document.body,{
       childList:true,
       subtree:true,
       attributes:true,
-      attributeFilter:['class']
+      attributeFilter:['class','aria-pressed']
     });
     scan();
   }
