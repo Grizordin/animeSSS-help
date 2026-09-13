@@ -1787,11 +1787,24 @@
     .cv-best-reasons {
       display:grid;grid-template-columns:repeat(var(--cv-reason-columns,3),minmax(0,1fr));
       column-gap:14px;align-items:end;margin:0 0 10px;padding:0;
-      color:#a7efbd;font:600 11px/1.35 "Segoe UI",Arial,sans-serif;text-align:center;
+      color:#c1f5d2;font:600 12px/1.4 "Segoe UI",Arial,sans-serif;text-align:center;
     }
     .cv-best-reasons > span { min-width:0;overflow-wrap:anywhere; }
-    .cv-best-reasons .cv-best-reason { padding:3px 4px; }
-    @media(max-width:540px){.cv-best-reasons{font-size:10px;margin-bottom:8px}}
+    .cv-best-reasons .cv-best-reason {
+      justify-self:center;width:fit-content;max-width:100%;box-sizing:border-box;padding:5px 9px;
+      border:1px solid rgba(94,190,126,.3);border-radius:8px;background:rgba(23,52,38,.82);
+      box-shadow:0 2px 6px rgba(0,0,0,.18);
+    }
+    /* React in the same frame as the site's choice state, without waiting for the debounced observer.
+       Keep the row height reserved so the cards do not jump under the pointer/finger. */
+    .packs-stage[data-pack-state]:not([data-pack-state="ready"]) .cv-best-reasons,
+    .lootbox__row.loot-lock > .cv-best-reasons,
+    .lootbox__row:not([data-pack-id]) > .cv-best-reasons,
+    .lootbox__row[data-pack-id=""] > .cv-best-reasons { visibility:hidden;pointer-events:none; }
+    @media(max-width:540px){
+      .cv-best-reasons{font-size:11px;margin-bottom:8px}
+      .cv-best-reasons .cv-best-reason{padding:4px 5px;border-radius:6px}
+    }
     .cv-best-badge {
       position:absolute;bottom:42px;left:50%;transform:translateX(-50%);z-index:999;
       background:#15803d;color:#bbf7d0;font-size:11px;font-weight:800;
