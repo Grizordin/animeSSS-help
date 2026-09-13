@@ -24,7 +24,7 @@ const setup=String.raw`
 ${extract('autoDiagnosticVisibleElapsed')}
 let suiteHealthVisibleSince=0;
 const cfg={modStats:true,modGuarantee:true,modCardValue:true,modBestCard:true,modNeon:true,autoOpenEnabled:true,autoOpenTarget:0};
-let bestCardPackState=null;const openBestCardSettings=()=>{};
+const bestCardReasonPickedPacks=new Set();let bestCardPackState=null;const openBestCardSettings=()=>{};
 let passed=0;function check(v,msg){if(!v)throw Error(msg);passed++;}
 const neonStateMap=new WeakMap();
 const tryRecordAllCards=()=>{};

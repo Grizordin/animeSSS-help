@@ -1798,6 +1798,7 @@
     /* React in the same frame as the site's choice state, without waiting for the debounced observer.
        Keep the row height reserved so the cards do not jump under the pointer/finger. */
     .packs-stage[data-pack-state]:not([data-pack-state="ready"]) .cv-best-reasons,
+    .cv-best-reasons.cv-best-reasons-picked,
     .lootbox__row.loot-lock > .cv-best-reasons,
     .lootbox__row:not([data-pack-id]) > .cv-best-reasons,
     .lootbox__row[data-pack-id=""] > .cv-best-reasons { visibility:hidden;pointer-events:none; }
@@ -2918,23 +2919,25 @@
   }
 
   // Клики по картам
-  document.addEventListener('click',function(e){
+  function handlePackCardClick(e){
     const card=e.target.closest('.lootbox__card'); if(!card)return;
     const row=card.closest('.lootbox__row[data-pack-id]'); if(!row)return;
     // Если диалог открыт и это не подтверждённая карта — блокируем любой клик по карте
     if(isConfirmDialogOpen() && confirmedCard !== card){
       e.preventDefault(); e.stopImmediatePropagation(); return;
     }
-    if(confirmedCard===card){ confirmedCard=null; setTimeout(()=>onCardPicked(card),80); return; }
+    if(confirmedCard===card){ confirmedCard=null; hideBestCardReasonsForPack(row); setTimeout(()=>onCardPicked(card),80); return; }
     if(cfg.modGuard && !autoOpenSuppressGuard){
       const vals=[...row.querySelectorAll('.lootbox__card')].map(c=>{ const r=computeCardValue(c); return r?r.value:0; });
       const bv=Math.max(...vals);
       const cr=computeCardValue(card); const cv=cr?cr.value:0;
       if(bv-cv>=cfg.guardThreshold){ e.preventDefault(); e.stopImmediatePropagation(); showConfirmDialog(card,cv,bv); return; }
     }
+    hideBestCardReasonsForPack(row);
     setTimeout(()=>onCardPicked(card),80);
     handleAutoManualPick(card);
-  },true);
+  }
+  document.addEventListener('click',handlePackCardClick,true);
 
   // ============================================================
   //  ОТОБРАЖЕНИЕ ЦЕННОСТИ
@@ -3020,6 +3023,16 @@
     return out;
   }
   let bestCardPackState=null, bestCardSettingsDialogOpen=null;
+  const bestCardReasonPickedPacks=new Set();
+  function hideBestCardReasonsForPack(row) {
+    const id=row?.getAttribute('data-pack-id');
+    if(!id)return;
+    bestCardReasonPickedPacks.add(id);
+    if(bestCardReasonPickedPacks.size>100)bestCardReasonPickedPacks.delete(bestCardReasonPickedPacks.values().next().value);
+    row.querySelectorAll('.cv-best-reasons').forEach(bar=>{
+      if(!bar.classList.contains('cv-best-reasons-picked'))bar.classList.add('cv-best-reasons-picked');
+    });
+  }
   function getBestCardPolicy(row) {
     const packId=row?.getAttribute('data-pack-id')||'';
     const same=bestCardPackState && bestCardPackState.packId===packId && (packId || bestCardPackState.row===row);
@@ -3133,6 +3146,8 @@
     if(!all.length)return;
     let bar=row.querySelector('.cv-best-reasons');
     if(!bar){bar=document.createElement('div');bar.className='cv-best-reasons';list.before(bar);}
+    // A transient ready state or a replaced DOM row must not resurrect the old pack's caption.
+    bar.classList.toggle('cv-best-reasons-picked',bestCardReasonPickedPacks.has(row.getAttribute('data-pack-id')));
     // A sibling row keeps labels outside card clipping, click targets and nth-child animation rules.
     const columns=String(all.length),gap=getComputedStyle(list).columnGap;
     if(bar.style.getPropertyValue('--cv-reason-columns')!==columns)bar.style.setProperty('--cv-reason-columns',columns);
