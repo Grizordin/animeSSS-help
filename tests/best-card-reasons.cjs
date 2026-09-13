@@ -9,7 +9,7 @@ function extract(name){
   const code=lines.slice(0,n).join('\n');try{new vm.Script('('+code+')');return code;}catch{}
  }throw Error(name);
 }
-const names=['getBestCardDefaults','getBestCardSettingGroups','normalizeBestCardSettings','getBestCardPolicy','getBestCardPriorityValue','isBestCardRare','selectBestCardEntries','getActiveRow','highlightBestCard','syncBestCardHighlights','syncBestCardReasons','computeCardValue','getCardRank','isGoldSCard','parseStat','calcCardValue','calcBadCardValue','calcTradeSValue','getRareFactor','stretchToOne'];
+const names=['getBestCardDefaults','getBestCardSettingGroups','normalizeBestCardSettings','getBestCardPolicy','getBestCardPriorityValue','isBestCardRare','selectBestCardEntries','getActiveRow','highlightBestCard','syncBestCardHighlights','syncBestCardReasons','hideBestCardReasonsForPack','handlePackCardClick','computeCardValue','getCardRank','isGoldSCard','parseStat','calcCardValue','calcBadCardValue','calcTradeSValue','getRareFactor','stretchToOne'];
 const constants=source.slice(source.indexOf('  const rankMap ='),source.indexOf('  const todayKey ='));
 const fallback='<div class="lootbox__row" data-pack-id="109030055"><div class="lootbox__title">Выберите одну карту из трёх</div><div class="lootbox__list">'+[[1696,7,220,1],[2720,75,462,0],[1110,5,168,1]].map((n,i)=>'<div class="lootbox__card cv-pack-valued" data-rank="'+['B','D','B'][i]+'" data-id="'+i+'"><img alt="Карта"><div class="card-stats">'+n.map(v=>'<span>'+v+'</span>').join('')+'<span class="card-value">★</span></div></div>').join('')+'</div></div>';
 const html=process.argv[2]?fs.readFileSync(process.argv[2],'utf8'):fallback;
@@ -29,9 +29,9 @@ let passed=0;const check=(v,m)=>{assert.ok(v,m);passed++;};
    const stage=document.createElement('section');stage.className='packs-stage';stage.dataset.packState='ready';
    stage.append(row);document.querySelector('.packs-page').append(stage);
   },html);
-  await page.evaluate(`const cfg={autoOpenEnabled:false,bestCardSettings:{custom:true,explain:true,unowned:'never'}};let bestCardPackState=null;
+  await page.evaluate(`const cfg={autoOpenEnabled:false,bestCardSettings:{custom:true,explain:true,unowned:'never'}};let bestCardPackState=null;const bestCardReasonPickedPacks=new Set();let confirmedCard=null,guardOpen=false,autoOpenSuppressGuard=false;const isConfirmDialogOpen=()=>guardOpen,showConfirmDialog=()=>guardOpen=true,onCardPicked=()=>{},handleAutoManualPick=()=>{};
 ${constants}\n${names.map(extract).join('\n')}
-window.api={cfg,highlight:highlightBestCard,sync:syncBestCardHighlights,compute:computeCardValue};highlightBestCard();`);
+document.addEventListener('click',handlePackCardClick,true);window.api={cancel:()=>guardOpen=false,confirm:card=>{guardOpen=false;confirmedCard=card;card.click();},cfg,highlight:highlightBestCard,sync:syncBestCardHighlights,compute:computeCardValue};highlightBestCard();`);
   check(await page.locator('.cv-best-reason').count()===1,'one visible reason');
   check(await page.locator('.cv-best-reason').innerText()==='Выше ценность','short reason from supplied example');
   check(await page.locator('.lootbox__list > .lootbox__card').count()===3,'no card wrappers or animation index changes');
@@ -49,26 +49,40 @@ window.api={cfg,highlight:highlightBestCard,sync:syncBestCardHighlights,compute:
   }
   const lifecycle=await page.evaluate(()=>{
    let checks=0;const ck=(v,m)=>{if(!v)throw Error(m);checks++;};
-   const stage=document.querySelector('.packs-stage'),row=document.querySelector('.lootbox__row'),card=row.querySelector('.cv-best-card');
+   const stage=document.querySelector('.packs-stage');let row=document.querySelector('.lootbox__row');const card=row.querySelector('.cv-best-card');
    const visible=()=>getComputedStyle(row.querySelector('.cv-best-reason')).visibility==='visible';
    const top=card.getBoundingClientRect().top;
+   api.cfg.modGuard=true;api.cfg.guardThreshold=0;
+   card.click();ck(visible(),'helper confirmation does not hide caption before selection');
+   api.cancel();ck(visible(),'cancelled guard keeps caption');api.cfg.modGuard=false;
    // Site changes stage synchronously in its selection handler. No helper refresh is called here.
    card.addEventListener('click',()=>stage.dataset.packState='choosing',{once:true});card.click();
    ck(!visible(),'manual click hides same frame');ck(card.getBoundingClientRect().top===top,'click does not shift cards');
    api.highlight();ck(!visible(),'redraw does not reveal chosen pack');
-   stage.dataset.packState='ready';ck(visible(),'failed/cancelled choice can return to ready');
+   stage.dataset.packState='ready';ck(!visible(),'transient ready cannot resurrect chosen pack');
+   api.highlight();ck(!visible(),'ready redraw cannot resurrect caption');
    for(const state of ['choosing','loading','idle','error']){stage.dataset.packState=state;ck(!visible(),'hide '+state);}
    stage.dataset.packState='ready';row.classList.add('loot-lock');ck(!visible(),'legacy selection lock hides immediately');
-   row.classList.remove('loot-lock');ck(visible(),'unlock restores caption');
+   row.classList.remove('loot-lock');ck(!visible(),'unlock cannot restore chosen caption');
+   const replacement=row.cloneNode(true);replacement.querySelector('.cv-best-reasons')?.remove();row.replaceWith(replacement);row=replacement;
+   api.highlight();ck(!visible(),'replacement DOM with same pack id remains hidden');
    const id=row.dataset.packId;row.removeAttribute('data-pack-id');ck(!visible(),'successful pick clears pack id');
    row.dataset.packId='';ck(!visible(),'empty pack id also hides');
-   row.dataset.packId=id+'-next';api.highlight();ck(visible(),'next ready pack shows new reason');
+   row.dataset.packId=id+'-next';
+   const stat=row.querySelector('.lootbox__card .card-stats > span');stat.textContent='1';stat.removeAttribute('title');stat.removeAttribute('aria-label');
+   api.highlight();ck(visible(),'next ready pack shows new reason');
+   ck(row.querySelector('.cv-best-reasons > span').classList.contains('cv-best-reason'),'new pack caption follows its new winning card');
+   api.cfg.modGuard=true;api.cfg.guardThreshold=0;row.querySelector('.cv-best-card').click();ck(visible(),'second guarded click awaits confirmation');
+   api.confirm(row.querySelector('.cv-best-card'));ck(!visible(),'confirmed guard hides caption immediately');
+   api.cfg.modGuard=false;row.dataset.packId=id+'-touch';api.highlight();
    return checks;
   });passed+=lifecycle;
   await page.evaluate(()=>document.querySelector('.cv-best-card').addEventListener('click',()=>document.querySelector('.packs-stage').dataset.packState='choosing',{once:true}));
   await page.locator('.cv-best-card').tap();
   check(!await page.locator('.cv-best-reason').isVisible(),'touch selection hides caption immediately');
-  await page.evaluate(()=>document.querySelector('.packs-stage').dataset.packState='ready');
+  await page.evaluate(()=>{document.querySelector('.packs-stage').dataset.packState='ready';api.highlight();});
+  check(!await page.locator('.cv-best-reason').isVisible(),'touch choice stays hidden after ready');
+  await page.evaluate(()=>{document.querySelector('.lootbox__row').dataset.packId+='-settings';api.highlight();});
   await page.evaluate(()=>{api.cfg.bestCardSettings.explain=false;api.highlight();});
   check(await page.locator('.cv-best-reasons').count()===0&&await page.locator('.cv-best-card').count()===1,'option off removes caption but keeps highlight');
   await page.evaluate(()=>{api.cfg.bestCardSettings.explain=true;api.highlight();});

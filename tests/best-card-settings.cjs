@@ -14,7 +14,7 @@ const constants=source.slice(source.indexOf('  const rankMap ='),source.indexOf(
 const css=source.match(/globalStyle\.textContent = `([\s\S]*?)`;/)[1];
 const setup=`
 const cfg={modStats:true,modBestCard:true,modCardValue:true,autoOpenEnabled:false,bestCardSettings:{}};
-let bestCardPackState=null,bestCardSettingsDialogOpen=null,statsPanel=null,saves=0,clicks=0,scheduled=0;
+const bestCardReasonPickedPacks=new Set();let bestCardPackState=null,bestCardSettingsDialogOpen=null,statsPanel=null,saves=0,clicks=0,scheduled=0;
 const SETTINGS_KEY='suite_settings_v1';let stored=null,failStorage=false;
 const GM_setValue=(key,value)=>{if(failStorage)throw Error('No storage');if(key!==SETTINGS_KEY)throw Error('Wrong key');stored=JSON.parse(value);saves++;};
 let autoBusy=false,autoRunGeneration=0,autoOpenSuppressGuard=false,autoLastChosenPackId='',rareDelay=false;
