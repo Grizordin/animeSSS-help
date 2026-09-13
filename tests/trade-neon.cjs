@@ -31,10 +31,10 @@ const html = process.argv[2] ? fs.readFileSync(process.argv[2], 'utf8')
       const page = await browser.newPage();
       await page.route('**/*', route => route.abort());
       await page.setViewportSize({width,height:900});
-      await page.setContent('<!doctype html><html><head></head><body><div id="inventory"></div></body></html>');
+      await page.setContent('<!doctype html><html><head></head><body><section class="to-inventory-panel"><button id="wantFilter" class="tabs__item tabs__want__card" data-want="1" aria-pressed="false">Хочет</button><div id="inventory"></div></section></body></html>');
       await page.evaluate(({html,css}) => {
         const parsed = new DOMParser().parseFromString(html,'text/html');
-        for (const [kind,id] of [['user__have__card','owned'],['user__donthave__card','wanted']]) {
+        for (const [kind,id] of [['user__have__card','owned'],['user__donthave__card','absent']]) {
           const el = parsed.querySelector('.trade__inventory-item.' + kind);
           if (!el) throw Error('Missing fixture card: ' + kind);
           el.querySelectorAll('script,style,link,iframe,object,embed').forEach(n => n.remove());
@@ -44,6 +44,8 @@ const html = process.argv[2] ? fs.readFileSync(process.argv[2], 'utf8')
             }
           }
           el.id = id;
+          // Reproduce stale green classes left by 3.69; dimensions use clean baseline.
+          el.classList.remove('cv-neon-outline','cv-neon-green','cv-neon-orange');
           document.querySelector('#inventory').append(el);
         }
         const style = document.createElement('style');
@@ -56,23 +58,81 @@ const html = process.argv[2] ? fs.readFileSync(process.argv[2], 'utf8')
         window.baseline = [...document.querySelectorAll('.trade__inventory-item')].map(el => ({
           width:el.getBoundingClientRect().width,height:el.getBoundingClientRect().height,stats:el.querySelector('.card-stats').innerHTML
         }));
+        document.querySelector('#absent').classList.add('cv-neon-outline','cv-neon-green');
       }, {html,css});
       await page.addScriptTag({content: `let cfg={modNeon:true,modNeonAnimation:true};
         let neonObserver,neonMutationObserver;let neonObservedSet=new WeakSet(),neonStateMap=new WeakMap();
         ${functions}\nsetupNeonObservers();`});
-      await page.waitForFunction(() => document.querySelector('#owned.cv-neon-orange') && document.querySelector('#wanted.cv-neon-green'));
+      await page.waitForFunction(() => document.querySelector('#owned.cv-neon-orange') && !document.querySelector('#absent').classList.contains('cv-neon-outline'));
+      check(true,'missing recipient card does not get green; old green removed');
+      const fixtureTypes = await page.evaluate(html => {
+        const parsed = new DOMParser().parseFromString(html,'text/html');
+        return [...parsed.querySelectorAll('.trade__inventory-item')].map(el => ({
+          type:getNeonCardType(el),owned:el.classList.contains('user__have__card')
+        }));
+      }, html);
+      check(fixtureTypes.length>0 && fixtureTypes.every(({type,owned}) => type===(owned?'orange':'')), 'all supplied cards: only recipient-owned cards get neon');
       const initial = await page.evaluate(() => [...document.querySelectorAll('.trade__inventory-item')].map((el,i) => ({
         size:Math.abs(el.getBoundingClientRect().width-baseline[i].width)<.1 && Math.abs(el.getBoundingClientRect().height-baseline[i].height)<.1,
         stats:el.querySelector('.card-stats').innerHTML===baseline[i].stats,
-        visible:el.style.display==='block',ring:getComputedStyle(el,'::before').content!== 'none'
+        visible:el.style.display==='block',ring:(getComputedStyle(el,'::before').content!== 'none') === (el.id==='owned')
       })));
       for (const result of initial) for (const [key,ok] of Object.entries(result)) check(ok,`${width}: ${key}`);
+      check(await page.evaluate(() => document.querySelector('#wantFilter').getAttribute('aria-pressed')==='false'), 'filter stays disabled by default');
+      await page.evaluate(() => {
+        const button=document.querySelector('#wantFilter');
+        button.classList.add('tabs__item__want--active');button.setAttribute('aria-pressed','true');
+        const outside=document.createElement('section');outside.className='to-inventory-panel';outside.id='otherPanel';
+        outside.innerHTML='<div class="trade__inventory-item user__donthave__card" id="otherCard"></div>';
+        document.body.append(outside);
+      });
+      await page.waitForFunction(() => document.querySelector('#owned.cv-neon-green') && document.querySelector('#absent.cv-neon-green'));
+      check(await page.evaluate(() => !document.querySelector('#otherCard.cv-neon-outline')), 'filter only affects its own inventory panel');
+      check(await page.evaluate(() => document.querySelector('#owned.user__have__card') && !document.querySelector('#owned.cv-neon-orange')), 'active want filter overlays orange without altering ownership');
+      await page.evaluate(() => {
+        const el=document.querySelector('#absent').cloneNode(true);el.id='filteredNew';
+        el.classList.remove('cv-neon-outline','cv-neon-green');document.querySelector('#inventory').append(el);
+      });
+      await page.waitForFunction(() => document.querySelector('#filteredNew.cv-neon-green'));
+      check(true,'AJAX cards respect enabled filter');
+      // aria-pressed=false wins even before the site removes the active class.
+      await page.evaluate(() => document.querySelector('#wantFilter').setAttribute('aria-pressed','false'));
+      await page.waitForFunction(() => document.querySelector('#owned.cv-neon-orange') && !document.querySelector('#absent.cv-neon-outline') && !document.querySelector('#filteredNew.cv-neon-outline'));
+      check(true,'aria-only disable restores orange and clears plain cards');
+      await page.evaluate(() => {
+        const button=document.querySelector('#wantFilter');button.removeAttribute('aria-pressed');
+      });
+      await page.waitForFunction(() => document.querySelector('#absent.cv-neon-green'));
+      check(true,'legacy class-only active filter');
+      await page.evaluate(() => document.querySelector('#wantFilter').classList.remove('tabs__item__want--active'));
+      await page.waitForFunction(() => document.querySelector('#owned.cv-neon-orange') && !document.querySelector('#absent.cv-neon-outline'));
+      check(true,'class-only disable clears green');
+      await page.evaluate(() => {
+        const old=document.querySelector('#wantFilter'),next=old.cloneNode(true);
+        next.setAttribute('aria-pressed','true');old.replaceWith(next);
+      });
+      await page.waitForFunction(() => document.querySelector('#absent.cv-neon-green'));
+      check(true,'replacement filter refreshes existing cards');
+      await page.evaluate(() => {
+        document.querySelector('#wantFilter').remove();
+        document.querySelector('#filteredNew').remove();document.querySelector('#otherPanel').remove();
+      });
+      await page.waitForFunction(() => document.querySelector('#owned.cv-neon-orange') && !document.querySelector('#absent.cv-neon-outline'));
+      check(true,'removed filter restores native classification');
       await page.evaluate(() => document.querySelector('#owned').classList.replace('user__have__card','user__donthave__card'));
-      await page.waitForFunction(() => document.querySelector('#owned.cv-neon-green:not(.cv-neon-orange)'));
-      check(true,'ownership class update');
+      await page.waitForFunction(() => !document.querySelector('#owned').classList.contains('cv-neon-outline'));
+      check(true,'owned to absent removes orange without adding green');
       await page.evaluate(() => document.querySelector('#owned').classList.remove('user__donthave__card'));
       await page.waitForFunction(() => !document.querySelector('#owned').classList.contains('cv-neon-outline'));
       check(true,'stale neon removed; copy count does not imply recipient ownership');
+      // Separate synthetic positive case for the already supported explicit wishlist class.
+      // Do not mislabel an absent card from the real attachment as a wishlist card.
+      await page.evaluate(() => {
+        const el=document.querySelector('#absent').cloneNode(true);
+        el.id='wanted';el.classList.add('anime-cards__owned-by-user-want');
+        document.querySelector('#inventory').append(el);
+      });
+      await page.waitForFunction(() => document.querySelector('#wanted.cv-neon-green'));
       await page.evaluate(() => {
         const el=document.querySelector('#wanted').cloneNode(true);
         el.id='dynamic';el.classList.remove('cv-neon-outline','cv-neon-green');
