@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.68
+// @version      3.69
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -4147,8 +4147,10 @@
     if(card.querySelector('i.fal.fa-trophy-alt'))return 'violet';
     if(card.querySelector('i.fal.fa-lock'))return 'red';
     if(card.querySelector('i.fal.fa-exchange, i.fal.fa-arrow-right-arrow-left'))return 'blue';
-    if(card.classList.contains('anime-cards__owned-by-user-want'))return 'green';
-    if(card.classList.contains('anime-cards__owned-by-user'))return 'orange';
+    if(card.classList.contains('anime-cards__owned-by-user-want')
+      || card.matches('.trade__inventory-item.user__donthave__card'))return 'green';
+    if(card.classList.contains('anime-cards__owned-by-user')
+      || card.matches('.trade__inventory-item.user__have__card'))return 'orange';
     return '';
   }
 
@@ -4194,7 +4196,7 @@
     );
 
     const scan=()=>{
-      document.querySelectorAll('.anime-cards__item,.trade__main-item').forEach(card=>{
+      document.querySelectorAll('.anime-cards__item,.trade__main-item,.trade__inventory-item').forEach(card=>{
         if(neonObservedSet.has(card)||isExcluded(card)) return;
         neonObserver.observe(card);
         neonObservedSet.add(card);
@@ -4205,7 +4207,7 @@
       scan();
       mutations.forEach(mutation=>{
         if(mutation.type !== 'attributes' || mutation.attributeName !== 'class') return;
-        const card = mutation.target.closest?.('.anime-cards__item,.trade__main-item');
+        const card = mutation.target.closest?.('.anime-cards__item,.trade__main-item,.trade__inventory-item');
         if(card && !isExcluded(card)) applyNeonToCard(card);
       });
     });
