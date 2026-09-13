@@ -17,13 +17,14 @@ function extract(name){
 }
 const css=source.match(/globalStyle\.textContent = `([\s\S]*?)`;/)[1];
 const constants=source.slice(source.indexOf('  const rankMap ='),source.indexOf('  const todayKey ='));
-const functions=['parseStat','getRareFactor','stretchToOne','calcCardValue','calcTradeSValue','calcBadCardValue','getCardRank','isGoldSCard','getCardId','computeCardValue','getActiveRow','addCardValue','highlightBestCard','syncBestCardHighlights','addNeonToCard','clearNeonFromCard','getNeonCardType','applyNeonToCard','getPackTools','insertStatsButton','placePackStatsButton','cleanupStatsUi','insertGuaranteeInfo','autoPackReady','autoBeginChoice','autoCheckChoice','autoClickBestCard','handleAutoManualPick','suiteTelemetryFlush'].map(extract).join('\n');
+const functions=['parseStat','getRareFactor','stretchToOne','calcCardValue','calcTradeSValue','calcBadCardValue','getCardRank','isGoldSCard','getCardId','computeCardValue','getActiveRow','addCardValue','highlightBestCard','getBestCardDefaults','getBestCardSettingGroups','normalizeBestCardSettings','getBestCardPolicy','isBestCardRare','getBestCardPriorityValue','selectBestCardEntries','syncBestCardHighlights','cleanupBestCardSettingsUi','addNeonToCard','clearNeonFromCard','getNeonCardType','applyNeonToCard','getPackTools','insertStatsButton','placePackStatsButton','cleanupStatsUi','insertGuaranteeInfo','autoPackReady','autoBeginChoice','autoCheckChoice','autoClickBestCard','handleAutoManualPick','suiteTelemetryFlush'].map(extract).join('\n');
 const fallback=`<style>.lootbox__card{position:relative;min-width:0}.lootbox__card>img{width:100%;height:auto;aspect-ratio:288/432}.card-stats{display:grid;position:absolute;left:0;right:0;bottom:0}.card-stats>span{display:flex;justify-content:center}</style><div class="packs-page"><div class="packs-guarantees"><span class="lootbox__counter__s">1620</span></div><span class="lootbox__balance">239082</span><div class="packs-stage" data-pack-state="ready"><div class="lootbox__row" data-pack-id="107214619"><div class="lootbox__list">${[[1046,5,181,1],[3276,19,385,0],[2488,15,260,1]].map((nums,i)=>`<div class="lootbox__card ${i!==1?'anime-cards__owned-by-user':''}" data-rank="${['e','d','c'][i]}" data-id="${i}"><img alt="Card"><div class="card-stats">${nums.map(n=>`<span><b class="pack-stat-full">${n}</b><b class="pack-stat-short">${n}</b><b class="pack-stat-tiny">${n}</b></span>`).join('')}</div></div>`).join('')}</div></div></div></div>`;
 const html=process.argv[2]?fs.readFileSync(process.argv[2],'utf8'):fallback;
 const setup=String.raw`
 ${extract('autoDiagnosticVisibleElapsed')}
 let suiteHealthVisibleSince=0;
 const cfg={modStats:true,modGuarantee:true,modCardValue:true,modBestCard:true,modNeon:true,autoOpenEnabled:true,autoOpenTarget:0};
+let bestCardPackState=null;const openBestCardSettings=()=>{};
 let passed=0;function check(v,msg){if(!v)throw Error(msg);passed++;}
 const neonStateMap=new WeakMap();
 const tryRecordAllCards=()=>{};
@@ -85,7 +86,7 @@ const statsObserver=new MutationObserver(()=>{});statsObserver.observe(document.
 insertStatsButton();check(statsObserver.takeRecords().length===0,'stable statistics card update');statsObserver.disconnect();
 document.getElementById('cv-stats-btn').click();
 check(document.getElementById('cv-stats-panel').style.display==='block','statistics opens');
-cfg.modStats=false;cleanupStatsUi();check(!document.getElementById('cv-pack-stats-card')&&!document.getElementById('cv-stats-btn')&&!!document.getElementById('cv-guarantee-block'),'stats off preserves guarantee and removes card');
+cfg.modStats=false;insertStatsButton();check(!!document.getElementById('cv-pack-stats-card')&&!document.getElementById('cv-stats-btn')&&!!document.getElementById('cv-best-settings-btn')&&!!document.getElementById('cv-guarantee-block'),'stats off preserves best settings and guarantee');
 cfg.modGuarantee=false;insertGuaranteeInfo();check(!document.getElementById('cv-guarantee-block'),'guarantee off cleans block');
 cfg.modStats=true;cfg.modGuarantee=true;insertStatsButton();insertGuaranteeInfo();
 cfg.modNeon=false;addCardValue();check(!document.querySelector('.cv-pack-neon-ring'),'neon off removes ring');

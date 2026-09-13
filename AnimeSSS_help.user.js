@@ -100,6 +100,7 @@
     modBrickFill:     true,   // наполнение кирпича
     modRemelt:        true,   // переплавка карт
     modBestCard:      true,   // подсветка лучшей карты
+    bestCardSettings: {},    // личные правила выбора; custom:false сохраняет стандартный выбор
     modGuard:         true,   // защитное окно
     modAutoOpen:      false,  // автооткрытие паков
     modAutoLootCards: true,   // автолут карт с просмотра
@@ -1766,15 +1767,17 @@
     #cv-pack-tools .cv-pack-tool-value { display:block; font-size:24px; font-weight:800; line-height:1.2; color:#d8b4fe; font-variant-numeric:tabular-nums; }
     #cv-pack-tools .cv-pack-stones-value { color:#f2cd84; font-size:21px; }
     #cv-pack-tools .cv-pack-stones-value span { font-size:14px; vertical-align:middle; }
-    #cv-pack-tools #cv-stats-btn {
+    #cv-pack-tools :is(#cv-stats-btn,#cv-best-settings-btn) {
       display:inline-flex; align-items:center; justify-content:center; gap:10px; width:auto; max-width:100%; height:auto;
       margin:16px 0 0; padding:10px 16px; border:1px solid #a63d61; border-radius:8px;
       background:rgba(158,41,79,.18); color:#f4aec5;
       font-family:"Segoe UI",Arial,sans-serif; font-size:12px; font-weight:700; line-height:1.4; text-transform:none;
       white-space:normal; text-align:center; letter-spacing:normal; box-shadow:none; cursor:pointer;
     }
-    #cv-pack-tools #cv-stats-btn:hover { background:rgba(158,41,79,.32); border-color:#d8678e; color:#ffe1eb; }
-    #cv-pack-tools #cv-stats-btn:focus-visible { outline:2px solid #e5779c; outline-offset:3px; }
+    #cv-pack-tools :is(#cv-stats-btn,#cv-best-settings-btn):hover { background:rgba(158,41,79,.32); border-color:#d8678e; color:#ffe1eb; }
+    #cv-pack-tools :is(#cv-stats-btn,#cv-best-settings-btn):focus-visible { outline:2px solid #e5779c; outline-offset:3px; }
+    #cv-pack-tools #cv-stats-btn + #cv-best-settings-btn { margin-left:8px; }
+    @media(max-width:540px){#cv-pack-tools #cv-stats-btn + #cv-best-settings-btn{margin-left:0}}
     @media(max-width:760px) { #cv-pack-tools { grid-template-columns:minmax(0,1fr); } }
     @media(max-width:420px) {
       #cv-pack-tools > #cv-guarantee-block, #cv-pack-tools > #cv-pack-stats-card { padding:18px 14px; gap:12px; }
@@ -2683,7 +2686,7 @@
   }
   function stretchToOne(v) { return v>=10?v:1+9*(1-Math.exp(-(v-1)/2)); }
 
-  function calcCardValue(total, want, trade, dup, rank, wantBonus) {
+  function calcCardValue(total, want, trade, dup, rank, wantBonus, bonusPoints=WANT_BONUS) {
     let D=(want/(trade+1))*DEMAND_MULTIPLIER; if(want>DEMAND_BOOST_THRESHOLD)D*=DEMAND_BOOST_MULTIPLIER; D=Math.min(D,DEMAND_MAX);
     const ru=rank?rank.toUpperCase():null;
     const dupScale=ru==='A'?0.5:ru==='B'?0.667:1.0;
@@ -2691,7 +2694,7 @@
     const R=rank?(rankMap[rank.toUpperCase()]||0):0;
     const badRanks=['C','C_PLUS','D','D_PLUS','E','E_PLUS'];
     const low=(badRanks.includes(rank)&&total<200)?2:0;
-    let v=getRareFactor(total)+D+R+(wantBonus?WANT_BONUS:0)+low-dupP;
+    let v=getRareFactor(total)+D+R+(wantBonus?bonusPoints:0)+low-dupP;
     return Math.round(stretchToOne(Math.min(Math.max(v,1),100))*100)/100;
   }
   function calcTradeSValue(total, want, trade, dup, wantBonus) {
@@ -2956,63 +2959,150 @@
     }
   }
 
+  function getBestCardDefaults() {
+    return {
+    custom: false, rank: 'a', wanted: 'normal', unowned: 'low',
+    duplicates: 'normal', demandA: true, demandGap: 40, weak: true, weakThreshold: 10,
+    tie: 'manual', protectRare: true, explain: true
+  };
+  }
+  function getBestCardSettingGroups() {
+    return [
+    ['Основа выбора', [
+      ['rank', 'Приоритет ранга', [['a','Приоритет A'],['ab','Приоритет A, B'],['highest','Приоритет старшего ранга']], 'Во всех режимах S, ASS, «+» и Gold важнее обычных карт. A — сначала A. A, B — сначала A, затем B. Старший ранг — самый высокий ранг. Среди оставшихся сравнивается ценность.']
+    ]],
+    ['Личные предпочтения', [
+      ['wanted', 'Желаемое', [['normal','Обычный бонус (+15)'],['strong','Усиленный бонус (+30)'],['off','Не в приоритете (+0)']], 'Добавляет желаемой карте +15 или +30 баллов к ценности для выбора. «Не в приоритете» — без бонуса (+0).'],
+      ['unowned', 'Нет в наличии', [['low','На низкой ценности'],['always','Всегда'],['never','Никогда']], 'Предпочитать карты, которых у вас нет: только при низкой ценности, всегда или никогда. Граница низкой ценности задаётся ниже, в «Пороге слабого пака».'],
+      ['duplicates', 'Штраф за дубли', [['normal','Стандартный штраф'],['off','Без штрафа']], 'Стандартный штраф снижает ценность карты за дубли на руках. «Без штрафа» — дубли не снижают ценность. Отдельные правила выбора без дублей сохраняются.']
+    ]],
+    ['Дополнительные правила', [
+      ['demandA', 'Учитывать спрос среди A', 'check', 'Среди карт A можно выбрать менее ценную, если её хочет заметно больше людей. Нужная разница задаётся рядом.'],
+      ['demandGap', 'Преимущество по желающим', {max:10000}, 'На сколько больше людей должны хотеть карту A. Например, 40 — это 140 желающих против 100.'],
+      ['weak', 'Без дублей в слабом паке', 'check', 'Если все карты ниже заданного порога, выбрать лучшую из карт с 0 дублей. Если таких нет — выбрать как обычно.'],
+      ['weakThreshold', 'Порог слабого пака', {max:100}, 'Ниже какой ценности пак считается слабым. Например, при 10 значение 9 считается слабым, а 10 — нет. Этот порог также используется для «Нет в наличии».']
+    ]],
+    ['При равенстве', [
+      ['tie', 'Если оценки одинаковые', [['manual','Оставить ручной выбор'],['dups','Меньше дублей'],['want','Больше желающих'],['owners','Меньше владельцев'],['random','Случайная карта']], 'Что делать, если лучшие карты одинаковы по ценности. «Случайная карта» выбирает одну из них наугад. Если другой критерий не помог — выбор остаётся ручным.'],
+      ['explain', 'Показывать причину выбора', 'check', 'Показывать короткое объяснение, почему эта карта выбрана лучшей.']
+    ]]
+  ];
+  }
+  function normalizeBestCardSettings(raw) {
+    if(!raw || typeof raw!=='object' || Array.isArray(raw))raw={};
+    const out=getBestCardDefaults();
+    if(typeof raw.custom==='boolean')out.custom=raw.custom;
+    for(const [key,,type] of getBestCardSettingGroups().flatMap(group=>group[1])){
+      if(Array.isArray(type)){if(type.some(([value])=>value===raw[key]))out[key]=raw[key];}
+      else if(type==='check'){if(typeof raw[key]==='boolean')out[key]=raw[key];}
+      else if(typeof raw[key]==='number' && Number.isFinite(raw[key]))out[key]=Math.round(Math.max(0,Math.min(type.max,raw[key])));
+    }
+    return out;
+  }
+  let bestCardPackState=null, bestCardSettingsDialogOpen=null;
+  function getBestCardPolicy(row) {
+    const packId=row?.getAttribute('data-pack-id')||'';
+    const same=bestCardPackState && bestCardPackState.packId===packId && (packId || bestCardPackState.row===row);
+    // Freeze the policy for this pack while auto-open runs, including a DOM replacement of the same pack.
+    if(same && cfg.autoOpenEnabled)return bestCardPackState;
+    const settings=normalizeBestCardSettings(cfg.bestCardSettings), signature=JSON.stringify(settings);
+    if(!same || bestCardPackState.signature!==signature)bestCardPackState={packId,row,settings,signature,randomKey:'',randomIndex:0};
+    return bestCardPackState;
+  }
+  function isBestCardRare(entry) {
+    return entry.isGold || entry.rank==='S' || entry.rank==='ASS' || entry.rank==='S_PLUS' || entry.rank?.endsWith('_PLUS') || entry.rank?.endsWith('+');
+  }
+  function getBestCardPriorityValue(result,wanted,settings) {
+    if(!settings.custom || result.isGold || (settings.wanted==='normal' && settings.duplicates==='normal'))return result.value;
+    const dup=settings.duplicates==='off'?0:result.dup;
+    const bonus=settings.wanted==='strong'?30:settings.wanted==='off'?0:15;
+    // Keep the original star/statistics value separate. The desired-card duplicate exemption stays unchanged.
+    let score=calcCardValue(result.total,result.want,result.trade,dup,result.rank,wanted,bonus);
+    if(score<BAD_BASE_MAX)score=calcBadCardValue(result.total,result.want,result.trade,dup);
+    return score;
+  }
+  function selectBestCardEntries(entries,settings,state) {
+    if(!entries.length)return {entries:[],reason:''};
+    let pool=entries, notes=[];
+    const gold=pool.filter(e=>e.isGold), rare=pool.filter(isBestCardRare);
+    // Mandatory in both default and custom modes. Personal preferences never leave this pool.
+    if(gold.length){pool=gold;notes.push('Приоритет Gold');}
+    else if(rare.length){pool=rare;notes.push('Приоритет S, ASS и +');}
+    const hasRare=gold.length>0 || rare.length>0;
+    const highest=list=>{const max=Math.max(...list.map(e=>e.value));return list.filter(e=>e.value===max);};
+    const demand=(list,top,gap,legacy)=>{
+      const max=top[0].value, eligible=list.filter(e=>e.value<max && top.every(t=>e.want-t.want>=gap));
+      if(!eligible.length)return top;
+      const wants=Math.max(...eligible.map(e=>e.want)), winners=eligible.filter(e=>e.want===wants);
+      notes.push('У A больше желающих');
+      return legacy?winners.slice(0,1):winners;
+    };
+    let winners;
+    if(!settings.custom){
+      const a=pool.filter(e=>e.rank==='A'), max=Math.max(...pool.map(e=>e.value));
+      if(!hasRare && a.length){winners=demand(a,highest(a),40,true);notes.push('Приоритет A');}
+      else if(!hasRare && max<10 && pool.some(e=>e.dup===0)){
+        winners=highest(pool.filter(e=>e.dup===0));notes.push('Слабый пак: нет дублей');
+      }else winners=highest(pool);
+    }else{
+      if(settings.rank==='highest'){
+        // Special ranks already took priority above. RANK_ORDER only compares inside that protected pool.
+        const order=['ASS','S_PLUS','S','A_PLUS','A','B_PLUS','B','C_PLUS','C','D_PLUS','D','E_PLUS','E'];
+        const weight=e=>e.isGold?100:order.includes(e.rank)?order.length-order.indexOf(e.rank):0;
+        const max=Math.max(...pool.map(weight));pool=pool.filter(e=>weight(e)===max);notes.push('Старший ранг');
+      }else if(!hasRare){
+        const rank=pool.some(e=>e.rank==='A')?'A':settings.rank==='ab' && pool.some(e=>e.rank==='B')?'B':null;
+        if(rank){pool=pool.filter(e=>e.rank===rank);notes.push('Приоритет '+rank);}
+      }
+      const low=Math.max(...pool.map(e=>e.value))<settings.weakThreshold;
+      if((settings.unowned==='always' || (settings.unowned==='low' && low)) && pool.some(e=>!e.owned)){
+        pool=pool.filter(e=>!e.owned);notes.push('Нет в наличии');
+      }
+      if(settings.weak && Math.max(...pool.map(e=>e.value))<settings.weakThreshold && pool.some(e=>e.dup===0)){
+        pool=pool.filter(e=>e.dup===0);notes.push('Слабый пак: нет дублей');
+      }
+      winners=highest(pool);
+      if(settings.demandA && pool.every(e=>e.rank==='A'))winners=demand(pool,winners,settings.demandGap,false);
+      if(winners.length>1 && settings.tie!=='manual'){
+        if(settings.tie==='random'){
+          // Roll once per candidate set, not on every MutationObserver update or auto-open restart.
+          const key=winners.map(e=>e.identity).join('|');
+          if(state.randomKey!==key){state.randomKey=key;state.randomIndex=Math.floor(Math.random()*winners.length);}
+          winners=[winners[state.randomIndex % winners.length]];notes.push('Случайный выбор среди равных');
+        }else{
+          const metric=e=>settings.tie==='want'?-e.want:settings.tie==='owners'?e.total:e.dup;
+          const min=Math.min(...winners.map(metric));winners=winners.filter(e=>metric(e)===min);
+          notes.push(settings.tie==='want'?'Больше желающих':settings.tie==='owners'?'Меньше владельцев':'Меньше дублей');
+        }
+      }
+      if(settings.wanted!=='normal' && winners.some(e=>e.wanted))notes.push(settings.wanted==='off'?'Желаемое без бонуса':'Бонус желаемого +30');
+      if(settings.duplicates==='off')notes.push('Без штрафа за дубли');
+    }
+    if(!notes.length)notes.push('Наибольшая ценность');
+    if(winners.length>1)notes.push('Равенство: ручной выбор');
+    return {entries:winners,reason:notes.join(' · ')};
+  }
   function highlightBestCard() {
     const row=getActiveRow();
-    if(!row){ syncBestCardHighlights([]); return; }
-    const cards=[...row.querySelectorAll('.lootbox__card')]; if(!cards.length)return;
-    const entries=cards.map(c=>{
-      const r=computeCardValue(c);
-      const dup=r?r.dup:99;
-      const want=r?r.want:0;
-      const rank=r?r.rankUpper:null;
-      return {card:c, value:r?r.value:0, dup, rank, want};
+    if(!row){syncBestCardHighlights([]);return;}
+    const cards=[...row.querySelectorAll('.lootbox__card')];
+    if(!cards.length){syncBestCardHighlights([]);return;}
+    const state=getBestCardPolicy(row), settings=state.settings;
+    const entries=cards.map((card,index)=>{
+      const r=computeCardValue(card);
+      if(!r || !r.rankUpper)return null;
+      const wanted=card.classList.contains('anime-cards__owned-by-user-want');
+      return {card,value:getBestCardPriorityValue(r,wanted,settings),dup:r.dup,want:r.want,total:r.total,
+        rank:r.rankUpper.replace(/\+$/,'_PLUS'),isGold:r.isGold,wanted,
+        owned:card.classList.contains('anime-cards__owned-by-user'),
+        identity:JSON.stringify([card.getAttribute('data-id'),index])};
     });
-
-    // Ранги, которые перебивают A (исключения из правила A-приоритета)
-    const ABOVE_A=['ASS','S_PLUS','S','A_PLUS','B_PLUS','C_PLUS','D_PLUS','E_PLUS'];
-    const hasAboveA=entries.some(e=>ABOVE_A.includes(e.rank));
-    const aEntries=entries.filter(e=>e.rank==='A');
-    const hasA=aEntries.length>0;
-    const maxVal=Math.max(...entries.map(e=>e.value));
-
-    let bestEntries;
-    if(!hasAboveA && hasA){
-      // Есть A-карты и нет ASS/S+/S/A+ — A-карта(ы) имеют безусловный приоритет
-      if(aEntries.length===1){
-        bestEntries=aEntries;
-      } else {
-        // Несколько A-карт: берём с максимальной ценностью,
-        // но если у более дешёвой A-карты на 40+ желающих больше — она лучшая
-        const maxAVal=Math.max(...aEntries.map(e=>e.value));
-        const topA=aEntries.filter(e=>e.value===maxAVal);
-        let demandWinner=null;
-        for(const cheaper of aEntries){
-          if(cheaper.value>=maxAVal)continue;
-          // cheaper должна иметь на 40+ желающих больше, чем КАЖДАЯ topA-карта
-          const qualifies=topA.every(top=>cheaper.want-top.want>=40);
-          if(qualifies){
-            if(!demandWinner||cheaper.want>demandWinner.want)demandWinner=cheaper;
-          }
-        }
-        bestEntries=demandWinner?[demandWinner]:topA;
-      }
-    } else if(maxVal<10){
-      // Нет A-приоритета, все карты плохие — приоритет картам с 0 дублей
-      const noDup=entries.filter(e=>e.dup===0);
-      if(noDup.length>0){
-        const bestNoDupVal=Math.max(...noDup.map(e=>e.value));
-        bestEntries=noDup.filter(e=>e.value===bestNoDupVal);
-      } else {
-        bestEntries=entries.filter(e=>e.value===maxVal);
-      }
-    } else {
-      // Обычная логика — по ценности
-      bestEntries=entries.filter(e=>e.value===maxVal);
-    }
-
-    syncBestCardHighlights(bestEntries.map(entry=>entry.card));
+    // Partial/missing statistics must not make a rare card disappear from the comparison.
+    if(entries.some(e=>!e)){syncBestCardHighlights([]);return;}
+    const result=selectBestCardEntries(entries,settings,state);
+    syncBestCardHighlights(result.entries.map(e=>e.card),settings.custom && settings.explain?result.reason:'');
   }
-  function syncBestCardHighlights(cards) {
+  function syncBestCardHighlights(cards,reason='') {
     const selected=new Set(cards);
     document.querySelectorAll('.cv-best-card').forEach(card=>{
       if(selected.has(card))return;
@@ -3029,7 +3119,11 @@
       }
       if(card.style.position!=='relative')card.style.position='relative';
       const value=card.querySelector('.card-value');
-      if(value && value.title!=='⭐ Лучшая карта в паке')value.title='⭐ Лучшая карта в паке';
+      const title=reason?'⭐ '+reason:'⭐ Лучшая карта в паке';
+      if(value && value.title!==title)value.title=title;
+      const badge=card.querySelector('.cv-best-badge');
+      if(reason && badge.title!==reason)badge.title=reason;
+      else if(!reason && badge.hasAttribute('title'))badge.removeAttribute('title');
     });
   }
 
@@ -3662,50 +3756,241 @@
     if(anchor.nextElementSibling!==tools)anchor.after(tools);
     return tools;
   }
-  function insertStatsButton(){
-    if(!cfg.modStats)return;
-    const tools=getPackTools();
-    const lbl=document.querySelector('label.checkbox input#packs_demand')?.closest('label.checkbox');
-    const existing=document.getElementById('cv-stats-btn');
-    if(existing){ if(tools)placePackStatsButton(existing,tools); return; }
-    if(!tools&&!lbl)return;
-    const btn=document.createElement('button'); btn.id='cv-stats-btn'; btn.type='button'; btn.textContent='📊 Статистика карт';
-    btn.style.cssText='display:block;margin:10px auto 0;padding:7px 20px;background:linear-gradient(135deg,#0ea5e9,#6366f1);border:none;border-radius:8px;color:#fff;font-weight:600;font-size:13px;cursor:pointer;';
-    btn.onmouseover=()=>btn.style.opacity='.8'; btn.onmouseout=()=>btn.style.opacity='1';
-    if(tools){
-      placePackStatsButton(btn,tools);
-    }else lbl.insertAdjacentElement('afterend',btn);
-    createStatsPanel();
-    btn.addEventListener('click',()=>{
-      const p=document.getElementById('cv-stats-panel');
-      if(p.style.display==='none'){
-        p.style.display='block'; renderStatsTab();
-        requestAnimationFrame(()=>suiteClampToViewport(p,{margin:8,constrainSize:true}));
-      } else p.style.display='none';
+  function openBestCardSettings() {
+    if(!cfg.modCardValue || !cfg.modBestCard)return;
+    if(bestCardSettingsDialogOpen){bestCardSettingsDialogOpen();return;}
+    const defaults=getBestCardDefaults(), groups=getBestCardSettingGroups(), fields=groups.flatMap(group=>group[1]);
+    const normalize=normalizeBestCardSettings;
+    let saved=normalize(cfg.bestCardSettings), storageError=false;
+    const host = document.createElement('div');
+    host.id = 'cv-best-settings-host';
+    const root = host.attachShadow({mode:'open'});
+    document.body.append(host);
+    root.innerHTML = `<style>
+      :host{all:initial;color-scheme:dark;font:14px/1.45 "Segoe UI",Arial,sans-serif;color:#ebe6e9}
+      *{box-sizing:border-box} [hidden]{display:none!important}
+      button,input,select{font:inherit} button{cursor:pointer}
+      button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid #f192b1;outline-offset:3px}
+      dialog{color:#ebe6e9;background:#1b191c;border:1px solid #45353d;border-radius:18px;padding:0;width:min(760px,calc(100vw - 24px));max-width:none;max-height:calc(100dvh - 32px);box-shadow:0 28px 90px #0009;overflow:hidden}
+      dialog::backdrop{background:#08070ac7}
+      form{display:flex;flex-direction:column;max-height:calc(100dvh - 34px);margin:0}
+      header{display:flex;justify-content:space-between;align-items:center;padding:20px 24px;border-bottom:1px solid #393036;gap:12px}
+      h2{font-size:21px;margin:0;letter-spacing:-.3px} .eyebrow{font-size:10px;letter-spacing:1.6px;color:#cd93a8;text-transform:uppercase;margin-bottom:4px}
+      .close{border:1px solid #46373e;border-radius:50%;width:32px;height:32px;color:#bcb2b8;background:#272127;font-size:22px;padding:0;line-height:1;flex-shrink:0}
+      .body{overflow:auto;padding:20px 24px;scrollbar-width:thin}
+      .notice{font-size:12px;color:#c8b8c1;background:#292027;border:1px solid #4b303e;border-radius:9px;padding:11px 13px;margin:0 0 18px}
+      .notice b{color:#edacc4}
+      .mode{display:grid;grid-template-columns:minmax(0,1fr) 50px minmax(0,1fr);align-items:center;gap:21px;padding:12px 0 20px;position:relative}
+      #default-label{text-align:right} #custom-label{text-align:left} .mode>.help{position:absolute;right:0;top:-6px}
+      .mode-text{color:#9e949b;font-size:13px}.mode-text.active{color:#f4d4e0;font-weight:700}
+      .toggle{position:relative;display:inline-flex;align-items:center;justify-content:center;width:50px;height:26px;flex:0 0 50px;vertical-align:middle;line-height:0}
+      .toggle input{position:absolute;opacity:0;width:0;height:0;min-width:0;min-height:0;margin:0;padding:0;border:0}
+      .slider{position:relative;display:grid;flex:0 0 50px;align-items:center;width:50px;height:26px;padding:2px;cursor:pointer;border-radius:999px;background:linear-gradient(145deg,#121821,#05080d);border:1px solid #94a3b82e;box-shadow:inset 4px 4px 8px #000b,inset -3px -3px 7px #94a3b814,0 0 8px #0008;transition:box-shadow .22s,border-color .22s}
+      .slider:before{content:'';position:relative;box-sizing:border-box;grid-area:1/1;align-self:center;justify-self:start;width:20px;height:20px;left:0;top:0;transform:translateX(0);border-radius:50%;background:linear-gradient(145deg,#303743,#171c25);border:1px solid #e2e8f057;box-shadow:0 0 8px #000b,inset 2px 2px 4px #ffffff14,inset -3px -3px 5px #0007;transition:transform .24s cubic-bezier(.2,.8,.2,1);z-index:2}
+      .slider:after{content:'';position:absolute;box-sizing:border-box;width:7px;height:7px;left:-9px;top:2px;border-radius:50%;background:#ef4444;box-shadow:0 0 9px #ef4444d9}
+      .toggle input:checked+.slider{border-color:#5eead4f2;background:linear-gradient(145deg,#101720,#05080d);box-shadow:inset 4px 4px 8px #000b,inset -3px -3px 7px #5eead41a,0 0 0 1px #4ade80b8,0 0 16px #4ade808c,0 0 22px #2dd4bf6b}
+      .toggle input:checked+.slider:before{transform:translateX(24px);border-color:#e2e8f094;box-shadow:0 0 8px #000c,0 0 10px #2dd4bf42,inset 2px 2px 4px #ffffff1a,inset -3px -3px 5px #0008}
+      .toggle input:checked+.slider:after{background:#4ade80;box-shadow:0 0 10px #4ade80e6,0 0 16px #2dd4bf8c}
+      .toggle input:focus-visible+.slider{outline:2px solid #7dd3fc;outline-offset:3px}
+      section+section{margin-top:20px} h3{color:#d89ab1;font-size:11px;letter-spacing:1px;text-transform:uppercase;margin:0 0 12px}
+      .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 18px}
+      section:first-child .grid>.field:only-child{grid-column:1/-1}
+      .field{min-width:0}.label{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:13px}.help{display:inline-grid;place-items:center;flex-shrink:0;border:1px solid #64515b;background:transparent;color:#c9a4b4;border-radius:50%;width:19px;height:19px;padding:0;font-size:11px;line-height:1}
+      select,input[type=number]{width:100%;min-width:0;height:38px;border:1px solid #453a40;background:#121113;border-radius:8px;color:#e2dce0;padding:7px 10px;font-size:12px}
+      input:disabled{opacity:.42} .field.disabled .label{color:#82777e}
+      .check-line{display:flex;align-items:center;gap:9px;min-height:38px;padding:8px 10px;background:#211e21;border:1px solid #3c3238;border-radius:8px}
+      .check-line label{flex:1;font-size:12px;cursor:pointer}.check-line input{width:16px;height:16px;margin:0;accent-color:#ac3d65;flex-shrink:0}
+      .rule{padding:13px 14px;border:1px solid #3a3036;border-radius:9px;background:#211d21}.rule strong{font-size:13px;color:#e1ccd7;display:block;margin-bottom:5px}.rule p{font-size:12px;color:#aba0a7;margin:0;line-height:1.65}
+      .footnote{color:#aca0a8;font-size:12px;margin:16px 0 0;line-height:1.6}
+      footer{display:flex;gap:9px;align-items:center;flex-wrap:wrap;padding:15px 24px;border-top:1px solid #3b3037;background:#19161a}
+      footer button{border:1px solid #4a3b43;border-radius:8px;padding:9px 14px;background:#282127;color:#d9ced5;font-size:12px} footer .primary{background:#95284d;border-color:#be4b73;color:#ffe6ef;font-weight:600} footer .reset{margin-right:auto;background:transparent;color:#bda5b1}
+      .feedback{flex-basis:100%;margin:0;font-size:12px;color:#dfb4c6}.feedback:empty{display:none}
+      #tooltip{position:fixed;z-index:5;max-width:min(340px,calc(100vw - 40px));padding:12px 14px;background:#30242c;color:#f2e5ec;border:1px solid #975069;border-radius:9px;box-shadow:0 10px 30px #0009;font-size:12px;line-height:1.6;pointer-events:none}
+      @media(max-width:540px){header{padding:15px 16px}.body{padding:16px}.grid{grid-template-columns:1fr;gap:13px}.mode{gap:17px}footer{padding:13px 16px;gap:7px}footer button{padding:9px 10px}.mode-text{font-size:12px}h2{font-size:19px}}
+      @media(max-width:360px){.mode{gap:10px}.mode-text{font-size:10px}.eyebrow{font-size:9px}footer .reset{flex-basis:100%}footer .cancel{margin-left:auto}}
+      @media(prefers-reduced-motion:reduce){*,*:before{transition:none!important}}
+    </style>
+    <dialog aria-labelledby="heading"><form>
+      <header><div><div class="eyebrow">Настройки выбора карт</div><h2 id="heading">Лучшая карта</h2></div><button class="close" type="button" aria-label="Закрыть без сохранения">×</button></header>
+      <div class="body">
+        <p class="notice"><b>Ваши правила выбора.</b> Настройки управляют подсветкой и автооткрытием. Звёздная ценность и статистика сохраняют обычный расчёт.</p>
+        <div class="mode"><span class="mode-text" id="default-label">По умолчанию</span><label class="toggle"><input id="custom" type="checkbox" role="switch" aria-label="Пользовательский режим"><span class="slider"></span></label><span class="mode-text" id="custom-label">Пользовательский</span><button type="button" class="help" data-help="По умолчанию — описание обычного выбора. Пользовательский — ваши настройки. Переключение не стирает значения. Чтобы запомнить изменения, нажмите «Сохранить»." aria-label="Подсказка о режиме">?</button></div>
+        <div id="default-view"><section><h3>Как выбирается карта сейчас</h3><div class="grid">
+          <div class="rule"><strong>01 · Ценность карты</strong><p>Учитываются ранг, редкость по числу владельцев, спрос относительно обменов, ваш список желаемого и дубли. Для очень низких оценок есть отдельный расчёт.</p></div>
+          <div class="rule"><strong>02 · Приоритет A</strong><p>Если нет карт выше A и особых рангов с плюсом, обычная A имеет приоритет. Среди A меньшая оценка может выиграть при преимуществе по желающим от 40.</p></div>
+          <div class="rule"><strong>03 · Слабый пак</strong><p>В обычном сравнении при максимальной ценности ниже 10 предпочтение отдаётся картам с 0 дублей. Среди них выбирается самая ценная.</p></div>
+          <div class="rule"><strong>04 · Равные оценки</strong><p>Подсвечиваются все лучшие. Автооткрытие ждёт ручного решения, кроме одинаковых экземпляров одной карты — там допускается первый.</p></div>
+        </div></section><p class="footnote">S, ASS, ранги с «+» и Gold имеют высший приоритет. Для своих правил включите «Пользовательский».</p></div>
+        <div id="custom-view" hidden></div>
+      </div>
+      <footer><p class="feedback" role="status" aria-live="polite"></p><button type="button" class="reset">Сбросить настройки</button><button type="button" class="cancel">Отмена</button><button type="submit" class="primary">Сохранить</button></footer>
+    </form><div id="tooltip" role="tooltip" hidden></div></dialog>`;
+    const $ = selector => root.querySelector(selector);
+    const dialog = $('dialog'), form = $('form'), controls = new Map();
+    function makeField([key, caption, type, help]) {
+      const field = document.createElement('div'); field.className = 'field';
+      const label = document.createElement('label'); label.htmlFor = 'field-'+key; label.textContent = caption;
+      const hint = document.createElement('button'); hint.type = 'button'; hint.className = 'help'; hint.textContent = '?';
+      hint.dataset.help = help; hint.setAttribute('aria-label', 'Подсказка: '+caption);
+      const input = document.createElement(Array.isArray(type) ? 'select' : 'input'); input.id = 'field-'+key; input.dataset.key = key;
+      if (Array.isArray(type)) for (const [value, text] of type) input.add(new Option(text, value));
+      else if (type === 'check') input.type = 'checkbox';
+      else { input.type = 'number'; input.min = '0'; input.max = String(type.max); input.step = '1'; input.required = true; }
+      if (type === 'check') { field.classList.add('check-line'); field.append(input, label, hint); }
+      else { const line = document.createElement('div'); line.className = 'label'; line.append(label, hint); field.append(line, input); }
+      controls.set(key, input); return field;
+    }
+    for (const [title, items] of groups) {
+      const section = document.createElement('section'), h = document.createElement('h3'), grid = document.createElement('div');
+      h.textContent = title; grid.className = 'grid'; grid.append(...items.map(makeField)); section.append(h, grid); $('#custom-view').append(section);
+    }
+    const footnote = document.createElement('p'); footnote.className = 'footnote';
+    footnote.textContent = 'S, ASS, «+» и Gold имеют высший приоритет во всех режимах. При работающем автооткрытии изменения применяются со следующего пака.';
+    $('#custom-view').append(footnote);
+    function setValues(value) {
+      $('#custom').checked = value.custom;
+      for (const [key, input] of controls) { if (input.type === 'checkbox') input.checked = value[key]; else input.value = value[key]; }
+      refresh();
+    }
+    function refresh() {
+      const custom = $('#custom').checked;
+      $('#default-view').hidden = custom; $('#custom-view').hidden = !custom;
+      $('#default-label').classList.toggle('active', !custom); $('#custom-label').classList.toggle('active', custom);
+      for (const [key, input] of controls) {
+        const relevant = key === 'demandGap' ? controls.get('demandA').checked
+          : key === 'weakThreshold' ? controls.get('weak').checked || controls.get('unowned').value === 'low' : true;
+        input.disabled = !custom || !relevant; input.closest('.field').classList.toggle('disabled', !relevant);
+      }
+    }
+    function readValues() {
+      const value = {custom:$('#custom').checked};
+      for (const [key, input] of controls) value[key] = input.type === 'checkbox' ? input.checked : input.type === 'number' ? (input.value === '' ? saved[key] : Number(input.value)) : input.value;
+      return normalize(value);
+    }
+    function open() {
+      if (dialog.open) return;
+      saved=normalizeBestCardSettings(cfg.bestCardSettings);
+      setValues(saved); $('.feedback').textContent = storageError ? 'Хранилище недоступно. Сохранение может не сработать.' : '';
+      dialog.showModal(); $('.body').scrollTop = 0; $('#custom').focus();
+    }
+    function close() { hideHelp(); dialog.close(); }
+    $('.close').addEventListener('click', close); $('.cancel').addEventListener('click', close);
+    dialog.addEventListener('cancel', hideHelp); dialog.addEventListener('close', hideHelp);
+    $('#custom').addEventListener('change', refresh);
+    for (const input of controls.values()) input.addEventListener('change', refresh);
+    $('.reset').addEventListener('click', () => {
+      setValues({...defaults, custom:$('#custom').checked});
+      $('.feedback').textContent = 'Поля сброшены. Сохраните результат или нажмите «Отмена». Статистика не затронута.';
     });
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+      if (!form.reportValidity()) return;
+      const next = readValues();
+      const previous=cfg.bestCardSettings;
+      if(cfg.autoOpenEnabled && getActiveRow())getBestCardPolicy(getActiveRow());
+      try {
+        // This dialog reports write failures instead of using the silent generic gmSet wrapper.
+        GM_setValue(SETTINGS_KEY,JSON.stringify({...cfg,bestCardSettings:next}));
+        cfg.bestCardSettings=next;saved=next;storageError=false;
+        if(!cfg.autoOpenEnabled)bestCardPackState=null;
+        debouncedAddCardValue();
+        $('.feedback').textContent=cfg.autoOpenEnabled?'Сохранено. Новые правила применятся со следующего пака.':'Сохранено. Новые правила применены к выбору карты.';
+      } catch {
+        cfg.bestCardSettings=previous;
+        $('.feedback').textContent='Не удалось сохранить. Ваши изменения пока остаются в окне.';
+      }
+    });
+    const tooltip = $('#tooltip'); let helpTarget = null;
+    function hideHelp() { tooltip.hidden = true; helpTarget?.removeAttribute('aria-describedby'); helpTarget = null; }
+    function showHelp(button) {
+      hideHelp(); helpTarget = button; button.setAttribute('aria-describedby', 'tooltip');
+      tooltip.textContent = button.dataset.help; tooltip.hidden = false;
+      const r = button.getBoundingClientRect(), box = tooltip.getBoundingClientRect();
+      tooltip.style.left = Math.max(20, Math.min(r.left, innerWidth - box.width - 20))+'px';
+      tooltip.style.top = Math.max(12, Math.min(r.bottom + 8, innerHeight - box.height - 12))+'px';
+    }
+    root.querySelectorAll('.help').forEach(button => {
+      button.addEventListener('pointerenter', event => { if (event.pointerType !== 'touch') showHelp(button); });
+      button.addEventListener('pointerleave', event => { if (event.pointerType !== 'touch') hideHelp(); });
+      button.addEventListener('focus', () => showHelp(button));
+      button.addEventListener('blur', hideHelp);
+      button.addEventListener('click', () => showHelp(button));
+    });
+    root.addEventListener('pointerdown', event => { if (!event.target.closest('.help')) hideHelp(); });
+    $('.body').addEventListener('scroll', hideHelp, {passive:true});
+    window.addEventListener('resize', hideHelp, {passive:true});
+    bestCardSettingsDialogOpen=open;
+    open();
+  }
+  function cleanupBestCardSettingsUi() {
+    document.getElementById('cv-best-settings-btn')?.remove();
+    document.getElementById('cv-best-settings-host')?.shadowRoot?.querySelector('dialog')?.close();
+  }
+  function insertStatsButton(){
+    const bestEnabled=!!(cfg.modBestCard && cfg.modCardValue);
+    if(!cfg.modStats)cleanupStatsUi();
+    if(!bestEnabled)cleanupBestCardSettingsUi();
+    if(!cfg.modStats && !bestEnabled){document.getElementById('cv-pack-stats-card')?.remove();return;}
+    let tools=getPackTools();
+    if(!tools){
+      const label=document.querySelector('label.checkbox input#packs_demand')?.closest('label.checkbox');
+      if(!label)return;
+      tools=document.getElementById('cv-pack-tools');
+      if(!tools){tools=document.createElement('div');tools.id='cv-pack-tools';label.after(tools);}
+    }
+    if(cfg.modStats){
+      let button=document.getElementById('cv-stats-btn');
+      if(!button){
+        button=document.createElement('button');button.id='cv-stats-btn';button.type='button';
+        button.addEventListener('click',()=>{
+          if(!document.getElementById('cv-stats-panel'))createStatsPanel();
+          const panel=document.getElementById('cv-stats-panel');
+          if(panel.style.display==='none'){
+            panel.style.display='block';renderStatsTab();
+            requestAnimationFrame(()=>suiteClampToViewport(panel,{margin:8,constrainSize:true}));
+          }else panel.style.display='none';
+        });
+        if(!document.getElementById('cv-stats-panel'))createStatsPanel();
+      }
+      placePackStatsButton(button,tools);
+    }
+    if(bestEnabled){
+      let button=document.getElementById('cv-best-settings-btn');
+      if(!button){
+        button=document.createElement('button');button.id='cv-best-settings-btn';button.type='button';
+        button.addEventListener('click',openBestCardSettings);
+        // Updated preview scripts remove their launcher when the integrated UI becomes available.
+        document.dispatchEvent(new CustomEvent('suite-best-card-integrated'));
+      }
+      placePackStatsButton(button,tools);
+    }
+    const card=document.getElementById('cv-pack-stats-card'), title=card?.querySelector('.cv-pack-tool-title'), note=card?.querySelector('.cv-pack-tool-note');
+    const text=cfg.modStats?(bestEnabled?'Статистика и лучшая карта':'Статистика паков'):'Лучшая карта';
+    const caption=cfg.modStats?(bestEnabled?'История выпадений и настройки выбора карты':'Полученные карты и история выпадений'):'Настройки выбора карты из пака';
+    if(title && title.textContent!==text)title.textContent=text;
+    if(note && note.textContent!==caption)note.textContent=caption;
   }
 
   function placePackStatsButton(button,tools){
     let card=document.getElementById('cv-pack-stats-card');
     if(!card){
-      card=document.createElement('div'); card.id='cv-pack-stats-card';
-      card.innerHTML='<span class="cv-pack-tool-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 3v17h17M8 15v-4m5 4V7m5 8V4"/></svg></span><div class="cv-pack-tool-body"><strong class="cv-pack-tool-title">Статистика паков</strong><small class="cv-pack-tool-note">Полученные карты и история выпадений</small></div>';
+      card=document.createElement('div');card.id='cv-pack-stats-card';
+      card.innerHTML='<span class="cv-pack-tool-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 3v17h17M8 15v-4m5 4V7m5 8V4"/></svg></span><div class="cv-pack-tool-body"><strong class="cv-pack-tool-title"></strong><small class="cv-pack-tool-note"></small></div>';
     }
     if(card.parentElement!==tools)tools.append(card);
     const body=card.querySelector('.cv-pack-tool-body');
     if(button.parentElement!==body){
-      button.style.cssText='';
-      button.onmouseover=null; button.onmouseout=null;
-      button.textContent='Открыть статистику →';
+      button.style.cssText='';button.onmouseover=null;button.onmouseout=null;
+      button.textContent=button.id==='cv-stats-btn'?'Открыть статистику →':'Настроить лучшую карту →';
       body.append(button);
     }
   }
 
   function cleanupStatsUi(){
     document.getElementById('cv-stats-btn')?.remove();
-    document.getElementById('cv-pack-stats-card')?.remove();
+    if(!cfg.modBestCard || !cfg.modCardValue)document.getElementById('cv-pack-stats-card')?.remove();
     document.getElementById('cv-stats-panel')?.remove();
-    statsPanel = null;
+    statsPanel=null;
   }
 
   // ============================================================
@@ -9926,6 +10211,10 @@
       if(!autoPackReady() || !card.isConnected || card.closest('.lootbox__row')!==getActiveRow()){
         autoBusy=false; scheduleAutoLoop(AUTO_DELAY_WAIT_CLOSE); return;
       }
+      highlightBestCard();
+      if(!card.classList.contains('cv-best-card')){
+        autoBusy=false;scheduleAutoLoop(AUTO_DELAY_WAIT_CLOSE);return;
+      }
       if(!autoBeginChoice(card)){autoBusy=false;return;}
       autoDiagnosticRecord('card_click',{packId:autoLastChosenPackId,card:getAutoCardIdentity(card)});
       autoOpenSuppressGuard=true;
@@ -10569,6 +10858,7 @@
       return;
     }
     if(key==='modCardValue'){
+      insertStatsButton();
       if(!cfg.modCardValue && (cfg.modAutoOpen || cfg.autoOpenEnabled)){
         stopAutoOpen('Модуль выключен');
         updateAutoOpenPanel();
@@ -10586,10 +10876,11 @@
           if(text.includes('Подсветка лучшей карты')) input.checked = true;
         });
       }
+      insertStatsButton();
       debouncedAddCardValue();
       return;
     }
-    if(key==='modStats'){ if(cfg.modStats) insertStatsButton(); else cleanupStatsUi(); insertGuaranteeInfo(); return; }
+    if(key==='modStats'){ insertStatsButton(); insertGuaranteeInfo(); return; }
     if(key==='modGuarantee'){ insertGuaranteeInfo(); return; }
     if(key==='modOnlyPack20'){ applyOnlyPack20(); return; }
     if(key==='modNeon'){ if(cfg.modNeon) setupNeonObservers(); else cleanupNeonUi(); return; }
@@ -11778,7 +12069,7 @@
       observeContainer(document.querySelector('.trade__main'));
       debouncedAddCardValue();
     });
-    suiteStartModule('pack_stats', 'modStats', insertStatsButton);
+    suiteStartModule('pack_stats', null, insertStatsButton);
     suiteStartModule('hotkeys', 'modHotkeys', createHotkeyPanel);
     suiteStartModule('auto_open', 'modAutoOpen', createAutoOpenPanel);
     suiteStartModule('settings', null, createSettingsButton);
