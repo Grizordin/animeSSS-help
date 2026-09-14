@@ -1427,7 +1427,7 @@
       }
       if(cfg.modEnlightenment){
         const counts = [...document.querySelectorAll('.nclub__top-carou.nclub__sect .club-top-list__count > div, .cg-daily .club-top-list__count > div')];
-        const pending = counts.filter(div => getEnlightenmentTotal(div.textContent) !== null);
+        const pending = counts.filter(div => getEnlightenmentTotal(div) !== null);
         if(pending.length) report('suite', 'enlightenment_not_applied', { count:pending.length });
       }
 
@@ -4414,7 +4414,15 @@
   //  ПРОСВЕТЛЕНИЕ
   // ============================================================
 
+  const enlightenmentFormattedState=new WeakMap();
+
   function getEnlightenmentTotal(text){
+    if(text?.nodeType === 1){
+      const label=text.querySelector('.cg-stat-label');
+      const value=text.querySelector('.cg-stat-value');
+      const extra=text.querySelector('.cg-stat-extra');
+      text=label && value ? `${label.textContent.trim()} ${value.textContent.trim()} ${extra?.textContent.trim() || ''}` : text.textContent;
+    }
     const match=String(text||'').trim().match(/^Просветление\s+(\d[\d\s]*)\s*\((\s*\+\s*\d[\d\s]*)+\)\s*$/i);
     if(!match)return null;
     const parts=String(text).slice(String(text).indexOf('(')+1,String(text).lastIndexOf(')')).split('+').slice(1);
@@ -4422,9 +4430,33 @@
     const total=values.reduce((sum,value)=>sum+value,0);
     return values.every(Number.isSafeInteger)&&Number.isSafeInteger(total)?total:null;
   }
+
+  function restoreFormattedEnlightenment(div){
+    const state=enlightenmentFormattedState.get(div);
+    if(!state)return;
+    // Restore only our own output; leave fresh values or replaced site nodes intact.
+    if(div.contains(state.value) && state.value.textContent===state.total)state.value.textContent=state.base;
+    if(div.contains(state.extra) && state.extra.textContent==='')state.extra.textContent=state.bonus;
+    enlightenmentFormattedState.delete(div);
+  }
+
   function applyEnlightenment(){
     if(!cfg.modEnlightenment)return;
     document.querySelectorAll('.nclub__top-carou.nclub__sect .club-top-list__count > div, .cg-daily .club-top-list__count > div').forEach(div=>{
+      const value=div.querySelector('.cg-stat-value');
+      const extra=div.querySelector('.cg-stat-extra');
+      const state=enlightenmentFormattedState.get(div);
+      if(state && value===state.value && extra===state.extra && value.textContent===state.total
+        && extra.textContent==='' && div.querySelector('.cg-stat-label')?.textContent.trim()==='Просветление')return;
+      restoreFormattedEnlightenment(div);
+      if(div.querySelector('.cg-stat-label') && value){
+        const total=getEnlightenmentTotal(div);
+        if(total===null || !extra)return;
+        enlightenmentFormattedState.set(div,{value,extra,base:value.textContent,bonus:extra.textContent,total:String(total)});
+        value.textContent=String(total);
+        extra.textContent='';
+        return;
+      }
       const text=div.textContent;
       if(div.dataset.enlightenmentRenderedText && text!==div.dataset.enlightenmentRenderedText){
         // The site updated this node: never restore an older snapshot over fresh data.
@@ -4441,6 +4473,7 @@
   }
 
   function cleanupEnlightenment(){
+    document.querySelectorAll('.club-top-list__count > div').forEach(restoreFormattedEnlightenment);
     document.querySelectorAll('.club-top-list__count > div[data-enlightenment-original-text]').forEach(div=>{
       if(!div.dataset.enlightenmentRenderedText || div.textContent===div.dataset.enlightenmentRenderedText){
         div.textContent = div.dataset.enlightenmentOriginalText || div.textContent;
