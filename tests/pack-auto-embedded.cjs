@@ -34,6 +34,7 @@ const isPremiumLockedSetting=()=>false,warnCardStatsDemandRequired=()=>false,war
 const ensureAutoDiagnosticTimer=()=>{},autoResolveExpectation=()=>{},autoStartExpectation=()=>{},autoDiagnosticRecord=()=>{},autoReportDiagnosticStall=()=>{};
 const scheduleAutoLoop=()=>scheduled++,getAutoCardIdentity=c=>c.dataset.id,needsAutoRareViewDelay=()=>rare;
 const getActiveRow=()=>document.querySelector('.lootbox__row[data-pack-id]');
+const captureAutoPackPick=()=>null,recordConfirmedPackPick=()=>{}; // Statistics covered by pack-picked-stats.cjs.
 const highlightBestCard=()=>getActiveRow()?.querySelector('.lootbox__card')?.classList.add('cv-best-card');
 const getCurrentStoneBalance=()=>100000,autoHandlePackRetry=()=>false,getAutoPackRetryButton=()=>null;
 const selectPack20=()=>{},isPack20Active=()=>true,clickBuyButton=()=>bought++,hasOpenCardsReady=()=>!!getActiveRow();

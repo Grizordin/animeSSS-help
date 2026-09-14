@@ -28,6 +28,7 @@ const bestCardReasonPickedPacks=new Set();let bestCardPackState=null;const openB
 let passed=0;function check(v,msg){if(!v)throw Error(msg);passed++;}
 const neonStateMap=new WeakMap();
 const tryRecordAllCards=()=>{};
+const captureAutoPackPick=()=>null,recordConfirmedPackPick=()=>{}; // Statistics covered by pack-picked-stats.cjs.
 const createStatsPanel=()=>{if(document.getElementById('cv-stats-panel'))return;const p=document.createElement('div');p.id='cv-stats-panel';p.style.display='none';document.body.append(p);};
 const renderStatsTab=()=>{}; const suiteClampToViewport=()=>{};let statsPanel=null;
 const PACK20_COUNT=20,PACK20_STONES=1600,GUARANTEE_STONES=144000;

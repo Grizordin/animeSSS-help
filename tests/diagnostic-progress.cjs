@@ -30,6 +30,7 @@ const isAutoOpenAvailable=()=>true,autoPackReady=()=>ready,hasOpenCardsReady=()=
 const getVisibleBestCards=()=>Array(best).fill({}),autoDiagnosticRecord=()=>{};
 const autoReportDiagnosticStall=(code,details)=>issues.push({code,details});
 const clearAutoChoiceWatch=()=>{},saveAutoOpenedCount=()=>saved++,updateAutoCount=()=>{};
+const recordConfirmedPackPick=()=>{}; // Statistics covered by pack-picked-stats.cjs.
 const stopAutoOpen=()=>{cfg.autoOpenEnabled=false;},scheduleAutoLoop=()=>scheduled++,setAutoStatus=()=>{};
 function wait(kind,age=11000){autoExpectation={kind,key:kind,startedAt:now-age,reported:false};}
 function reset(){issues.length=0;autoPendingChoice=null;autoExpectation=null;cfg.autoOpenEnabled=true;stage='ready';ready=true;cards=true;best=1;autoLoopTimer=1;autoBusy=false;autoBusySinceAt=0;autoSchedulerMissingSinceAt=0;suiteHealthVisibleSince=0;document.visibilityState='visible';}
