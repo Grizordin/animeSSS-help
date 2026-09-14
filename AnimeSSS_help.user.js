@@ -2690,9 +2690,15 @@
     const key = rank.toUpperCase();
     if (!stats[bucket][key]) stats[bucket][key] = { count:0, totalValue:0, minValue:Infinity, maxValue:-Infinity, byDate:{} };
     const s = stats[bucket][key];
-    s.count++; s.totalValue = Math.round((s.totalValue + value)*100)/100;
-    if (value < s.minValue) s.minValue = value;
-    if (value > s.maxValue) s.maxValue = value;
+    s.count++;
+    if (Number.isFinite(value)) {
+      s.totalValue = Math.round((s.totalValue + value)*100)/100;
+      if (!Number.isFinite(s.minValue) || value < s.minValue) s.minValue = value;
+      if (!Number.isFinite(s.maxValue) || value > s.maxValue) s.maxValue = value;
+    } else {
+      // Missing card stats must not lose the card or turn its unknown value into zero.
+      s.missingValueCount = (s.missingValueCount || 0) + 1;
+    }
     s.byDate[todayKey] = (s.byDate[todayKey]||0)+1;
     saveStats();
   }
@@ -2849,14 +2855,71 @@
     prevGuaranteeCount = cur;
   }
 
-  function onCardPicked(card) {
-    if(!cfg.modStats)return;
-    const row=card.closest('.lootbox__row[data-pack-id]'); if(!row)return;
-    const packId=row.getAttribute('data-pack-id');
-    if(!packId||seenPickIds.has(packId))return;
-    seenPickIds.add(packId); saveSeenPicks();
-    const r=computeCardValue(card); if(r)recordCard('pickedCards',r.rank,r.value);
+  let manualPackPick=null, manualPackPickObserver=null;
+
+  function capturePackPick(card) {
+    if(!cfg.modStats)return null;
+    const packId=card.closest('.lootbox__row[data-pack-id]')?.getAttribute('data-pack-id');
+    const r=computeCardValue(card);
+    const rank=r?.rank||getCardRank(card);
+    if(!packId||!rank)return null;
+    // Keep immutable data before the site's click handler clears/reuses the DOM.
+    return Object.freeze({packId,cardId:getCardId(card),rank,value:Number.isFinite(r?.value)?r.value:null});
+  }
+
+  function recordConfirmedPackPick(pick) {
+    if(!cfg.modStats||!pick?.packId||!pick.rank||seenPickIds.has(pick.packId))return false;
+    recordCard('pickedCards',pick.rank,pick.value);
+    // Do not deduplicate a card whose data could not be recorded.
+    seenPickIds.add(pick.packId); saveSeenPicks();
     renderStatsTab();
+    return true;
+  }
+
+  function checkManualPackPick() {
+    if(!manualPackPick)return;
+    const {row,pick}=manualPackPick;
+    const stage=document.querySelector('.packs-stage')?.getAttribute('data-pack-state');
+    if(cfg.modStats && (stage==='error' || (row.isConnected && row.getAttribute('data-pack-id')===pick.packId)))return;
+    // Same success signal as auto-open; a click or a hidden row alone is not a receipt.
+    recordConfirmedPackPick(pick);
+    clearManualPackPick();
+  }
+
+  function clearManualPackPick() {
+    manualPackPick=null;
+    manualPackPickObserver?.disconnect(); manualPackPickObserver=null;
+  }
+
+  function captureAutoPackPick(card) {
+    checkManualPackPick();
+    // A retry can switch from manual to auto selection of a different card.
+    clearManualPackPick();
+    return capturePackPick(card);
+  }
+
+  function onCardPicked(card) {
+    checkManualPackPick();
+    const row=card.closest('.lootbox__row[data-pack-id]');
+    if(!row||!autoPackReady())return;
+    // Auto-open owns its snapshot and confirmation, including manual pauses.
+    if(autoPendingChoice?.packId===row.getAttribute('data-pack-id')){
+      // After a failed automatic request the user may pick another card manually.
+      if(autoPendingChoice.cardId!==getCardId(card)){
+        autoPendingChoice.statsPick=capturePackPick(card);
+        autoPendingChoice.cardId=getCardId(card);
+      }
+      if(!autoChoiceObserver)watchAutoChoice();
+      return;
+    }
+    const pick=capturePackPick(card);
+    if(!pick||seenPickIds.has(pick.packId))return;
+    manualPackPick={row,pick};
+    if(!manualPackPickObserver){
+      manualPackPickObserver=new MutationObserver(checkManualPackPick);
+      manualPackPickObserver.observe(document.querySelector('.lootbox')||document.querySelector('.packs-stage')||document.body,
+        {childList:true,subtree:true,attributes:true,attributeFilter:['data-pack-id','data-pack-state']});
+    }
   }
 
   // ============================================================
@@ -2926,7 +2989,7 @@
     if(isConfirmDialogOpen() && confirmedCard !== card){
       e.preventDefault(); e.stopImmediatePropagation(); return;
     }
-    if(confirmedCard===card){ confirmedCard=null; hideBestCardReasonsForPack(row); setTimeout(()=>onCardPicked(card),80); return; }
+    if(confirmedCard===card){ confirmedCard=null; hideBestCardReasonsForPack(row); handleAutoManualPick(card); onCardPicked(card); return; }
     if(cfg.modGuard && !autoOpenSuppressGuard){
       const vals=[...row.querySelectorAll('.lootbox__card')].map(c=>{ const r=computeCardValue(c); return r?r.value:0; });
       const bv=Math.max(...vals);
@@ -2934,8 +2997,8 @@
       if(bv-cv>=cfg.guardThreshold){ e.preventDefault(); e.stopImmediatePropagation(); showConfirmDialog(card,cv,bv); return; }
     }
     hideBestCardReasonsForPack(row);
-    setTimeout(()=>onCardPicked(card),80);
     handleAutoManualPick(card);
+    onCardPicked(card);
   }
   document.addEventListener('click',handlePackCardClick,true);
 
@@ -3731,7 +3794,8 @@
       const s=data[r]||null;
       const cnt=s?getCountForFilter(s):0;
       const pct=total>0&&cnt>0?((cnt/total)*100).toFixed(1):'0.0';
-      const avg=s&&s.count>0?(s.totalValue/s.count).toFixed(2):'—';
+      const valuedCount=s?s.count-(s.missingValueCount||0):0;
+      const avg=valuedCount>0?(s.totalValue/valuedCount).toFixed(2):'—';
       const color=RANK_COLORS[r]||'#ccc';
       const dimmed=cnt===0?';opacity:.35':'';
       return `<tr style="transition:opacity .15s${dimmed}">
@@ -3744,7 +3808,7 @@
           </div>
         </td>
         <td style="padding:5px 8px;text-align:center;color:${cnt>0?'#94a3b8':'#334155'}">${avg}</td>
-        <td style="padding:5px 8px;text-align:center;color:#475569;font-size:11px">${s&&s.minValue!==Infinity?s.minValue:'—'} / ${s&&s.maxValue!==-Infinity?s.maxValue:'—'}</td>
+        <td style="padding:5px 8px;text-align:center;color:#475569;font-size:11px">${s&&Number.isFinite(s.minValue)?s.minValue:'—'} / ${s&&Number.isFinite(s.maxValue)?s.maxValue:'—'}</td>
       </tr>`;
     }).join('');
     return`<div style="font-size:11px;color:#475569;margin-bottom:8px;text-align:right">Всего карт: <b style="color:#64748b">${total}</b></div>
@@ -10221,7 +10285,7 @@
     const row=card.closest('.lootbox__row[data-pack-id]');
     if(!row?.getAttribute('data-pack-id'))return false;
     autoLastChosenPackId=row?.getAttribute('data-pack-id')||'';
-    autoPendingChoice={row,packId:autoLastChosenPackId,cardId:card.getAttribute('data-id'),startedAt:Date.now()};
+    autoPendingChoice={row,packId:autoLastChosenPackId,cardId:card.getAttribute('data-id'),startedAt:Date.now(),statsPick:captureAutoPackPick(card)};
     autoStartExpectation('pack_close_after_card',{packId:autoLastChosenPackId,card:getAutoCardIdentity(card)});
     watchAutoChoice();
     return true;
@@ -10293,6 +10357,7 @@
       autoPendingChoice=null;
       clearAutoChoiceWatch();
       autoResolveExpectation('card_pick_confirmed_by_pack_change');
+      recordConfirmedPackPick(pending.statsPick);
       if(!autoCountedPackIds.has(pending.packId)){
         autoCountedPackIds.add(pending.packId);
         if(autoCountedPackIds.size>200)autoCountedPackIds.delete(autoCountedPackIds.values().next().value);

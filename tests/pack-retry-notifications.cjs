@@ -59,6 +59,7 @@ const scheduleAutoLoop=()=>scheduled++;
 const autoStartExpectation=(kind)=>autoExpectation={kind};
 const autoResolveExpectation=()=>autoExpectation=null;
 const saveAutoOpenedCount=()=>{},updateAutoCount=()=>{},getAutoCardIdentity=c=>c.dataset.id;
+const captureAutoPackPick=()=>null,recordConfirmedPackPick=()=>{}; // Statistics covered by pack-picked-stats.cjs.
 const autoCheckDiagnosticProgress=()=>{},isPremiumLockedSetting=()=>false,warnPremiumRequired=()=>{},warnCardStatsDemandRequired=()=>false,isAutoOpenAvailable=()=>true;
 let activeCost=100;
 const selectPack20=()=>{selected++;activeCost=1600;},isPack20Active=()=>true;
