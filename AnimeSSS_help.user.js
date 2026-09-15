@@ -141,10 +141,26 @@
     guardThreshold: 20,       // порог разницы ценности для защитного окна
   };
 
-  // Saved values override defaults; changing defaults must never reset existing preferences.
+  // Per-field preferences survive full-object writes from older tabs. Runtime pack
+  // state stays in the legacy object so an old running tab can still update it.
+  const SETTING_VALUE_PREFIX = 'suite_setting_value_v2:';
+  const PERSISTENT_SETTING_KEYS = new Set(Object.keys(DEFAULT_SETTINGS).filter(key=>
+    key !== 'autoOpenedCount' && key !== 'autoOpenEnabled'
+  ));
+  function readSettingPreference(key) {
+    if(!PERSISTENT_SETTING_KEYS.has(key)) return null;
+    const entry = gmGet(SETTING_VALUE_PREFIX + key, null);
+    return entry && entry.version === 1 && Object.prototype.hasOwnProperty.call(entry,'value') ? entry : null;
+  }
+
+  // No bulk migration or default writes: existing settings remain the fallback.
   let cfg = { ...DEFAULT_SETTINGS, ...gmGet(SETTINGS_KEY, {}) };
+  PERSISTENT_SETTING_KEYS.forEach(key=>{
+    const preference = readSettingPreference(key);
+    if(preference) cfg[key] = preference.value;
+  });
   let savedCfgSnapshot = JSON.parse(JSON.stringify(cfg));
-  function saveCfg(explicitKeys = [], throwOnError = false) {
+  function saveCfg(explicitKeys = [], throwOnError = false, savePreferences = true) {
     try {
       // Other tabs can update settings while this page keeps an older runtime cfg.
       // Save only local changes, never the stale full configuration or defaults.
@@ -157,7 +173,12 @@
       const next = stored && typeof stored === 'object' && !Array.isArray(stored) ? {...stored} : {};
       changedKeys.forEach(key=>{ next[key] = cfg[key]; });
       GM_setValue(SETTINGS_KEY, JSON.stringify(next));
-      savedCfgSnapshot = JSON.parse(JSON.stringify(cfg));
+      changedKeys.forEach(key=>{
+        if(savePreferences && PERSISTENT_SETTING_KEYS.has(key)) {
+          GM_setValue(SETTING_VALUE_PREFIX + key, JSON.stringify({version:1,value:cfg[key]}));
+        }
+        savedCfgSnapshot[key] = cfg[key] === undefined ? undefined : JSON.parse(JSON.stringify(cfg[key]));
+      });
     } catch(error) {
       if(throwOnError) throw error;
     }
@@ -213,8 +234,10 @@
 
     let changed = false;
     PREMIUM_REQUIRED_SETTINGS.forEach(key=>{
-      if(Object.prototype.hasOwnProperty.call(desired, key) && cfg[key] !== !!desired[key]) {
-        cfg[key] = !!desired[key];
+      const preference = readSettingPreference(key);
+      const value = preference ? preference.value : desired[key];
+      if((preference || Object.prototype.hasOwnProperty.call(desired, key)) && cfg[key] !== !!value) {
+        cfg[key] = !!value;
         changed = true;
       }
     });
@@ -224,7 +247,7 @@
       changed = true;
     }
 
-    if(changed) saveCfg();
+    if(changed) saveCfg([],false,false);
     return changed;
   }
 
@@ -254,7 +277,8 @@
     }
 
     if(shouldSaveDesired && !getPremiumDesiredSettings()) savePremiumDesiredSettings(desiredBeforeLock);
-    if(changed) saveCfg();
+    // Access enforcement changes runtime availability, not the user's preference.
+    if(changed) saveCfg([],false,false);
     return changed;
   }
 

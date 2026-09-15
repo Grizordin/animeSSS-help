@@ -16,9 +16,11 @@ const setup=`
 const cfg={modStats:true,modBestCard:true,modCardValue:true,autoOpenEnabled:false,bestCardSettings:{}};
 const bestCardReasonPickedPacks=new Set();let bestCardPackState=null,bestCardSettingsDialogOpen=null,statsPanel=null,saves=0,clicks=0,scheduled=0;
 const SETTINGS_KEY='suite_settings_v1';let stored=null,failStorage=false;
+const SETTING_VALUE_PREFIX='suite_setting_value_v2:',preferences=new Map();
+const PERSISTENT_SETTING_KEYS=new Set(Object.keys(cfg).filter(key=>key!=='autoOpenEnabled'));
 let savedCfgSnapshot=JSON.parse(JSON.stringify(cfg));
-const GM_getValue=()=>stored===null?null:JSON.stringify(stored);
-const GM_setValue=(key,value)=>{if(failStorage)throw Error('No storage');if(key!==SETTINGS_KEY)throw Error('Wrong key');stored=JSON.parse(value);saves++;};
+const GM_getValue=(key,fallback)=>key===SETTINGS_KEY?(stored===null?null:JSON.stringify(stored)):(preferences.get(key)??fallback);
+const GM_setValue=(key,value)=>{if(failStorage)throw Error('No storage');if(key===SETTINGS_KEY){stored=JSON.parse(value);saves++;}else if(key.startsWith(SETTING_VALUE_PREFIX)){preferences.set(key,value);}else throw Error('Wrong key');};
 ${extract('gmGet')}
 ${extract('saveCfg')}
 let autoBusy=false,autoRunGeneration=0,autoOpenSuppressGuard=false,autoLastChosenPackId='',rareDelay=false;
