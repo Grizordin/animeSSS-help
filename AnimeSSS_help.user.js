@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.70
+// @version      3.71
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -73,43 +73,44 @@
   const SETTINGS_KEY = 'suite_settings_v1';
   const PREMIUM_DESIRED_SETTINGS_KEY = 'suite_premium_desired_settings_v1';
   const DEFAULT_SETTINGS = {
-    // Модули вкл/выкл
-    modCardValue:     true,   // ценность карт
-    modHotkeys:       true,   // горячие клавиши
-    modStats:         true,   // статистика паков
-    modNeon:          true,   // неоновые обводки
-    modNeonAnimation: true,   // анимация неоновых обводок
-    modMenuBg:        true,   // фон меню
+    // Новые функции выключены, пока пользователь не включит их сам.
+    modCardValue:     false,  // ценность карт
+    modHotkeys:       false,  // горячие клавиши
+    modStats:         false,  // статистика паков
+    modNeon:          false,  // неоновые обводки
+    modNeonAnimation: false,  // анимация неоновых обводок
+    modMenuBg:        false,  // фон меню
     menuBgDim:        0.42,   // затемнение фона меню
     menuTextClarity:  0.75,   // четкость текста меню
-    modProfileBtns:   true,   // кнопки "Открытые S" и "Желаемые"
-    modEnlightenment: true,   // просветление
-    modVoteCardsToggle:true,  // скрытие голосования
-    modSuggestionAuthors:true,// предложка и авторы на голосовании
-    modCustomPush:    true,   // кастомные уведомления
+    modProfileBtns:   false,  // кнопки "Открытые S" и "Желаемые"
+    modEnlightenment: false,  // просветление
+    modVoteCardsToggle:false, // скрытие голосования
+    modSuggestionAuthors:false,// предложка и авторы на голосовании
+    modCustomPush:    false,  // кастомные уведомления
     customPushScale:  1,      // масштаб кастомных уведомлений
-    modStones:        true,   // камни
-    modChatStoneAutoloot:true, // автолут небесного камня из чата
-    modGachaAutoloot: true,   // автолут гачи клуба
-    modWantCards:     true,   // кнопка добавления в желаемое
-    modQuickCardOwners:true,  // быстрые фильтры обладателей карты
-    wantButtonsAlways:true,   // кнопки желаемого видны постоянно
+    modStones:        false,  // камни
+    modChatStoneAutoloot:false, // автолут небесного камня из чата
+    modGachaAutoloot: false,  // автолут гачи клуба
+    modWantCards:     false,  // кнопка добавления в желаемое
+    modQuickCardOwners:false, // быстрые фильтры обладателей карты
+    modOwnerRestrictions:false, // личные ЧС и запреты в списках обладателей
+    wantButtonsAlways:false,  // кнопки желаемого видны постоянно
     mobileFloatingUiHidden:false, // мобильные плавающие кнопки и окна визуально скрыты
-    modNoNeedCards:   true,   // кнопка ненужных карт
-    noNeedButtonsAlways:true, // кнопки ненужного видны постоянно
-    modBrickFill:     true,   // наполнение кирпича
-    modRemelt:        true,   // переплавка карт
-    modBestCard:      true,   // подсветка лучшей карты
+    modNoNeedCards:   false,  // кнопка ненужных карт
+    noNeedButtonsAlways:false, // кнопки ненужного видны постоянно
+    modBrickFill:     false,  // наполнение кирпича
+    modRemelt:        false,  // переплавка карт
+    modBestCard:      false,  // подсветка лучшей карты
     bestCardSettings: {},    // личные правила выбора; custom:false сохраняет стандартный выбор
-    modGuard:         true,   // защитное окно
+    modGuard:         false,  // защитное окно
     modAutoOpen:      false,  // автооткрытие паков
-    modAutoLootCards: true,   // автолут карт с просмотра
-    modOnlyPack20:    true,  // только паки за 1600 (скрыть за 100 и 500)
-    modGuarantee:     true,   // расчёт гаранта
-    modLabyrinthQuiz: true,   // викторина лабиринта
-    modLabyrinthEmission: true, // таймер выброса в лабиринте
-    modLabyrinthFatigue: true, // статистика ходов после усталости, отката и мимика
-    modLabyrinthClubWar:  true, // подсветка клубов в битве клубов
+    modAutoLootCards: false,  // автолут карт с просмотра
+    modOnlyPack20:    false,  // только паки за 1600 (скрыть за 100 и 500)
+    modGuarantee:     false,  // расчёт гаранта
+    modLabyrinthQuiz: false,  // викторина лабиринта
+    modLabyrinthEmission: false, // таймер выброса в лабиринте
+    modLabyrinthFatigue: false, // статистика ходов после усталости, отката и мимика
+    modLabyrinthClubWar:  false, // подсветка клубов в битве клубов
 
     // Хоткеи
     buyKey:        'Space',
@@ -140,6 +141,7 @@
     guardThreshold: 20,       // порог разницы ценности для защитного окна
   };
 
+  // Saved values override defaults; changing defaults must never reset existing preferences.
   let cfg = { ...DEFAULT_SETTINGS, ...gmGet(SETTINGS_KEY, {}) };
   function saveCfg() { gmSet(SETTINGS_KEY, cfg); }
 
@@ -10805,6 +10807,7 @@
     modAutoLootCards: 'Автоматически получает карты за просмотр аниме.',
     modWantCards: 'Добавляет инструменты для добавления в желаемое в библиотеке карт и на странице аниме.',
     modQuickCardOwners: 'Позволяет быстро выбирать обладателей карты у которых она открыта, онлайн и соклуб/друг',
+    modOwnerRestrictions: 'Визуально отображает пользователей в ЧС или с запретом во всех обладателях. Обновляет оба списка раз в сутки.',
     wantButtonsAlways: 'Показывает кнопки всегда, а не только при наведении, если выключить функцию кнопки будут появляться только при наведения на ряд карт.',
     modNoNeedCards: 'Добавляет инструменты для работы с ненужными картами на странице ваших карт.',
     noNeedButtonsAlways: 'Показывает кнопки всегда, а не только при наведении, если выключить функцию кнопки будут появляться только при наведения на ряд карт.',
@@ -11117,6 +11120,7 @@
     if(key==='modGachaAutoloot'){ if(cfg.modGachaAutoloot) initGachaAutoloot(); else cleanupGachaAutoloot(); return; }
     if(key==='modSuggestionAuthors'){ if(cfg.modSuggestionAuthors) initSuggestionAuthors(); else cleanupSuggestionAuthors(); return; }
     if(key==='modQuickCardOwners'){ if(cfg.modQuickCardOwners) initQuickCardOwners(); else cleanupQuickCardOwners(); return; }
+    if(key==='modOwnerRestrictions'){ if(cfg.modOwnerRestrictions) initOwnerRestrictions(); else cleanupOwnerRestrictions(); return; }
     if(key==='modWantCards'){
       if(cfg.modWantCards) initWantCards();
       else if(typeof window.__suiteWantCardsCleanup==='function') window.__suiteWantCardsCleanup();
@@ -11491,6 +11495,7 @@
 
     // ── UI ────────────────────────────────────────────────────
     const uiSection = makeSection('ui','🖥️ UI');
+    uiSection.appendChild(makeToggle('modOwnerRestrictions', '🚫 ЧС и запреты'));
     uiSection.appendChild(makeToggle('modProfileBtns',   '🔍 Кнопки в профиле'));
     uiSection.appendChild(makeToggle('modEnlightenment', '🧘 Просветление на странице клубов'));
     const voteCardsRow = makeToggle('modVoteCardsToggle', '🗳️ Скрытие голосования');
@@ -11982,6 +11987,239 @@
     window.__suiteQuickCardOwnersInstalled = false;
   }
 
+  // Personal lists: passive GET requests only; never change a user's blocks or offers.
+  const OWNER_RESTRICTIONS_DAY = 24 * 60 * 60 * 1000;
+  const OWNER_RESTRICTIONS_RETRY = 30 * 60 * 1000;
+
+  function normalizeOwnerNickname(value){
+    return String(value || '').normalize('NFC').trim().toLowerCase();
+  }
+  function ownerNicknameFromHref(href, base = location.origin){
+    try {
+      const url = new URL(href, base);
+      if(url.origin !== new URL(base).origin)return '';
+      if(url.pathname === '/user/cards/')return normalizeOwnerNickname(url.searchParams.get('name'));
+      const match = url.pathname.match(/^\/user\/([^/]+)\/?$/);
+      return match ? normalizeOwnerNickname(decodeURIComponent(match[1])) : '';
+    } catch(e){ return ''; }
+  }
+  function ownerRestrictionPageUrl(href, root){
+    try {
+      const url = new URL(href, root), base = new URL(root);
+      if(url.origin !== base.origin)return null;
+      const pathname = decodeURIComponent(url.pathname), prefix = decodeURIComponent(base.pathname);
+      if(pathname !== prefix && !(/^page\/[1-9]\d*\/$/.test(pathname.slice(prefix.length)) && pathname.startsWith(prefix)))return null;
+      for(const [key,value] of url.searchParams){
+        if(!['page','cstart'].includes(key) || !/^[1-9]\d*$/.test(value))return null;
+      }
+      url.hash=''; url.searchParams.sort();
+      return url.href;
+    } catch(e){ return null; }
+  }
+  function parseOwnerRestrictionPage(doc, root){
+    if(suiteDocumentIsGuest(doc))throw new Error('Требуется вход на сайт');
+    const list = doc.querySelector('.usn-fr-list');
+    if(!list)throw new Error('Не найден список пользователей');
+    // Only actual list entries, not navigation/profile links elsewhere on the page.
+    const cards = [...list.querySelectorAll('.card-inline')];
+    const names = cards.map(card=>ownerNicknameFromHref(card.querySelector('.card-inline__name a[href]')?.getAttribute('href'),root));
+    if(names.some(name=>!name))throw new Error('Не удалось прочитать ник в списке');
+    const pages = [...doc.querySelectorAll('.pagination a[href]')]
+      .map(a=>ownerRestrictionPageUrl(a.getAttribute('href'),root)).filter(Boolean);
+    const tab = [...doc.querySelectorAll('a.ncard__tabs-btn[href]')].find(a=>ownerRestrictionPageUrl(a.getAttribute('href'),root)===root);
+    const totalText = tab?.querySelector('span')?.textContent.replace(/\s/g,'') || '';
+    const total = /^\d+$/.test(totalText) ? Number(totalText) : null;
+    if(!names.length && total !== 0 && !/нет|пуст|не найден/i.test(list.textContent))throw new Error('Пустой список без подтверждения');
+    return {names,pages,total};
+  }
+  function ownerRestrictionsAccount(){
+    return normalizeOwnerNickname(suiteGetCurrentUserName());
+  }
+  function ownerRestrictionsActive(state){
+    return cfg.modOwnerRestrictions && window.__suiteOwnerRestrictionsState === state
+      && ownerRestrictionsAccount() === state.account;
+  }
+  function readOwnerRestrictionsCache(state){
+    const cache = gmGet(state.key, null);
+    state.cache = cache && cache.account === state.account && Array.isArray(cache.blocked) && Array.isArray(cache.trade) ? cache : null;
+    state.blocked = new Set((state.cache?.blocked || []).map(normalizeOwnerNickname));
+    state.trade = new Set((state.cache?.trade || []).map(normalizeOwnerNickname));
+  }
+  async function crawlOwnerRestrictionList(state, root){
+    const queue=[root], visited=new Set(), names=new Set();
+    let expected=null;
+    while(queue.length){
+      if(!ownerRestrictionsActive(state) || document.hidden)throw new Error('Обновление приостановлено');
+      const url=queue.shift();
+      if(visited.has(url))continue;
+      if(visited.size>=200)throw new Error('Слишком много страниц списка');
+      const lock=gmGet(state.key+':lock',null);
+      if(lock?.owner!==state.id)throw new Error('Обновление выполняется в другой вкладке');
+      gmSet(state.key+':lock',{owner:state.id,until:Date.now()+60000});
+      visited.add(url);
+      const controller=new AbortController(); state.controller=controller;
+      const timer=setTimeout(()=>controller.abort(),12000);
+      let doc;
+      try {
+        const response=await fetch(url,{credentials:'same-origin',cache:'no-store',signal:controller.signal,headers:{Accept:'text/html'}});
+        if(!response.ok)throw new Error(`Не удалось загрузить список (HTTP ${response.status})`);
+        if(response.url && !ownerRestrictionPageUrl(response.url,root))throw new Error('Страница перенаправлена');
+        doc=new DOMParser().parseFromString(await response.text(),'text/html');
+      } finally {clearTimeout(timer);if(state.controller===controller)state.controller=null;}
+      const currentUser=doc.querySelector('.header__group-menu a[href*="/user/"]');
+      const account=currentUser && ownerNicknameFromHref(currentUser.getAttribute('href'),root);
+      if(account && account!==state.account)throw new Error('Аккаунт изменился');
+      const page=parseOwnerRestrictionPage(doc,root);
+      if(page.total!==null)expected=Math.max(expected || 0,page.total);
+      page.names.forEach(name=>names.add(name));
+      page.pages.forEach(next=>{if(!visited.has(next)&&!queue.includes(next))queue.push(next);});
+      // Sequential requests; leave the site a short pause between pages.
+      if(queue.length)await new Promise(resolve=>setTimeout(resolve,250));
+    }
+    if(expected!==null && names.size<expected)throw new Error('Загружены не все страницы списка');
+    return [...names];
+  }
+  async function refreshOwnerRestrictions(state){
+    if(!ownerRestrictionsActive(state) || state.running || document.hidden || !state.account)return;
+    readOwnerRestrictionsCache(state);
+    const now=Date.now();
+    if(state.cache && now-state.cache.updatedAt<OWNER_RESTRICTIONS_DAY)return;
+    const lastAttempt=Number(gmGet(state.key+':attempt',0));
+    if(lastAttempt && now-lastAttempt<OWNER_RESTRICTIONS_RETRY)return;
+    state.running=true;
+    try {
+      const lock=gmGet(state.key+':lock',null);
+      if(lock?.until>now && lock.owner!==state.id)return;
+      gmSet(state.key+':lock',{owner:state.id,until:now+60000});
+      await new Promise(resolve=>setTimeout(resolve,80+Math.random()*80));
+      if(!ownerRestrictionsActive(state) || gmGet(state.key+':lock',null)?.owner!==state.id)return;
+      readOwnerRestrictionsCache(state);
+      if(state.cache && Date.now()-state.cache.updatedAt<OWNER_RESTRICTIONS_DAY)return;
+      gmSet(state.key+':attempt',Date.now());
+      state.error='';
+      const blockedRoot=new URL(`/user/${encodeURIComponent(state.nickname)}/friends/blocked/`,location.origin).href;
+      const tradeRoot=new URL('/trades/blacklist/',location.origin).href;
+      const blocked=await crawlOwnerRestrictionList(state,blockedRoot);
+      const trade=await crawlOwnerRestrictionList(state,tradeRoot);
+      if(!ownerRestrictionsActive(state))return;
+      // Commit both complete lists atomically. A partial/failed scan never erases the last cache.
+      gmSet(state.key,{account:state.account,updatedAt:Date.now(),blocked,trade});
+      readOwnerRestrictionsCache(state);
+    } catch(error){
+      if(ownerRestrictionsActive(state))state.error=error?.message || 'Не удалось обновить списки';
+    } finally {
+      if(gmGet(state.key+':lock',null)?.owner===state.id)gmDelete(state.key+':lock');
+      state.running=false;
+      if(ownerRestrictionsActive(state))renderOwnerRestrictions(state);
+    }
+  }
+  function createOwnerRestrictionBadge(kind){
+    const badge=document.createElement('span');
+    badge.className=`suite-owner-restriction-badge suite-owner-restriction-${kind}`;
+    const label=kind==='blocked'?'В вашем ЧС':'Запрет обмена';
+    badge.title=label; badge.setAttribute('aria-label',label); badge.setAttribute('role','img');
+    const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
+    svg.setAttribute('viewBox','0 0 24 24'); svg.setAttribute('aria-hidden','true');
+    const path=document.createElementNS('http://www.w3.org/2000/svg','path');
+    path.setAttribute('d',kind==='blocked'?'M15 21H3v-2a6 6 0 0 1 12 0M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0M16 11h6':'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0M6 6l12 12');
+    svg.append(path);badge.append(svg);return badge;
+  }
+  function positionOwnerRestrictionBadges(card, icons){
+    const rect=card.getBoundingClientRect();
+    const native=[...card.querySelectorAll('.card-show__owner-icon')].map(el=>el.getBoundingClientRect()).filter(r=>r.width&&r.height);
+    const right=native.length?Math.max(-5,rect.right-Math.min(...native.map(r=>r.left))+4):-5;
+    const time=card.querySelector('.card-show__time-icon')?.getBoundingClientRect();
+    const left=rect.right-right-icons.children.length*26;
+    const top=time && time.right>left ? Math.min(-10,time.top-rect.top-27) : -10;
+    if(icons.style.right!==`${right}px`)icons.style.right=`${right}px`;
+    if(icons.style.top!==`${top}px`)icons.style.top=`${top}px`;
+  }
+  function renderOwnerRestrictions(state){
+    if(!ownerRestrictionsActive(state))return;
+    if(!/^\/cards\/users\/(?:trade\/)?$/.test(location.pathname)){
+      document.querySelectorAll('.suite-owner-restriction-icons,.suite-owner-restriction-legend').forEach(el=>el.remove());
+      document.querySelectorAll('.suite-owner-restriction-host').forEach(el=>el.classList.remove('suite-owner-restriction-host'));
+      return;
+    }
+    document.querySelectorAll('a.card-show__owner').forEach(card=>{
+      const name=ownerNicknameFromHref(card.getAttribute('href'));
+      const kinds=[state.blocked.has(name)&&'blocked',state.trade.has(name)&&'trade'].filter(Boolean);
+      let icons=card.querySelector('.suite-owner-restriction-icons');
+      const signature=kinds.join(',');
+      if(!signature){icons?.remove();card.classList.remove('suite-owner-restriction-host');return;}
+      if(!icons || icons.dataset.kinds!==signature){
+        icons?.remove();icons=document.createElement('span');icons.className='suite-owner-restriction-icons';icons.dataset.kinds=signature;
+        kinds.forEach(kind=>icons.append(createOwnerRestrictionBadge(kind)));card.append(icons);
+      }
+      card.classList.add('suite-owner-restriction-host');positionOwnerRestrictionBadges(card,icons);
+    });
+    const about=[...document.querySelectorAll('.ncard__about')].find(el=>!el.closest('.not-found')&&/пользовател/i.test(el.textContent));
+    if(!about)return;
+    let legend=about.querySelector('.suite-owner-restriction-legend');
+    if(!legend){
+      legend=document.createElement('div');legend.className='suite-owner-restriction-legend';
+      for(const [kind,label] of [['blocked','в ЧС'],['trade','запрет обмена']]){
+        const item=document.createElement('span');item.className='suite-owner-restriction-legend-item';
+        item.append(createOwnerRestrictionBadge(kind),document.createTextNode(label));legend.append(item);
+      }
+      const native=about.querySelector('.ncard__about-legend');
+      if(native)native.after(legend);else about.append(legend);
+    }
+    const note=state.error?`${state.error}. ${state.cache?'Показаны ранее сохранённые списки.':'Списки ещё не загружены.'}`
+      :state.cache?`Списки обновлены: ${new Date(state.cache.updatedAt).toLocaleString('ru-RU')}`:'Списки ещё не загружены';
+    if(legend.title!==note)legend.title=note;
+  }
+  function injectOwnerRestrictionsStyle(){
+    if(document.getElementById('suite-owner-restrictions-style'))return;
+    const style=document.createElement('style');style.id='suite-owner-restrictions-style';
+    style.textContent=`
+      .card-show__owner.suite-owner-restriction-host{position:relative;overflow:visible}
+      .suite-owner-restriction-icons{position:absolute;display:flex;gap:4px;align-items:center;z-index:4;line-height:1}
+      .suite-owner-restriction-badge{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;width:22px;height:22px;min-width:22px;border:1px solid #a1a1aa;border-radius:50%;color:#fff;box-shadow:0 1px 3px #0008;vertical-align:middle}
+      .suite-owner-restriction-blocked{background:#08090b}
+      .suite-owner-restriction-trade{background:#454950}
+      .suite-owner-restriction-badge svg{display:block;width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;pointer-events:none}
+      .suite-owner-restriction-legend{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;margin:10px 0}
+      .suite-owner-restriction-legend-item{display:inline-flex;align-items:center;gap:8px;padding:5px 10px;border:1px solid #ffffff14;border-radius:8px;background:#111;color:inherit;font:inherit;line-height:1.3}
+      @media(max-width:480px){.suite-owner-restriction-legend{gap:6px}.suite-owner-restriction-legend-item{padding:4px 8px;font-size:12px}}
+    `;
+    document.head.append(style);
+  }
+  function cleanupOwnerRestrictions(){
+    const state=window.__suiteOwnerRestrictionsState;
+    delete window.__suiteOwnerRestrictionsState;window.__suiteOwnerRestrictionsInstalled=false;
+    if(state){
+      state.controller?.abort();state.observer.disconnect();clearInterval(state.timer);clearTimeout(state.renderTimer);
+      document.removeEventListener('visibilitychange',state.tick);window.removeEventListener('pageshow',state.tick);
+      window.removeEventListener('popstate',state.tick);window.removeEventListener('resize',state.schedule);
+      if(state.storageListener!=null && typeof GM_removeValueChangeListener==='function')GM_removeValueChangeListener(state.storageListener);
+      if(gmGet(state.key+':lock',null)?.owner===state.id)gmDelete(state.key+':lock');
+    }
+    document.querySelectorAll('.suite-owner-restriction-icons,.suite-owner-restriction-legend,#suite-owner-restrictions-style').forEach(el=>el.remove());
+    document.querySelectorAll('.suite-owner-restriction-host').forEach(el=>el.classList.remove('suite-owner-restriction-host'));
+  }
+  function initOwnerRestrictions(){
+    if(!cfg.modOwnerRestrictions || window.__suiteOwnerRestrictionsInstalled || window.top!==window)return;
+    const account=ownerRestrictionsAccount();
+    const state={account,nickname:suiteGetCurrentUserName(),key:`suite_owner_restrictions_v1:${location.hostname}:${account}`,id:`${Date.now()}-${Math.random()}`,running:false,error:''};
+    window.__suiteOwnerRestrictionsState=state;window.__suiteOwnerRestrictionsInstalled=true;
+    injectOwnerRestrictionsStyle();readOwnerRestrictionsCache(state);
+    state.tick=()=>{
+      if(ownerRestrictionsAccount()!==state.account){cleanupOwnerRestrictions();initOwnerRestrictions();return;}
+      if(!ownerRestrictionsActive(state))return;
+      readOwnerRestrictionsCache(state);renderOwnerRestrictions(state);void refreshOwnerRestrictions(state);
+    };
+    state.schedule=()=>{if(!state.renderTimer)state.renderTimer=setTimeout(()=>{state.renderTimer=null;state.tick();},120);};
+    state.observer=new MutationObserver(records=>{
+      if(records.some(r=>r.type==='attributes'||[...r.addedNodes,...r.removedNodes].some(n=>n.nodeType===1&&!n.matches?.('.suite-owner-restriction-icons,.suite-owner-restriction-legend'))))state.schedule();
+    });
+    state.observer.observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['href']});
+    document.addEventListener('visibilitychange',state.tick);window.addEventListener('pageshow',state.tick);
+    window.addEventListener('popstate',state.tick);window.addEventListener('resize',state.schedule);
+    if(typeof GM_addValueChangeListener==='function')state.storageListener=GM_addValueChangeListener(state.key,state.schedule);
+    state.timer=setInterval(state.tick,60000);state.tick();
+  }
+
   function initQuickCardOwners(){
     if(!cfg.modQuickCardOwners || window.__suiteQuickCardOwnersInstalled) return;
     window.__suiteQuickCardOwnersInstalled = true;
@@ -12309,6 +12547,7 @@
     suiteStartModule('chat_stone', 'modChatStoneAutoloot', initChatStoneAutoloot);
     suiteStartModule('gacha', 'modGachaAutoloot', initGachaAutoloot);
     suiteStartModule('quick_card_owners', 'modQuickCardOwners', initQuickCardOwners);
+    suiteStartModule('owner_restrictions', 'modOwnerRestrictions', initOwnerRestrictions);
     suiteStartModule('vote_cards', 'modVoteCardsToggle', initVoteCardsToggle);
     suiteStartModule('suggestion_authors', 'modSuggestionAuthors', initSuggestionAuthors);
     suiteStartModule('autowatch', 'modAutoLootCards', initAutoLootCards);
