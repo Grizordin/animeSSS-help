@@ -39,7 +39,7 @@
   // ============================================================
 
   function gmGet(key, def) {
-    try { const v = GM_getValue(key, null); return v !== null ? JSON.parse(v) : def; }
+    try { const v = GM_getValue(key, null); return v == null ? def : (typeof v === 'string' ? JSON.parse(v) : v); }
     catch(e) { return def; }
   }
   function gmSet(key, val) {
@@ -143,7 +143,25 @@
 
   // Saved values override defaults; changing defaults must never reset existing preferences.
   let cfg = { ...DEFAULT_SETTINGS, ...gmGet(SETTINGS_KEY, {}) };
-  function saveCfg() { gmSet(SETTINGS_KEY, cfg); }
+  let savedCfgSnapshot = JSON.parse(JSON.stringify(cfg));
+  function saveCfg(explicitKeys = [], throwOnError = false) {
+    try {
+      // Other tabs can update settings while this page keeps an older runtime cfg.
+      // Save only local changes, never the stale full configuration or defaults.
+      const changedKeys = new Set(explicitKeys);
+      Object.keys(cfg).forEach(key=>{
+        if(JSON.stringify(cfg[key]) !== JSON.stringify(savedCfgSnapshot[key])) changedKeys.add(key);
+      });
+      if(!changedKeys.size) return;
+      const stored = gmGet(SETTINGS_KEY, {});
+      const next = stored && typeof stored === 'object' && !Array.isArray(stored) ? {...stored} : {};
+      changedKeys.forEach(key=>{ next[key] = cfg[key]; });
+      GM_setValue(SETTINGS_KEY, JSON.stringify(next));
+      savedCfgSnapshot = JSON.parse(JSON.stringify(cfg));
+    } catch(error) {
+      if(throwOnError) throw error;
+    }
+  }
 
   const PREMIUM_REQUIRED_SETTINGS = [
     'modCardValue',
@@ -4025,9 +4043,10 @@
       const previous=cfg.bestCardSettings;
       if(cfg.autoOpenEnabled && getActiveRow())getBestCardPolicy(getActiveRow());
       try {
-        // This dialog reports write failures instead of using the silent generic gmSet wrapper.
-        GM_setValue(SETTINGS_KEY,JSON.stringify({...cfg,bestCardSettings:next}));
-        cfg.bestCardSettings=next;saved=next;storageError=false;
+        // Share the cross-tab-safe writer, but keep visible write-error feedback.
+        cfg.bestCardSettings=next;
+        saveCfg(['bestCardSettings'],true);
+        saved=next;storageError=false;
         if(!cfg.autoOpenEnabled)bestCardPackState=null;
         debouncedAddCardValue();
         $('.feedback').textContent=cfg.autoOpenEnabled?'Сохранено. Новые правила применятся со следующего пака.':'Сохранено. Новые правила применены к выбору карты.';
@@ -10947,7 +10966,7 @@
         return;
       }
       cfg[key]=input.checked;
-      saveCfg();
+      saveCfg([key]);
       if(hasActivePremium() && isPremiumRequiredSetting(key)) savePremiumDesiredSettings();
       document.dispatchEvent(new CustomEvent('suite-setting-change',{
         detail:{ key, value:input.checked }

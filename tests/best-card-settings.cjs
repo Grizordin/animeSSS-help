@@ -16,14 +16,18 @@ const setup=`
 const cfg={modStats:true,modBestCard:true,modCardValue:true,autoOpenEnabled:false,bestCardSettings:{}};
 const bestCardReasonPickedPacks=new Set();let bestCardPackState=null,bestCardSettingsDialogOpen=null,statsPanel=null,saves=0,clicks=0,scheduled=0;
 const SETTINGS_KEY='suite_settings_v1';let stored=null,failStorage=false;
+let savedCfgSnapshot=JSON.parse(JSON.stringify(cfg));
+const GM_getValue=()=>stored===null?null:JSON.stringify(stored);
 const GM_setValue=(key,value)=>{if(failStorage)throw Error('No storage');if(key!==SETTINGS_KEY)throw Error('Wrong key');stored=JSON.parse(value);saves++;};
+${extract('gmGet')}
+${extract('saveCfg')}
 let autoBusy=false,autoRunGeneration=0,autoOpenSuppressGuard=false,autoLastChosenPackId='',rareDelay=false;
 const delayed=[];const nativeTimeout=window.setTimeout.bind(window);
 const setTimeout=(fn,delay)=>delay===3000?(delayed.push(fn),0):nativeTimeout(fn,delay);
 const AUTO_DELAY_RARE_VIEW=3000,AUTO_DELAY_WAIT_CLOSE=350,AUTO_DELAY_AFTER_PICK=650;
 const autoPackReady=()=>true,needsAutoRareViewDelay=()=>rareDelay,setAutoStatus=()=>{},autoBeginChoice=()=>true,autoDiagnosticRecord=()=>{};
 const getAutoCardIdentity=c=>c.dataset.id,scheduleAutoLoop=()=>scheduled++;
-const saveCfg=()=>saves++,debouncedAddCardValue=()=>highlightBestCard(),renderStatsTab=()=>{},suiteClampToViewport=()=>{};
+const debouncedAddCardValue=()=>highlightBestCard(),renderStatsTab=()=>{},suiteClampToViewport=()=>{};
 const createStatsPanel=()=>{if(document.getElementById('cv-stats-panel'))throw Error('Duplicate stats creation');const p=document.createElement('div');p.id='cv-stats-panel';p.style.display='none';document.body.append(p);};
 ${constants}
 ${names.map(extract).join('\n')}
