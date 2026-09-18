@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.71
+// @version      3.72
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -10036,6 +10036,7 @@
   const AUTO_DELAY_WAIT_CLOSE=350;
   const AUTO_DELAY_BEFORE_BUY=180;
   const AUTO_DELAY_RARE_VIEW=3000;
+  const AUTO_DELAY_NO_ANIMATION=1200;
   const AUTO_DIAGNOSTIC_STALL_MS=10*1000;
   const AUTO_DIAGNOSTIC_HISTORY_MAX=20;
   let autoDiagnosticTimer=null, autoExpectation=null, autoSchedulerMissingSinceAt=0, autoBusySinceAt=0;
@@ -10470,9 +10471,14 @@
   function autoClickBestCard(card) {
     autoBusy=true;
     const generation=autoRunGeneration;
-    const extraDelay=needsAutoRareViewDelay(card)?AUTO_DELAY_RARE_VIEW:0;
+    const rareDelay=needsAutoRareViewDelay(card)?AUTO_DELAY_RARE_VIEW:0;
+    const motionOff=document.querySelector('.packs-page')?.getAttribute('data-pack-motion')==='off'
+      || !!document.querySelector('#disable_pack_animation')?.checked
+      || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const extraDelay=Math.max(rareDelay,motionOff?AUTO_DELAY_NO_ANIMATION:0);
     setAutoStatus('Выбираю лучшую карту...');
-    if(extraDelay)setAutoStatus('Редкая карта, пауза 3 сек...');
+    if(rareDelay)setAutoStatus('Редкая карта, пауза 3 сек...');
+    else if(extraDelay)setAutoStatus('Без анимации, пауза 1,2 сек...');
     const choose=()=>{
       if(generation!==autoRunGeneration)return;
       if(!cfg.autoOpenEnabled){ autoBusy=false; return; }
@@ -10495,7 +10501,7 @@
       setAutoStatus('Жду следующий пак...');
       scheduleAutoLoop(AUTO_DELAY_AFTER_PICK);
     };
-    // The site's readiness check already waits for animation; no extra pick delay.
+    // Replace the skipped site animation with a pause; do not stack it on the rare-card pause.
     if(extraDelay) setTimeout(choose,extraDelay);
     else choose();
   }
@@ -13789,6 +13795,8 @@
         let storageListenerId = null;
         let nextRunAt = 0;
         let profileFetchInProgress = false;
+        let offeringRefreshTimer = null, offeringRefreshPending = false;
+        let offeringLastSeenAt = 0, offeringRefreshDisposed = false;
         let kodikWarmupPromise = null;
         let diagnosticRequestSequence = 0;
         let animeDbEmpty = null;
@@ -14602,7 +14610,7 @@
             if (!html) return null;
             const parser = new DOMParser();
             const doc = parser.parseFromString(html, 'text/html');
-            const text = (doc.body?.innerText || '').replace(/\s+/g, ' ');
+            const text = (doc.body?.innerText || doc.body?.textContent || '').replace(/\s+/g, ' ');
 
             const around = text.match(/Получено карточек за просмотр аниме[^0-9]{0,80}(\d+)\s+из\s+(\d+)/i);
             if (around) {
@@ -14617,7 +14625,7 @@
             return null;
         }
 
-        async function updateCardCounter(forceUpdate = false) {
+        async function updateCardCounter(forceUpdate = false, source = 'profile') {
             if (!currentUser || profileFetchInProgress || suiteGetAuthPause('autowatch')) return;
 
             const now = Date.now();
@@ -14632,8 +14640,12 @@
             try {
                 await GM_setValue(LAST_PROFILE_FETCH_KEY, now);
                 const html = await fetchUserProfileHtml(currentUser);
+                if (source === 'offering' && (offeringRefreshDisposed || !cfg.modAutoLootCards)) return;
                 const quest = parseCardQuestFromHtml(html);
-                if (!quest) return;
+                if (!quest) {
+                    if (source === 'offering') saveDiagnosticLog('offering_profile_check_failed', { reason:'counter_not_found' });
+                    return;
+                }
 
                 const { current, limit } = quest;
                 await setKnownDailyLimit(limit);
@@ -14655,12 +14667,17 @@
                     if (wasPaused) {
                         await GM_setValue(COLLECTION_PAUSED_KEY, false);
                         await GM_deleteValue(PAUSE_DATE_KEY);
-                        safePush('success', 'Новый день подтверждён профилем. Пауза снята.');
+                        safePush('success', source === 'offering'
+                            ? 'После подношения доступны новые карточки. Пауза по лимиту снята.'
+                            : 'Профиль подтвердил доступные карточки. Пауза по лимиту снята.');
                     }
                 }
 
                 updateButtonState();
+                if (source === 'offering') saveDiagnosticLog('offering_profile_checked', { current, limit, isAtLimit });
+                return quest;
             } catch (e) {
+                if (source === 'offering') saveDiagnosticLog('offering_profile_check_failed', { error:String(e?.message || e) });
                 warn('Ошибка обновления счётчика из профиля:', e);
             } finally {
                 profileFetchInProgress = false;
@@ -16076,12 +16093,61 @@
             window.fetch = hookedFetch;
         }
 
+        function queueOfferingProfileCheck(message) {
+            if (offeringRefreshDisposed || !cfg.modAutoLootCards || !currentUser) return;
+            const text = new DOMParser().parseFromString(String(message || ''), 'text/html').body.textContent.replace(/\s+/g, ' ').trim();
+            if (!/^Подношение принято!/i.test(text) || !/лимит получения карточек за просмотр/i.test(text)) return;
+            const now = Date.now();
+            // The same notification can arrive through both DLEPush and its DOM node.
+            if (offeringRefreshPending || (offeringLastSeenAt && now - offeringLastSeenAt < 5000)) return;
+            offeringLastSeenAt = now;
+            offeringRefreshPending = true;
+            saveDiagnosticLog('offering_detected', { message:text });
+            offeringRefreshTimer = setTimeout(() => { void refreshProfileAfterOffering(); }, 400);
+        }
+
+        async function refreshProfileAfterOffering() {
+            offeringRefreshTimer = null;
+            if (offeringRefreshDisposed || !cfg.modAutoLootCards || suiteGetAuthPause('autowatch')) {
+                offeringRefreshPending = false;
+                return;
+            }
+            // A check started before the offering may still contain the old limit.
+            if (profileFetchInProgress) {
+                offeringRefreshTimer = setTimeout(() => { void refreshProfileAfterOffering(); }, 500);
+                return;
+            }
+            try {
+                const quest = await updateCardCounter(true, 'offering');
+                if (offeringRefreshDisposed || !cfg.modAutoLootCards || !quest || quest.current >= quest.limit) return;
+                const enabled = await GM_getValue(STORAGE_KEY_WATCH, true);
+                if (offeringRefreshDisposed || !cfg.modAutoLootCards || !enabled || !scriptEnabledWatch || !isTabVisible()) return;
+                tryAcquireTabLock();
+                if (isThisTabLeader() && !isLoopRunning) {
+                    // Respect the normal interval between card requests when resuming.
+                    if (!await restoreTimerFromStorage()) scheduleNext(RESUME_DELAY_MS);
+                }
+            } catch (e) {
+                saveDiagnosticLog('offering_profile_check_failed', { error:String(e?.message || e) });
+            } finally {
+                offeringRefreshPending = false;
+            }
+        }
+
+        function cleanupOfferingProfileCheck() {
+            offeringRefreshDisposed = true;
+            clearTimeout(offeringRefreshTimer);
+            offeringRefreshTimer = null;
+            offeringRefreshPending = false;
+        }
+
         function installSiteNotificationInterceptor() {
             if (window.__awVisibleTabDleInstalled) return;
             window.__awVisibleTabDleInstalled = true;
 
-            const handleSiteNotification = async (message) => {
+            const handleSiteNotification = async (message, allowOffering = true) => {
                 if (!message) return;
+                if (allowOffering) queueOfferingProfileCheck(message);
 
                 if (message.includes('за первый вход за сегодня')) {
                     await confirmCurrentServerDay('site_notification');
@@ -16107,7 +16173,7 @@
 
             const wrapNotifier = (type, originalFn) => {
                 const wrapped = function (message) {
-                    try { handleSiteNotification(String(message)); } catch (e) {}
+                    try { void handleSiteNotification(String(message)).catch(() => {}); } catch (e) {}
                     return typeof originalFn === 'function' ? originalFn.apply(this, arguments) : undefined;
                 };
                 wrapped.__awVisibleTabOriginal = originalFn;
@@ -16128,7 +16194,8 @@
                         for (const node of mutation.addedNodes) {
                             if (!(node instanceof HTMLElement)) continue;
                             const text = (node.textContent || '').trim();
-                            if (text) handleSiteNotification(text);
+                            const isNotification = !!node.closest('#DLEPush, .DLEPush-notification, .cpt-toast');
+                            if (text) void handleSiteNotification(text, isNotification).catch(() => {});
                         }
                     }
                 });
@@ -17558,6 +17625,7 @@
         }
 
         window.__suiteAutoLootCardsCleanup = async () => {
+            cleanupOfferingProfileCheck();
             saveDiagnosticLog('module_cleanup_requested', {
                 smartProgression: await GM_getValue(SMART_PROGRESSION_KEY, null)
             });
