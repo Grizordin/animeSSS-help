@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.72
+// @version      3.73
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -12185,12 +12185,19 @@
   }
   function renderOwnerRestrictions(state){
     if(!ownerRestrictionsActive(state))return;
-    if(!/^\/cards\/users\/(?:trade\/)?$/.test(location.pathname)){
+    const standardOwners=/^\/cards\/users\/(?:trade\/)?$/.test(location.pathname);
+    const variantOwners=/^\/cards\/[1-9]\d*\/(?:stars|awakened)\/?$/.test(location.pathname);
+    if(!standardOwners && !variantOwners){
       document.querySelectorAll('.suite-owner-restriction-icons,.suite-owner-restriction-legend').forEach(el=>el.remove());
       document.querySelectorAll('.suite-owner-restriction-host').forEach(el=>el.classList.remove('suite-owner-restriction-host'));
       return;
     }
-    document.querySelectorAll('a.card-show__owner').forEach(card=>{
+    const ownerSelector=variantOwners?'a.card-show__owner,a.leaderboard-top__item':'a.card-show__owner';
+    document.querySelectorAll('.suite-owner-restriction-host').forEach(card=>{
+      if(card.matches(ownerSelector))return;
+      card.querySelector('.suite-owner-restriction-icons')?.remove();card.classList.remove('suite-owner-restriction-host');
+    });
+    document.querySelectorAll(ownerSelector).forEach(card=>{
       const name=ownerNicknameFromHref(card.getAttribute('href'));
       const kinds=[state.blocked.has(name)&&'blocked',state.trade.has(name)&&'trade'].filter(Boolean);
       let icons=card.querySelector('.suite-owner-restriction-icons');
@@ -12202,6 +12209,10 @@
       }
       card.classList.add('suite-owner-restriction-host');positionOwnerRestrictionBadges(card,icons);
     });
+    if(location.pathname !== '/cards/users/'){
+      document.querySelectorAll('.suite-owner-restriction-legend').forEach(el=>el.remove());
+      return;
+    }
     const about=[...document.querySelectorAll('.ncard__about')].find(el=>!el.closest('.not-found')&&/пользовател/i.test(el.textContent));
     if(!about)return;
     let legend=about.querySelector('.suite-owner-restriction-legend');
@@ -12222,7 +12233,7 @@
     if(document.getElementById('suite-owner-restrictions-style'))return;
     const style=document.createElement('style');style.id='suite-owner-restrictions-style';
     style.textContent=`
-      .card-show__owner.suite-owner-restriction-host{position:relative;overflow:visible}
+      .card-show__owner.suite-owner-restriction-host,.leaderboard-top__item.suite-owner-restriction-host{position:relative;overflow:visible}
       .suite-owner-restriction-icons{position:absolute;display:flex;gap:4px;align-items:center;z-index:4;line-height:1}
       .suite-owner-restriction-badge{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;width:22px;height:22px;min-width:22px;border:1px solid #a1a1aa;border-radius:50%;color:#fff;box-shadow:0 1px 3px #0008;vertical-align:middle}
       .suite-owner-restriction-blocked{background:#08090b}
@@ -16181,27 +16192,55 @@
             };
 
             const target = unsafeWindow?.DLEPush || window.DLEPush;
-            if (target && typeof target === 'object') {
+            if (target && (typeof target === 'object' || typeof target === 'function')) {
                 ['info', 'success', 'error', 'warning', 'warn'].forEach((type) => {
+                    if (typeof target[type] !== 'function') return;
                     target[type] = wrapNotifier(type, target[type]);
                 });
             }
 
-            const observerTarget = document.getElementById('DLEPush') || document.body;
+            const handleNotificationNode = (node) => {
+                const element = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+                if (!(element instanceof HTMLElement)) return;
+                const items = new Set(element.querySelectorAll('.DLEPush-notification, .cpt-toast'));
+                const parent = element.closest('.DLEPush-notification, .cpt-toast');
+                if (parent) items.add(parent);
+                for (const item of items) {
+                    // Native notifications begin with a close button; only their message is the payload.
+                    const messageEl = item.querySelector('.DLEPush-message, .cpt-sub') || item;
+                    const text = (messageEl.textContent || '').trim();
+                    if (text) void handleSiteNotification(text).catch(() => {});
+                }
+                if (!items.size) {
+                    // Preserve legacy new-day handling, without accepting quoted offering text elsewhere.
+                    const text = (element.textContent || '').trim();
+                    if (text) void handleSiteNotification(text, false).catch(() => {});
+                }
+            };
+            // Also survive replacement of #DLEPush and helper toasts rendered outside it.
+            const observerTarget = document.body;
             if (observerTarget) {
                 const observer = new MutationObserver((mutations) => {
                     for (const mutation of mutations) {
-                        for (const node of mutation.addedNodes) {
-                            if (!(node instanceof HTMLElement)) continue;
-                            const text = (node.textContent || '').trim();
-                            const isNotification = !!node.closest('#DLEPush, .DLEPush-notification, .cpt-toast');
-                            if (text) void handleSiteNotification(text, isNotification).catch(() => {});
-                        }
+                        if (mutation.type === 'characterData') handleNotificationNode(mutation.target);
+                        else mutation.addedNodes.forEach(handleNotificationNode);
                     }
                 });
-                observer.observe(observerTarget, { childList: true, subtree: true });
+                observer.observe(observerTarget, { childList: true, subtree: true, characterData: true });
                 window.__awVisibleTabDleObserver = observer;
             }
+        }
+
+        function cleanupSiteNotificationInterceptor() {
+            const target = unsafeWindow?.DLEPush || window.DLEPush;
+            if (target && (typeof target === 'object' || typeof target === 'function')) {
+                ['info', 'success', 'error', 'warning', 'warn'].forEach(type => {
+                    if (target[type]?.__awVisibleTabOriginal) target[type] = target[type].__awVisibleTabOriginal;
+                });
+            }
+            window.__awVisibleTabDleObserver?.disconnect();
+            window.__awVisibleTabDleObserver = null;
+            window.__awVisibleTabDleInstalled = false;
         }
 
         // =========================================================
@@ -17652,17 +17691,7 @@
                 }
                 window.__awVisibleTabFetchInstalled = false;
             } catch (e) {}
-            try {
-                const target = unsafeWindow?.DLEPush || window.DLEPush;
-                if(target && typeof target === 'object'){
-                    ['info', 'success', 'error', 'warning', 'warn'].forEach(type => {
-                        if(target[type]?.__awVisibleTabOriginal) target[type] = target[type].__awVisibleTabOriginal;
-                    });
-                }
-                window.__awVisibleTabDleObserver?.disconnect();
-                window.__awVisibleTabDleObserver = null;
-                window.__awVisibleTabDleInstalled = false;
-            } catch (e) {}
+            try { cleanupSiteNotificationInterceptor(); } catch (e) {}
             try { document.getElementById('aw-active-tab-panel')?.remove(); } catch (e) {}
             try { document.getElementById(ANIME_DB_MODAL_ID)?.remove(); } catch (e) {}
             try { document.getElementById(MANUAL_MAX_EP_MODAL_ID)?.remove(); } catch (e) {}

@@ -14,7 +14,7 @@ function extract(name){
  }
  throw Error('extract '+name);
 }
-const functions=['parseCardQuestFromHtml','updateCardCounter','queueOfferingProfileCheck','refreshProfileAfterOffering','cleanupOfferingProfileCheck','installSiteNotificationInterceptor'].map(extract).join('\n');
+const functions=['parseCardQuestFromHtml','updateCardCounter','queueOfferingProfileCheck','refreshProfileAfterOffering','cleanupOfferingProfileCheck','installSiteNotificationInterceptor','cleanupSiteNotificationInterceptor'].map(extract).join('\n');
 const setup=String.raw`
 let passed=0;const check=(v,m)=>{if(!v)throw Error(m);passed++;};
 const currentUser='Test',cfg={modAutoLootCards:true};
@@ -38,7 +38,10 @@ const getKnownDailyLimit=async()=>storage.get('limit');
 let html='<p>Получено карточек за просмотр аниме <b>30 из 35</b></p>';
 async function fetchUserProfileHtml(){fetches++;if(fetchGate)await fetchGate;if(fetchError)throw Error('offline');return html;}
 const unsafeWindow=window;
-window.DLEPush={success:()=>{originalCalls++;}};
+// Actual site shape: function DLEPush() {}, with static info/warning/error methods.
+window.DLEPush=function DLEPush(){};
+const originalInfo=function(){originalCalls++;return 'original-result';};
+window.DLEPush.info=originalInfo;
 const message='Подношение принято! Получено 200 камней духа и +1 ход в Лабиринте Бесконечности. Так же увеличен шанс познать просветление и лимит получения карточек за просмотр';
 function reset(){
  timers.clear();storage.clear();logs.length=0;pushes.length=0;
@@ -96,16 +99,41 @@ check(storage.get('paused')===true&&scheduled===0,'late response after cleanup c
 reset();cfg.modAutoLootCards=false;queueOfferingProfileCheck(message);check(timers.size===0,'disabled module ignores offering');
 reset();auth=true;queueOfferingProfileCheck(message);await runPending();check(fetches===0,'auth pause blocks request');
 
-reset();installSiteNotificationInterceptor();window.DLEPush.success('<b>'+message+'</b>');
+reset();installSiteNotificationInterceptor();const result=window.DLEPush.info('<b>'+message+'</b>');
 check(timers.size===1&&originalCalls===1,'DLEPush wrapper detects HTML and preserves original notification');
+check(result==='original-result'&&typeof window.DLEPush==='function','native notifier type and return value preserved');
+check(!('success' in window.DLEPush),'missing site methods are not fabricated');
+const installedInfo=window.DLEPush.info;installSiteNotificationInterceptor();
+check(window.DLEPush.info===installedInfo,'second install does not stack hooks');
 await runPending();check(fetches===1,'DLEPush integration refreshes profile');
 reset();const unrelated=document.createElement('div');unrelated.textContent=message;document.body.append(unrelated);await flush();
 check(timers.size===0,'quoted text outside notifications ignored');
-const toast=document.createElement('div');toast.className='DLEPush-notification';toast.textContent=message;document.body.append(toast);await flush();
+const toast=document.createElement('div');toast.className='DLEPush-notification wrapper';
+toast.innerHTML='<button class="DLEPush-close">&times;</button><div class="DLEPush-icon"></div><div class="DLEPush-header">Информация</div><div class="DLEPush-message">'+message+'</div>';
+document.body.append(toast);await flush();
 check(timers.size===1,'DOM-only native notification detected');await runPending();check(fetches===1,'DOM notification refreshes profile');
-reset();const custom=document.createElement('div');custom.className='cpt-toast';custom.textContent=message;document.body.append(custom);await flush();
+reset();const custom=document.createElement('div');custom.className='cpt-toast';
+custom.innerHTML='<div class="cpt-title">Награда</div><div class="cpt-sub">'+message+'</div>';document.body.append(custom);await flush();
 check(timers.size===1,'custom helper toast detected too');await runPending();
-window.__awVisibleTabDleObserver.disconnect();
+reset();const container=document.createElement('div');container.id='DLEPush';container.append(toast.cloneNode(true));document.body.append(container);await flush();
+check(timers.size===1,'notification inside newly inserted container detected');await runPending();
+reset();container.replaceWith(container.cloneNode(true));await flush();
+check(timers.size===1,'replacement notification container still observed');await runPending();
+reset();const delayed=toast.cloneNode(true);const body=delayed.querySelector('.DLEPush-message');body.textContent='';document.body.append(delayed);await flush();
+check(timers.size===0,'empty native notification ignored');body.textContent=message;await flush();
+check(timers.size===1,'message added after notification insertion detected');await runPending();
+reset();body.firstChild.data=message+' ';await flush();
+check(timers.size===1,'text-node updates detected');await runPending();
+reset();window.DLEPush.info(message);document.body.append(toast.cloneNode(true));await flush();
+check(timers.size===1,'real notifier and native DOM path deduplicated');await runPending();check(fetches===1,'one profile request for both paths');
+reset();const decoy=toast.cloneNode(true);decoy.querySelector('.DLEPush-header').textContent=message;decoy.querySelector('.DLEPush-message').textContent='Другая награда';document.body.append(decoy);await flush();
+check(timers.size===0,'notification header is not mistaken for message');
+cleanupSiteNotificationInterceptor();
+check(window.DLEPush.info===originalInfo&&!window.__awVisibleTabDleInstalled,'cleanup restores function notifier');
+document.body.append(toast.cloneNode(true));await flush();check(timers.size===0,'cleanup disconnects DOM observer');
+window.DLEPush={info:originalInfo};installSiteNotificationInterceptor();window.DLEPush.info(message);await runPending();
+check(fetches===1,'object notifier variant still supported');cleanupSiteNotificationInterceptor();
+check(window.DLEPush.info===originalInfo,'cleanup restores object notifier');
 window.offeringTest={result:'AUTOLOOT_OFFERING_OK',passed};
 `;
 (async()=>{
