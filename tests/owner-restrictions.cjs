@@ -1,4 +1,5 @@
 // Offline browser tests. Optional args: trade blacklist, blocked friends, owners, traders HTML.
+// Or: --variants <stars HTML> <awakened HTML> to check sanitized supplied owner blocks.
 // Attached scripts never execute; all HTTP is mocked/blocked.
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const {chromium}=require('playwright');
@@ -86,9 +87,32 @@ const duplicate=target.cloneNode(true);duplicate.href='/user/cards/?name=Both';t
 check(duplicate.querySelectorAll('.suite-owner-restriction-badge').length===2,'late owner tiles annotated');
 const native=document.querySelector('.ncard__about-legend');native.remove();document.querySelector('.suite-owner-restriction-legend').remove();
 history.pushState({},'', '/cards/users/trade/?id=3591');state.tick();
-check(!!document.querySelector('.ncard__about>.suite-owner-restriction-legend'),'trade page without native legend supported');
+check(!document.querySelector('.suite-owner-restriction-legend'),'trade page has badges without bottom legend');
+check(document.querySelectorAll('.suite-owner-restriction-icons').length===4,'trade page keeps owner badges');
 history.pushState({},'', '/other/');state.tick();check(!document.querySelector('.suite-owner-restriction-icons'),'route exit cleans marks');
 history.pushState({},'', '/cards/users/?id=3591');state.tick();
+
+for(let stars=1;stars<=5;stars++){
+ history.pushState({},'', '/cards/16518/stars/?stars='+stars);state.tick();
+ check(document.querySelectorAll('.suite-owner-restriction-icons').length===4,'star level '+stars+' owners decorated');
+ check(!document.querySelector('.suite-owner-restriction-legend'),'star level '+stars+' has no bottom legend');
+}
+for(const url of ['/cards/66728/awakened/?variant=all','/cards/66728/awakened/?variant=light&awakened=10','/cards/66728/awakened?variant=dark']){
+ history.pushState({},'',url);state.tick();
+ check(document.querySelectorAll('.suite-owner-restriction-icons').length===4,'awakened filters supported');
+ check(!document.querySelector('.suite-owner-restriction-legend'),'awakened has no bottom legend');
+}
+const top=document.createElement('a');top.className='leaderboard-top__item';top.href='/user/Both/';top.innerHTML='<span>Both</span><span class="leaderboard-top__icon">Medal</span>';document.body.append(top);await flush();
+check(top.querySelectorAll('.suite-owner-restriction-badge').length===2,'variant leaderboard owner decorated');
+check(top.querySelector('.leaderboard-top__icon').textContent==='Medal','leaderboard medal preserved');
+const free=top.cloneNode(true);free.href='#';document.body.append(free);await flush();
+check(!free.querySelector('.suite-owner-restriction-icons'),'vacant leaderboard place not decorated');
+history.pushState({},'', '/cards/users/?id=3591');state.tick();
+check(!top.querySelector('.suite-owner-restriction-icons'),'variant-only marks removed when returning to standard owners');
+top.remove();free.remove();
+history.pushState({},'', '/cards/16518/');state.tick();check(!document.querySelector('.suite-owner-restriction-icons'),'unrelated card route not decorated');
+history.pushState({},'', '/cards/users/?id=3591');state.tick();
+check(!!document.querySelector('.suite-owner-restriction-legend'),'normal owners legend restored');
 
 let saved=gmGet(state.key);saved.updatedAt=Date.now()-OWNER_RESTRICTIONS_DAY-1;gmSet(state.key,saved);gmDelete(state.key+':attempt');
 const old=JSON.stringify(saved);failure='network';await refreshOwnerRestrictions(state);
@@ -126,6 +150,7 @@ check(!window.__suiteOwnerRestrictionsState.blocked.has('alice'),'previous accou
 cleanupOwnerRestrictions();nickname='Tester';
 gmSet(state.key,{account:'tester',updatedAt:Date.now(),blocked:['Alice','Both'],trade:['Bob','Both']});owners();initOwnerRestrictions();
 window.ownerTests={passed};
+window.ownerFixtureCleanup=cleanupOwnerRestrictions;
 `;
 (async()=>{
  const browser=await chromium.launch({headless:true,channel:process.env.TEST_BROWSER_CHANNEL||'msedge'});
@@ -152,7 +177,64 @@ window.ownerTests={passed};
    const dir=path.join(__dirname,'..','output','owner-restrictions');fs.mkdirSync(dir,{recursive:true});
    await page.screenshot({path:path.join(dir,width+'.png'),fullPage:true});
   }
-  if(process.argv.length>=6){
+  if(process.argv[2]==='--variants'){
+   const html=process.argv.slice(3,5).map(file=>fs.readFileSync(file,'utf8'));
+   if(html.length!==2)throw Error('Expected stars and awakened HTML files');
+   await page.evaluate(()=>window.ownerFixtureCleanup());
+   const code=['normalizeOwnerNickname','ownerNicknameFromHref','ownerRestrictionsAccount','ownerRestrictionsActive','createOwnerRestrictionBadge','positionOwnerRestrictionBadges','renderOwnerRestrictions','injectOwnerRestrictionsStyle'].map(extract).join('\n');
+   result.variants=[];
+   for(let index=0;index<html.length;index++){
+    for(const width of [1200,390,320]){
+     await page.setViewportSize({width,height:700});
+     const actual=await page.evaluate(({html,index,code})=>{
+      return new Function('html','index',String.raw`
+       const cfg={modOwnerRestrictions:true},suiteGetCurrentUserName=()=> 'fixture';
+       ${code}
+       const doc=new DOMParser().parseFromString(html,'text/html');
+       document.body.replaceChildren();
+       for(const root of doc.querySelectorAll('.leaderboard-top__list,.ncard__owners-list')){
+        const clone=root.cloneNode(true);
+        clone.querySelectorAll('script,iframe,object,embed,style,link').forEach(e=>e.remove());
+        for(const el of [clone,...clone.querySelectorAll('*')])for(const a of [...el.attributes]){
+         if(/^on/i.test(a.name)||['src','srcset','data-src','style'].includes(a.name))el.removeAttribute(a.name);
+        }
+        document.body.append(clone);
+       }
+       const native=document.createElement('style');native.textContent='.card-show__owner-image>img{width:40px;height:40px}.leaderboard-top__list{display:flex;justify-content:center;gap:12px;margin:26px 0}.leaderboard-top__item{display:flex;flex-direction:column;align-items:center;max-width:30%;color:inherit}.leaderboard-top__image{position:relative;width:50px;height:50px;margin-bottom:14px}.leaderboard-top__image>img{width:50px;height:50px}.leaderboard-top__icon{position:absolute;width:20px;height:20px;bottom:-9px;left:15px}.leaderboard-top__icon>img{width:20px;height:20px}.leaderboard-top__score{font-size:10px}';document.body.append(native);
+       const tiles=[...document.querySelectorAll('a.card-show__owner')];
+       const names=tiles.map(a=>ownerNicknameFromHref(a.getAttribute('href')));
+       if(!names.length||names.some(n=>!n))throw Error('Invalid supplied owner links');
+       const state={account:'fixture',blocked:new Set([names[0]]),trade:new Set([names.at(-1)]),cache:null,error:''};
+       window.__suiteOwnerRestrictionsState=state;injectOwnerRestrictionsStyle();
+       const nativeLevels=[...document.querySelectorAll('.awake_lvl')].map(e=>e.textContent).join();
+       const urls=index===0?[1,2,3,4,5].map(s=>'/cards/16518/stars/?stars='+s):['/cards/66728/awakened/?variant=all','/cards/66728/awakened/?variant=light&awakened=10'];
+       let passed=0;
+       for(const url of urls){
+        history.replaceState({},'',url);renderOwnerRestrictions(state);
+        for(const tile of tiles){
+         const name=ownerNicknameFromHref(tile.getAttribute('href'));
+         const expected=Number(state.blocked.has(name))+Number(state.trade.has(name));
+         if(tile.querySelectorAll('.suite-owner-restriction-badge').length!==expected)throw Error('Wrong supplied owner badges');
+        }
+        passed++;
+        if(document.querySelector('.suite-owner-restriction-legend'))throw Error('Unexpected bottom legend');passed++;
+       }
+       if([...document.querySelectorAll('.awake_lvl')].map(e=>e.textContent).join()!==nativeLevels)throw Error('Native awakening level changed');passed++;
+       const overlap=(a,b)=>a.left<b.right&&a.right>b.left&&a.top<b.bottom&&a.bottom>b.top;
+       for(const tile of document.querySelectorAll('.suite-owner-restriction-host')){
+        const badges=[...tile.querySelectorAll('.suite-owner-restriction-badge,.card-show__owner-icon,.leaderboard-top__icon')].map(e=>e.getBoundingClientRect());
+        for(let i=0;i<badges.length;i++)if(badges.some((b,j)=>j!==i&&overlap(badges[i],b)))throw Error('Overlapping owner badges');
+       }
+       passed++;
+       return {passed,tiles:tiles.length,nativeLevels,width:innerWidth,page:index?'awakened':'stars'};
+      `)(html,index);
+     },{html:html[index],index,code});
+     result.passed+=actual.passed;result.variants.push(actual);
+     const dir=path.join(__dirname,'..','output','owner-restrictions');fs.mkdirSync(dir,{recursive:true});
+     await page.screenshot({path:path.join(dir,actual.page+'-'+width+'.png'),fullPage:true});
+    }
+   }
+  } else if(process.argv.length>=6){
    const html=process.argv.slice(2,6).map(file=>fs.readFileSync(file,'utf8'));
    const actual=await page.evaluate(({html,code})=>{
     return eval('(()=>{'+code+';const docs=html.map(x=>new DOMParser().parseFromString(x,"text/html"));return {trade:parseOwnerRestrictionPage(docs[0],"https://animesss.tv/trades/blacklist/"),blocked:parseOwnerRestrictionPage(docs[1],"https://animesss.tv/user/BETEP_B_TYMAHE/friends/blocked/"),owners:docs.slice(2).map(d=>({tiles:d.querySelectorAll("a.card-show__owner").length,valid:[...d.querySelectorAll("a.card-show__owner")].filter(a=>ownerNicknameFromHref(a.getAttribute("href"))).length,about:!![...d.querySelectorAll(".ncard__about")].find(e=>!e.closest(".not-found")&&/пользовател/i.test(e.textContent))}))};})()');
