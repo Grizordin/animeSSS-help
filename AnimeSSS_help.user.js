@@ -14308,9 +14308,14 @@
         }
 
         async function saveCardReceipt(receipt) {
-            const receipts = await getGmStore('card_receipts');
-            receipts.push(receipt);
-            await setGmStore('card_receipts', receipts);
+            // One key per issued copy: concurrent tabs must not replace a shared array.
+            const id = receipt.ownerId ? `owner_${receipt.ownerId}` : `event_${receipt.receivedAt}_${Math.random().toString(36).slice(2)}`;
+            const key = `${AW_GM_DB_PREFIX}receipt_v2_${id}`;
+            if (await GM_getValue(key, null)) return false;
+            await GM_setValue(key, { ...receipt, receiptId:id });
+            const stored = await GM_getValue(key, null);
+            if (!stored || String(stored.cardId) !== String(receipt.cardId)) throw new Error('Не удалось сохранить полученную карту');
+            return true;
         }
 
         function saveRequestLog(entry) {
@@ -14330,7 +14335,21 @@
         }
 
         async function getAllReceipts() {
-            return getGmStore('card_receipts');
+            const keys = (await GM_listValues()).filter(key => key.startsWith(`${AW_GM_DB_PREFIX}receipt_v2_`));
+            const records = [...await getGmStore('card_receipts'), ...await Promise.all(keys.map(key => GM_getValue(key, null)))];
+            const seen = new Set();
+            return records.filter(rc => {
+                if (!rc) return false;
+                const id = rc.ownerId ? `owner_${rc.ownerId}` : rc.receiptId || `${rc.receivedAt}:${rc.cardId}:${rc.source}`;
+                if (seen.has(id)) return false;
+                seen.add(id);return true;
+            });
+        }
+
+        async function clearCardReceipts() {
+            const keys = (await GM_listValues()).filter(key => key.startsWith(`${AW_GM_DB_PREFIX}receipt_v2_`));
+            await setGmStore('card_receipts', []);
+            await Promise.all(keys.map(key => GM_deleteValue(key)));
         }
 
         async function getHistoryEntry(animeId) {
@@ -14499,9 +14518,8 @@
                 if (!confirmed) return;
 
                 try {
-                    for (const store of ['card_receipts', 'skipped_episodes']) {
-                        await setGmStore(store, []);
-                    }
+                    await clearCardReceipts();
+                    await setGmStore('skipped_episodes', []);
                     // Сбрасываем дневной прогресс
                     await setDailyProgress(0);
                     // Сбрасываем smart-progression чтобы начать с начала
@@ -15571,6 +15589,7 @@
                     receivedAt: Date.now(),
                     dateMsk: getMoscowTimeString(),
                     cardId: card.id,
+                    ownerId: card.owner_id || null,
                     cardName: card.name || 'Без названия',
                     rank: String(card.rank || 'e').toLowerCase(),
                     cardAnimeId: card.news_id,
@@ -15583,6 +15602,8 @@
                     source
                 };
 
+                // Save the real server payload before progression work can fail.
+                if (!await saveCardReceipt(receipt)) return;
                 let state = await GM_getValue(SMART_PROGRESSION_KEY, null);
                 if (state && state.index !== -1) {
                     const pool = await buildOrderedPool();
@@ -15599,7 +15620,6 @@
                     }
                 }
 
-                await saveCardReceipt(receipt);
                 await saveRequestLog({
                     source,
                     watchedAnimeId: animeIdValue,
