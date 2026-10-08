@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.73
+// @version      3.74
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -14334,9 +14334,14 @@
             }, entry.status === 'error' ? 'error' : 'debug');
         }
 
-        async function getAllReceipts() {
-            const keys = (await GM_listValues()).filter(key => key.startsWith(`${AW_GM_DB_PREFIX}receipt_v2_`));
-            const records = [...await getGmStore('card_receipts'), ...await Promise.all(keys.map(key => GM_getValue(key, null)))];
+        async function getAllReceipts(storage = null) {
+            const keys = storage?.keys || (await GM_listValues()).filter(key => key.startsWith(`${AW_GM_DB_PREFIX}receipt_v2_`));
+            const records = [...(storage?.legacy || await getGmStore('card_receipts'))];
+            // Bound extension calls and give the page a rendering opportunity between batches.
+            for (let i = 0; i < keys.length; i += 64) {
+                if (i) await new Promise(resolve => setTimeout(resolve, 0));
+                records.push(...await Promise.all(keys.slice(i, i + 64).map(key => GM_getValue(key, null))));
+            }
             const seen = new Set();
             return records.filter(rc => {
                 if (!rc) return false;
@@ -14817,10 +14822,10 @@
             await GM_setValue(FINISHED_ANIME_ARCHIVE_KEY, Array.isArray(data) ? data.map(normalizeAnimeEntry) : []);
         }
 
-        async function addFinishedAnimeToArchive(entry) {
+        async function addFinishedAnimeToArchive(entry, knownProgress = null) {
             const archive = await getFinishedAnimeArchive();
             const key = buildAnimeUniqueKey(entry);
-            const progress = await getAnimeProgress(entry);
+            const progress = knownProgress || await getAnimeProgress(entry);
             if (!progress.isFullyFarmed) {
                 await removeFinishedAnimeArchiveByKey(key);
                 return false;
@@ -15362,7 +15367,51 @@
             };
         }
 
-        async function getAnimeProgress(entry) {
+        async function readAutolootProgressInputs() {
+            const [pool, history, skipped, order, legacy, storedKeys] = await Promise.all([
+                buildOrderedPool(), getGmStore('anime_history'), getGmStore('skipped_episodes'),
+                GM_getValue(EP_ORDER_KEY, null), getGmStore('card_receipts'), GM_listValues()
+            ]);
+            const keys = storedKeys.filter(key => key.startsWith(`${AW_GM_DB_PREFIX}receipt_v2_`)).sort();
+            // Receipt-v2 entries are immutable. New/deleted keys and legacy-array edits
+            // invalidate exhaustion, including changes made by another tab.
+            const signature = JSON.stringify([getMskDateKey(), pool, history, skipped, order, legacy, keys]);
+            return { pool, history, skipped, order, keys, legacy, signature };
+        }
+
+        async function buildAutolootProgressSnapshot(inputs = null) {
+            inputs = inputs || await readAutolootProgressInputs();
+            const receipts = await getAllReceipts(inputs);
+            const receiptCounts = new Map(), watched = new Map(), skippedByAnime = new Map(), skippedKeys = new Set();
+            let work = 0;
+            const yieldWork = async () => {
+                if (++work % 256 === 0) await new Promise(resolve => setTimeout(resolve, 0));
+            };
+            for (const rc of receipts) {
+                const id = String(rc?.watchedAnimeId), ep = Number(rc?.watchedEpisode);
+                if (Number.isFinite(ep)) {
+                    if (!receiptCounts.has(id)) receiptCounts.set(id, new Map());
+                    const counts = receiptCounts.get(id);
+                    counts.set(ep, (counts.get(ep) || 0) + 1);
+                }
+                await yieldWork();
+            }
+            for (const row of inputs.history) {
+                const id = String(row?.animeId);
+                if (!watched.has(id)) watched.set(id, new Set(Array.isArray(row?.episodes) ? row.episodes : []));
+                await yieldWork();
+            }
+            for (const row of inputs.skipped) {
+                skippedKeys.add(String(row?.skipKey));
+                const id = String(row?.animeId), ep = Number(row?.episode);
+                if (!skippedByAnime.has(id)) skippedByAnime.set(id, new Set());
+                if (Number.isFinite(ep)) skippedByAnime.get(id).add(ep);
+                await yieldWork();
+            }
+            return { ...inputs, receiptCounts, watched, skippedByAnime, skippedKeys };
+        }
+
+        async function getAnimeProgress(entry, snapshot = null) {
             const animeId = String(entry.anime_id);
             const minEp = Number(entry.min_ep || 1);
             const maxEp = Number(entry.max_ep || 0);
@@ -15376,38 +15425,16 @@
                 };
             }
 
-            const [receipts, skippedEpisodes, historyEntry] = await Promise.all([
-                getAllReceipts(),
-                getAllFromStore('skipped_episodes'),
-                getHistoryEntry(animeId)
-            ]);
-
-            const watchedSet = new Set(
-                Array.isArray(historyEntry?.episodes)
-                    ? historyEntry.episodes.map(v => Number(v))
-                    : []
-            );
-
-            const skippedSet = new Set(
-                skippedEpisodes
-                    .filter(item => String(item?.animeId) === animeId)
-                    .map(item => Number(item?.episode))
-                    .filter(Number.isFinite)
-            );
-
-            const receiptMap = new Map();
-
-            for (const rc of receipts) {
-                if (String(rc?.watchedAnimeId) !== animeId) continue;
-                const ep = Number(rc?.watchedEpisode);
-                if (!Number.isFinite(ep)) continue;
-                receiptMap.set(ep, (receiptMap.get(ep) || 0) + 1);
-            }
+            snapshot = snapshot || await buildAutolootProgressSnapshot();
+            const watchedSet = new Set([...(snapshot.watched.get(animeId) || [])].map(Number));
+            const skippedSet = snapshot.skippedByAnime.get(animeId) || new Set();
+            const receiptMap = snapshot.receiptCounts.get(animeId) || new Map();
 
             const episodeStates = [];
             let processedEpisodes = 0;
 
             for (let ep = minEp; ep <= maxEp; ep++) {
+                if (ep > minEp && (ep - minEp) % 256 === 0) await new Promise(resolve => setTimeout(resolve, 0));
                 const receiptCount = receiptMap.get(ep) || 0;
                 const isSkipped = skippedSet.has(ep);
                 const isWatched = watchedSet.has(ep);
@@ -15436,10 +15463,12 @@
 
         async function syncFinishedArchiveWithDb() {
             const db = await getAnimeDb();
+            if (!db.length) return;
+            const snapshot = await buildAutolootProgressSnapshot();
             for (const item of db) {
-                const progress = await getAnimeProgress(item);
+                const progress = await getAnimeProgress(item, snapshot);
                 if (progress.isFullyFarmed) {
-                    await addFinishedAnimeToArchive(item);
+                    await addFinishedAnimeToArchive(item, progress);
                 }
             }
         }
@@ -15447,9 +15476,9 @@
         // =========================================================
         // ORDER / TARGET
         // =========================================================
-        async function getEpOrder(animeEntry) {
+        async function getEpOrder(animeEntry, savedOrder = undefined) {
             const key = `${animeEntry.anime_id}_s${animeEntry.s || 1}`;
-            const saved = await GM_getValue(EP_ORDER_KEY, null);
+            const saved = savedOrder === undefined ? await GM_getValue(EP_ORDER_KEY, null) : savedOrder;
 
             if (saved && saved[key] && Array.isArray(saved[key]) && saved[key].length) {
                 return saved[key];
@@ -15470,14 +15499,17 @@
                 state = { index: 0, ep_offset: 0, cards_collected: 0, failed_attempts: 0 };
             }
 
-            const allReceipts = await getAllReceipts();
-            const animePoolByOrder = await buildOrderedPool();
+            const inputs = await readAutolootProgressInputs();
+            const animePoolByOrder = inputs.pool;
+            if (updateSmartTarget.exhaustedSignature === inputs.signature && state.index === -1) return state;
+            updateSmartTarget.exhaustedSignature = null;
 
             if (!animePoolByOrder.length) {
                 state.index = -1;
                 await GM_setValue(SMART_PROGRESSION_KEY, state);
                 return state;
             }
+            const snapshot = await buildAutolootProgressSnapshot(inputs);
 
             if (state.index < 0 || state.index >= animePoolByOrder.length) {
                 state.index = 0;
@@ -15488,26 +15520,26 @@
 
             let targetFound = false;
             let checkedAnimeCount = 0;
+            let checkedEpisodes = 0;
 
             while (checkedAnimeCount < animePoolByOrder.length) {
                 const curAnime = animePoolByOrder[state.index];
                 if (!curAnime) break;
 
-                const orderedEps = await getEpOrder(curAnime);
+                const orderedEps = await getEpOrder(curAnime, inputs.order);
                 const maxEpisodes = orderedEps.length;
+                const animeId = String(curAnime.anime_id);
+                const receiptCounts = snapshot.receiptCounts.get(animeId);
+                const watched = snapshot.watched.get(animeId);
 
                 while (state.ep_offset < maxEpisodes) {
+                    if (++checkedEpisodes % 128 === 0) await new Promise(resolve => setTimeout(resolve, 0));
                     const currentEp = orderedEps[state.ep_offset];
                     const skipKey = `${curAnime.anime_id}_s${curAnime.s || 1}_e${currentEp}`;
 
-                    const collected = allReceipts.filter(rc =>
-                        String(rc.watchedAnimeId) === String(curAnime.anime_id) &&
-                        Number(rc.watchedEpisode) === Number(currentEp)
-                    ).length;
-
-                    const history = await getHistoryEntry(curAnime.anime_id);
-                    const isAlreadyWatched = !!(history && Array.isArray(history.episodes) && history.episodes.includes(currentEp));
-                    const skipped = await isEpisodeSkipped(skipKey);
+                    const collected = receiptCounts?.get(Number(currentEp)) || 0;
+                    const isAlreadyWatched = watched?.has(currentEp) || false;
+                    const skipped = snapshot.skippedKeys.has(skipKey);
 
                     if (collected >= RECEIPTS_PER_EP_COMPLETE || isAlreadyWatched || skipped) {
                         state.ep_offset++;
@@ -15522,9 +15554,9 @@
 
                 if (targetFound) break;
 
-                const progress = await getAnimeProgress(curAnime);
+                const progress = await getAnimeProgress(curAnime, snapshot);
                 if (progress.isFullyFarmed) {
-                    await addFinishedAnimeToArchive(curAnime);
+                    await addFinishedAnimeToArchive(curAnime, progress);
                 }
 
                 state.index = (state.index + 1) % animePoolByOrder.length;
@@ -15534,7 +15566,10 @@
                 checkedAnimeCount++;
             }
 
-            if (!targetFound) state.index = -1;
+            if (!targetFound) {
+                state.index = -1;
+                updateSmartTarget.exhaustedSignature = inputs.signature;
+            }
 
             await GM_setValue(SMART_PROGRESSION_KEY, state);
             return state;
@@ -18076,17 +18111,30 @@
       }
 
       function getQuizQuestionText(quiz) {
+        if (!quiz || !isQuizVisible(quiz)) return '';
+        const scope = quiz.closest('.labyrinth') || quiz.parentElement || quiz;
+        const questionSelector = '[data-quiz-question], .labyrinth__quiz-question, .labyrinth__question';
         const candidates = [
+          ...quiz.querySelectorAll(questionSelector),
+          ...scope.querySelectorAll('#labyrinthEventText'),
           document.getElementById('labyrinthEventText'),
-          quiz?.querySelector('#labyrinthEventText'),
-          quiz?.closest('.labyrinth')?.querySelector('#labyrinthEventText'),
-          ...document.querySelectorAll('[id*="labyrinth"][id*="Text"], [class*="labyrinth"][class*="text"], [class*="event"][class*="text"]')
+          ...scope.querySelectorAll(questionSelector),
+          ...scope.querySelectorAll('[id*="labyrinth"][id*="Text"], [class*="labyrinth"][class*="text"]')
         ].filter(Boolean);
+        const uiOnly = '[role="progressbar"], [role="timer"], [class*="progress"], [class*="Progress"], [class*="timer"], [class*="fatigue"], [id*="Progress"], [id*="Timer"], .labyrinth__quiz-btn, button';
 
-        for (const el of candidates) {
+        for (const el of new Set(candidates)) {
           if (!isQuizVisible(el)) continue;
-          const text = el.textContent.trim();
-          if (text) return text;
+          if (el.closest(uiOnly)) continue;
+          const copy = el.cloneNode(true);
+          copy.querySelectorAll(`${uiOnly}, [hidden], script, style`).forEach(node => node.remove());
+          const text = copy.textContent.replace(/\s+/g, ' ').trim();
+          const cleaned = cleanQuestionText(text);
+          // A progress percentage or loading label is not a new quiz question.
+          if (!/[\p{L}]/u.test(cleaned)) continue;
+          if (/^(?:загрузка|загружается|подождите|ожидание|усталость|прогресс|время|таймер|аниме-викторина)(?:[\s.:…\d%/\-]*)$/i.test(cleaned)) continue;
+          if (/^(?:неправильный|правильный)\s+ответ[!.\s]/i.test(cleaned)) continue;
+          return text;
         }
         return '';
       }
@@ -18154,6 +18202,7 @@
 
         const runSearch = () => {
           if(!window.__suiteLabyrinthQuizInstalled || !/\/labyrinth(?:\/|$)/.test(location.pathname)) return;
+          if (!isQuizVisible(quiz) || getQuizQuestionText(quiz) !== questionText || buttons.some(b => !isQuizVisible(b))) return;
           const found = findQuestion(cleanedQuestionText, db);
 
           if (found) {
