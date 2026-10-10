@@ -91,5 +91,27 @@ const anime = (id = '33', max = 1168) => ({ anime_id: id, s: 1, min_ep: 1, max_e
   const progress = await f.ctx.getAnimeProgress(anime());
   check(progress.totalEpisodes === 1168 && progress.processedEpisodes === 1167, 'progress display retains accurate counts');
   const empty = fixture(); check((await empty.ctx.updateSmartTarget()).index === -1, 'empty pool remains safe');
+  // Opening a multi-anime database must share one journal snapshot, including archiving.
+  const list = fixture();
+  list.db.set('pool', Array.from({ length: 10 }, (_, i) => anime(String(i + 1), 1)));
+  list.db.set('test_skipped_episodes', Array.from({ length: 5 }, (_, i) => ({ animeId: String(i + 1), episode: 1, skipKey: `${i + 1}_s1_e1` })));
+  for (let i = 0; i < 130; i++) list.db.set(`test_receipt_v2_owner_${i}`, { ownerId: i + 1, watchedAnimeId: '99', watchedEpisode: i });
+  let archive = [];
+  Object.assign(list.ctx, {
+    getFinishedAnimeArchive: async () => structuredClone(archive),
+    setFinishedAnimeArchive: async value => { archive = structuredClone(value); },
+    buildAnimeUniqueKey: entry => entry.anime_id,
+    removeFinishedAnimeArchiveByKey: async () => { throw Error('unexpected archive removal'); }
+  });
+  vm.runInContext(['addFinishedAnimeToArchive', 'buildAnimeDbListWithProgress'].map(extract).join('\n'), list.ctx);
+  const items = await list.ctx.buildAnimeDbListWithProgress();
+  check(items.length === 10 && items.filter(item => item.progress.isFullyFarmed).length === 5, 'list progress remains correct');
+  check(archive.length === 5, 'completed anime are still archived');
+  check(list.reads.get('test_card_receipts') === 1, 'list reads legacy receipts once for all anime');
+  check([...list.reads].filter(([key]) => key.includes('receipt_v2')).every(([, n]) => n === 1), 'list reads each journal entry only once');
+  await list.ctx.buildAnimeDbListWithProgress();
+  check(archive.length === 5, 'reopening does not duplicate archived anime');
+  list.db.set('pool', []); list.reads.clear();
+  check((await list.ctx.buildAnimeDbListWithProgress()).length === 0 && !list.reads.has('test_card_receipts'), 'empty database does not read receipts');
   console.log(JSON.stringify({ result: 'AUTOLOOT_PROGRESS_OK', passed, exhaustedSeries: 1168, legacyReceipts: 3000 }));
 })().catch(error => { console.error(error); process.exitCode = 1; });

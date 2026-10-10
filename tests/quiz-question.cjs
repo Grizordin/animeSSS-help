@@ -25,6 +25,8 @@ function extract(name) {
       const QUESTION_SUFFIX_PATTERNS = [];
       let quizDbReady = true, lastProcessedQuestion = '', resetTimer = 0, searches = 0;
       const logs = [], reports = [], pending = [];
+      let scheduled = 0;
+      const scheduleProcessQuiz = () => { scheduled++; };
       const requestIdleCallback = fn => pending.push(fn);
       const suiteTelemetryLog = (...args) => logs.push(args);
       const sendQuizReport = (...args) => reports.push(args);
@@ -77,6 +79,39 @@ function extract(name) {
       check(searches === 1, 'deferred search cannot highlight a changed question');
       lastProcessedQuestion = ''; processQuiz(); quiz.remove(); pending.shift()();
       check(searches === 1, 'deferred search cannot process removed quiz');
+
+      quiz = fixture(`<div id="labyrinthEventText">${question}</div>`);
+      processQuiz(); processQuiz();
+      check(pending.length === 1, 'repeated mutations share one pending search');
+      const answer = quiz.querySelector('.labyrinth__quiz-btn');
+      answer.style.display = 'none';
+      pending.shift()();
+      check(!lastProcessedQuestion && !processQuiz.pendingSearch && scheduled > 0, 'cancelled search releases question and schedules recheck');
+      answer.style.display = '';
+      processQuiz(); pending.shift()();
+      check(searches === 2 && answer.classList.contains('labyrinth__quiz-btn--correct'), 'restored answer is highlighted without waiting 60 seconds');
+      const selections = logs.filter(row => row[1] === 'answer_selected').length;
+      answer.click();
+      check(logs.filter(row => row[1] === 'answer_selected').length === selections + 1, 'cancelled search leaves no duplicate click listener');
+
+      lastProcessedQuestion = '';
+      quiz = fixture(`<div id="labyrinthEventText">${question}</div>`);
+      processQuiz();
+      document.getElementById('labyrinthEventText').textContent = 'Новый вопрос?';
+      processQuiz();
+      pending.shift()();
+      check(!!processQuiz.pendingSearch && !lastProcessedQuestion, 'stale callback cannot clear a newer pending search');
+      pending.shift()();
+      check(lastProcessedQuestion === 'Новый вопрос?' && searches === 3, 'newer question is processed normally');
+
+      lastProcessedQuestion = '';
+      quiz = fixture(`<div id="labyrinthEventText">${question}</div>`);
+      processQuiz();
+      quiz.querySelectorAll('.labyrinth__quiz-btn')[1].textContent = 'Другой ответ';
+      pending.shift()();
+      check(!lastProcessedQuestion && searches === 3, 'changing answer options cancels stale search');
+      processQuiz(); pending.shift()();
+      check(searches === 4, 'updated answer options can be searched again');
       clearTimeout(resetTimer);
       return { result: 'QUIZ_QUESTION_OK', passed };
     }, ['cleanQuestionText', 'isQuizVisible', 'getQuizRoot', 'getQuizQuestionText', 'processQuiz'].map(extract).join('\n'));
