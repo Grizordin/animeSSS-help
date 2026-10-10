@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.74
+// @version      3.75
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -4997,6 +4997,8 @@
     {r:/Уровень культивации заверш[её]н!\s*Вы получили \d[\d\s]*\s+очк(?:о|а|ов) для испытаний актуальной главы Кодекса\.?/i, icon:'star', title:'Культивация', theme:'neon-green'},
     {s:'Новое испытание успешно открыто',                          icon:'star',   title:'Испытание',   theme:'neon-green'},
     {s:'Испытание успешно завершено',                              icon:'check',  title:'Испытание',   theme:'neon-green'},
+    {r:/Прогресс испытания обновл[её]н\.?/i,                     icon:'refresh',title:'Испытание',   theme:'neon-blue'},
+    {s:'Условие испытания выполнено. Его можно завершить.',        icon:'check',  title:'Испытание',   theme:'neon-green'},
     {s:'Глава полностью завершена.',                               icon:'check',  title:'Кодекс',      theme:'neon-green'},
     {r:/Восстановлено \d[\d\s]*\s+очк(?:о|а|ов)?\.? испытаний\.\s*Списано \d[\d\s]*\s+случайных карт ранга C, D или E\.?/i, icon:'refresh', title:'Испытание', theme:'neon-green'},
     {r:/Испытание успешно изменено\.\s*Списано \d[\d\s]*\s+случайных карт ранга C, D или E\.?/i, icon:'refresh', title:'Испытание', theme:'neon-green'},
@@ -5045,6 +5047,32 @@
     {s:'Вы уже получали карту с этого пака', icon:'warn', title:'Пак', theme:'neon-amber'},
     {s:'Публикация успешно убрана из ваших закладок на сайте', icon:'save', title:'Закладки', theme:'emerald'},
     {s:'Публикация успешно добавлена в ваши закладки на сайте', icon:'save', title:'Закладки', theme:'emerald'},
+    // ── Коллекции и получение наград ──────────────────────
+    {s:'Не удалось получить ответ сервера. Обновите страницу и проверьте награду перед повтором.', icon:'warn', title:'Награда', theme:'neon-amber'},
+    {r:/За сбор полной коллекции карточек вы получили высшую награду:\s*\d[\d\s]*\s+камней духа/i, icon:'star', title:'Коллекция', theme:'neon-green'},
+    {s:'При сдаче набора произошла ошибка.',                       icon:'err',    title:'Коллекция',   theme:'rose'},
+    // ── Аниме и списки ────────────────────────────────────
+    {r:/Для того чтобы оставить сво[её] мнение об аниме вы должны его посмотреть/i, icon:'warn', title:'Аниме', theme:'neon-amber'},
+    {s:'Данное аниме уже есть в этом списке',                      icon:'info',   title:'Список',      theme:'neon-amber'},
+    // ── Карты, переплавка и обмен ─────────────────────────
+    {s:'Блокировка карты снята.',                                  icon:'lock',   title:'Разблокировка', theme:'emerald'},
+    {s:'Такой карты нет в наличии.',                               icon:'card',   title:'Карта',       theme:'neon-amber'},
+    {r:/Вы использовали дневной лимит в \d+\s+плав(?:ку|ка|ки|ок) карт ранга [A-EАВСДЕ]\+?/i, icon:'clock', title:'Переплавка', theme:'rose'},
+    {r:/Одна из карт,? которую вы предложили на обмен,? больше не пр[еи]надлежит вам/i, icon:'trade', title:'Обмен', theme:'rose'},
+    // ── Лабиринт и подношения ─────────────────────────────
+    {s:'Выбор судьбы не найден',                                  icon:'warn',   title:'Комната',     theme:'neon-amber'},
+    {s:'Активная головоломка не найдена',                          icon:'warn',   title:'Головоломка', theme:'neon-amber'},
+    {s:'Активный алтарь удачи не найден',                          icon:'warn',   title:'Алтарь',      theme:'neon-amber'},
+    {s:'В этой комнате нельзя установить личного стража',          icon:'shield', title:'Комната',     theme:'neon-amber'},
+    {s:'Активная ловушка не найдена',                              icon:'warn',   title:'Ловушка',     theme:'neon-amber'},
+    {s:'У вас нет свободного экземпляра карты для подношения.',    icon:'card',   title:'Подношение',  theme:'neon-amber'},
+    // ── Авторизация и промокоды ───────────────────────────
+    {s:'Для продолжения необходимо авторизоваться.',              icon:'lock',   title:'Авторизация', theme:'rose'},
+    {r:/Ввод промо-кода отключ[её]н с \d{1,2}:\d{2} до \d{1,2}:\d{2}/i, icon:'clock', title:'Промокод', theme:'neon-amber'},
+    // ── Сообщения, изображения и клуб ─────────────────────
+    {s:'Слишком много картинок/смайлов в сообщении',               icon:'warn',   title:'Сообщения',   theme:'neon-amber'},
+    {s:'Не удалось загрузить изображение в предпросмотр',         icon:'err',    title:'Изображение', theme:'rose'},
+    {s:'Не хватает очков вклада',                                  icon:'coin',   title:'Клуб',        theme:'neon-amber'},
     {
       r:/(?:с момента вашего отсутствия на сайте вам было прислано|у вас(?: сейчас)?)\s+\d+\s+(?:(?:нов(?:ое|ых)|непрочитанн(?:ое|ых))\s+)*сообщени(?:е|я|й)/i,
       icon:'bell',
@@ -15717,7 +15745,7 @@
             updateButtonState();
         }
 
-        function scheduleNext(delayMs) {
+        function scheduleNext(delayMs, refreshPanelData = true) {
             if (suiteGetAuthPause('autowatch')) {
                 stopMainCardCheckLogic();
                 return;
@@ -15731,7 +15759,8 @@
                 nextRunAt,
                 loopRunning: isLoopRunning
             });
-            updateButtonState();
+            if (refreshPanelData) updateButtonState();
+            else renderPanelLiveState();
         }
 
         // Восстанавливает nextRunAt из сохранённого времени последнего запроса,
@@ -16452,11 +16481,13 @@
         async function buildAnimeDbListWithProgress() {
             const db = await getAnimeDb();
             const result = [];
+            if (!db.length) return result;
+            const snapshot = await buildAutolootProgressSnapshot();
 
             for (const item of db) {
-                const progress = await getAnimeProgress(item);
+                const progress = await getAnimeProgress(item, snapshot);
                 if (progress.isFullyFarmed) {
-                    await addFinishedAnimeToArchive(item);
+                    await addFinishedAnimeToArchive(item, progress);
                 }
                 result.push({ ...item, progress });
             }
@@ -16545,9 +16576,21 @@
 
         async function openAnimeDbModal() {
             removeAnimeDbModal();
-            await syncFinishedArchiveWithDb();
-
-            const items = await buildAnimeDbListWithProgress();
+            const modal = createSimpleModal(ANIME_DB_MODAL_ID, 'База аниме',
+                '<div class="aw-empty" role="status">Загрузка базы аниме…</div>', '860px');
+            let items;
+            try {
+                items = await buildAnimeDbListWithProgress();
+            } catch (error) {
+                warn('Не удалось загрузить базу аниме:', error);
+                if (modal.isConnected) {
+                    modal.querySelector('.aw-modal-body').innerHTML = '<div class="aw-empty" role="alert">Не удалось загрузить базу аниме.</div><button class="aw-action-btn" type="button">Повторить</button>';
+                    modal.querySelector('.aw-action-btn').addEventListener('click', openAnimeDbModal);
+                }
+                return;
+            }
+            // Do not reopen a closed dialog or overwrite a newer loading operation.
+            if (!modal.isConnected || document.getElementById(ANIME_DB_MODAL_ID) !== modal) return;
 
             let processedEpisodesAll = 0;
             let totalEpisodesAll = 0;
@@ -16557,10 +16600,7 @@
                 totalEpisodesAll += Number(item.progress?.totalEpisodes || 0);
             }
 
-            const modal = createSimpleModal(
-                ANIME_DB_MODAL_ID,
-                'База аниме',
-                `
+            modal.querySelector('.aw-modal-body').innerHTML = `
                     <div class="aw-summary">
                         <div class="aw-card">
                             <div class="aw-card-label">Аниме в базе</div>
@@ -16611,9 +16651,7 @@
                                 : `<div class="aw-empty">База аниме пока пуста.</div>`
                         }
                     </div>
-                `,
-                '860px'
-            );
+                `;
 
             modal.querySelector('#aw-refresh-anime-db-btn')?.addEventListener('click', async () => {
                 modal.remove();
@@ -16739,7 +16777,7 @@
             return value.replace(new RegExp(`\\s+(?:\\[${escapedRank}\\]|\\(${escapedRank}\\)|${escapedRank})$`, 'i'), '').trim() || value;
         }
 
-        async function updateButtonStateNow() {
+        async function updateButtonStateNow(includeLastCard = true) {
             renderPanelLiveState();
             const daily = document.getElementById('aw-active-tab-daily');
             const pause = document.getElementById('aw-active-tab-pause');
@@ -16778,7 +16816,7 @@
             setPanelText(pause, `Пауза: ${suiteGetAuthPause('autowatch') ? 'нужна авторизация' : panelPaused ? 'да' : 'нет'}`);
 
             // последняя полученная карта
-            if (lastCardEl) {
+            if (lastCardEl && includeLastCard) {
                 try {
                     const receipts = await getAllReceipts();
                     if (receipts.length > 0) {
@@ -16787,15 +16825,18 @@
                         const rc = RANK_CONFIG.find(r => r.key === rank) || RANK_CONFIG[RANK_CONFIG.length - 1];
                         lastCardEl.style.display = '';
                         const cardName = cleanCardNameForPanel(last.cardName, rc.label);
+                        lastCardEl.title = `${rc.label}: ${cardName}`;
                         const cardHtml =
                             `<span class="aw-last-card" style="background:${rc.bg};color:${rc.color}">${rc.label}</span>` +
                             `${escapeHtml(cardName)}`;
                         if (lastCardEl.innerHTML !== cardHtml) lastCardEl.innerHTML = cardHtml;
                     } else {
-                        lastCardEl.style.display = 'none';
+                        setPanelText(lastCardEl, 'Полученных карт пока нет');
+                        lastCardEl.title = '';
                     }
                 } catch (e) {
-                    lastCardEl.style.display = 'none';
+                    setPanelText(lastCardEl, 'Не удалось загрузить последнюю карту');
+                    lastCardEl.title = '';
                 }
             }
         }
@@ -16884,7 +16925,6 @@
 
             const collapsed = await GM_getValue(PANEL_COLLAPSED_KEY, false);
             renderPanelCollapsedState(panel, body, btn, collapsed);
-            await updateButtonState();
         }
 
         async function createPanel() {
@@ -16989,6 +17029,14 @@
                     color: #cbd5e1;
                     opacity: .92;
                 }
+                #aw-active-tab-last-card {
+                    contain: inline-size;
+                    height: 20px;
+                    line-height: 20px;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }
                 #aw-active-tab-panel .aw-actions {
                     margin-top: 8px;
                     display: flex;
@@ -17069,6 +17117,7 @@
                 .aw-last-card {
                     display: inline-block;
                     font-size: 11px;
+                    line-height: 14px;
                     font-weight: 700;
                     padding: 1px 6px;
                     border-radius: 5px;
@@ -17383,6 +17432,8 @@
 
             const panel = document.createElement('div');
             panel.id = 'aw-active-tab-panel';
+            // Restore geometry before the first paint; history can load afterwards.
+            panel.style.visibility = 'hidden';
             panel.innerHTML = `
                 <div class="aw-head">
                     <div class="aw-title">
@@ -17403,7 +17454,7 @@
                     <div class="aw-progress-wrap aw-line">
                         <div id="aw-daily-bar" class="aw-progress-bar"><div id="aw-daily-bar-fill" class="aw-progress-fill"></div></div>
                     </div>
-                    <div id="aw-active-tab-last-card" class="aw-line" style="display:none"></div>
+                    <div id="aw-active-tab-last-card" class="aw-line">Последняя карта: загрузка…</div>
                     <div id="aw-active-tab-timer" class="aw-line">До попытки: ...</div>
                     <div id="aw-empty-db-warning" hidden>⚠ База аниме пуста. Добавьте аниме через кнопку ниже.</div>
                     <div class="aw-actions">
@@ -17418,7 +17469,6 @@
                 left: panel.style.left,
                 top: panel.style.top
             });
-            suiteKeepInViewport(panel, {margin:8, constrainSize:true});
 
             panel.querySelector('#aw-active-tab-toggle').addEventListener('click', toggleWatch);
             panel.querySelector('#aw-open-anime-db').addEventListener('click', openAnimeDbModal);
@@ -17430,8 +17480,19 @@
             panel.querySelector('#aw-active-tab-collapse').addEventListener('click', togglePanelCollapsed);
 
             installPanelDrag(panel);
-            await applyPanelCollapsedState();
-            await applyPanelPosition(panel);
+            try {
+                await applyPanelCollapsedState();
+                await updateButtonStateNow(false);
+                await applyPanelPosition(panel);
+            } catch (error) {
+                warn('Не удалось восстановить панель автолута:', error);
+            }
+            if (!panel.isConnected) return;
+            clampPanelToViewport(panel);
+            suiteKeepInViewport(panel, {margin:8, constrainSize:true});
+            panel.style.visibility = '';
+            suiteResolveFloatingButtonOverlaps(panel);
+            void updateButtonState();
         }
 
         function installPanelDrag(panel) {
@@ -17546,7 +17607,13 @@
                     panel.style.bottom = 'auto';
                 }
             }
-            requestAnimationFrame(() => clampPanelToViewport(panel));
+            clampPanelToViewport(panel);
+            // Keep the top edge fixed when the last-card row arrives asynchronously.
+            const rect = panel.getBoundingClientRect();
+            panel.style.left = `${Math.round(rect.left)}px`;
+            panel.style.top = `${Math.round(rect.top)}px`;
+            panel.style.right = 'auto';
+            panel.style.bottom = 'auto';
         }
 
         function clampPanelToViewport(panel) {
@@ -17589,12 +17656,14 @@
             }
         }
 
-        function handleTabFocus() {
+        function handleTabFocus(event) {
             const becameLeader = claimTabLock(true);
-            updateButtonState();
+            const pointerOnly = event?.type === 'pointerdown';
+            if (pointerOnly) renderPanelLiveState();
+            else updateButtonState();
             if (becameLeader && scriptEnabledWatch) {
                 const hasFutureRun = checkNewCardTimeoutId && nextRunAt > Date.now() + RESUME_DELAY_MS;
-                if (!hasFutureRun) scheduleNext(animeDbEmpty ? EMPTY_DB_RECHECK_MS : RESUME_DELAY_MS);
+                if (!hasFutureRun) scheduleNext(animeDbEmpty ? EMPTY_DB_RECHECK_MS : RESUME_DELAY_MS, !pointerOnly);
             }
         }
 
@@ -18163,11 +18232,12 @@
 
         // Не обрабатывать один вопрос дважды, но сброс происходит через минуту
         if (questionText === lastProcessedQuestion) return;
-        lastProcessedQuestion = questionText;
-
-        // Сброс через 60 сек — КД на ход минута, тот же вопрос может появиться снова
-        clearTimeout(resetTimer);
-        resetTimer = setTimeout(() => { lastProcessedQuestion = ''; }, 60_000);
+        const pending = processQuiz.pendingSearch;
+        if (pending?.questionText === questionText && pending.quiz === quiz &&
+            pending.buttons.length === buttons.length && pending.buttons.every((b, i) => b === buttons[i])) return;
+        pending?.controller.abort();
+        const search = { questionText, quiz, buttons, controller: new AbortController() };
+        processQuiz.pendingSearch = search;
 
         // Сброс предыдущей подсветки
         buttons.forEach(b => b.classList.remove(
@@ -18198,11 +18268,26 @@
           attempt.selectedAnswer = button.textContent.trim();
           suiteTelemetryLog('quiz', 'answer_selected', attempt);
           observeQuizResult(attempt);
-        }, { once:true, capture:true }));
+        }, { once:true, capture:true, signal:search.controller.signal }));
 
         const runSearch = () => {
-          if(!window.__suiteLabyrinthQuizInstalled || !/\/labyrinth(?:\/|$)/.test(location.pathname)) return;
-          if (!isQuizVisible(quiz) || getQuizQuestionText(quiz) !== questionText || buttons.some(b => !isQuizVisible(b))) return;
+          if (processQuiz.pendingSearch !== search) return;
+          processQuiz.pendingSearch = null;
+          if(!window.__suiteLabyrinthQuizInstalled || !/\/labyrinth(?:\/|$)/.test(location.pathname)) {
+            search.controller.abort();
+            return;
+          }
+          if (!isQuizVisible(quiz) || getQuizQuestionText(quiz) !== questionText ||
+              buttons.some((b, i) => !isQuizVisible(b) || b.textContent.trim() !== options[i])) {
+            search.controller.abort();
+            scheduleProcessQuiz();
+            return;
+          }
+          // Only a validated search marks the question as processed. Cancelled work
+          // may retry immediately when the site's buttons/question finish updating.
+          lastProcessedQuestion = questionText;
+          clearTimeout(resetTimer);
+          resetTimer = setTimeout(() => { lastProcessedQuestion = ''; }, 60_000);
           const found = findQuestion(cleanedQuestionText, db);
 
           if (found) {
