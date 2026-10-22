@@ -4,7 +4,7 @@ const {chromium}=require('playwright');
 const source=fs.readFileSync(path.join(__dirname,'..','AnimeSSS_help.user.js'),'utf8');
 new vm.Script(source);
 function extract(name){
- const m=new RegExp('^([ \\t]*)function '+name+'\\(','m').exec(source),lines=source.slice(m.index).split(/\r?\n/);
+ const m=new RegExp('^([ \\t]*)(?:async )?function '+name+'\\(','m').exec(source),lines=source.slice(m.index).split(/\r?\n/);
  for(let n=2;n<=lines.length;n++)if(lines[n-1]===m[1]+'}'){
   const code=lines.slice(0,n).join('\n');try{new vm.Script('('+code+')');return code;}catch{}
  }
@@ -13,7 +13,7 @@ function extract(name){
 const native=`<section class="ps-wallet" aria-label="Ваш баланс"><div class="ps-wallet-main"><span class="ps-wallet-icon"><i class="fal fa-gem" aria-hidden="true"></i></span><div><div class="ps-label">Ваши камни духа</div><div class="ncard-shop__text-caption"><span data-ps-balance="">167002</span><i class="diamond" aria-hidden="true"></i></div></div></div><div class="ps-wallet-actions"><a class="ps-button ps-button--primary ncard-shop__btn-donate" href="/donate/">Пополнить</a><a class="ps-button" href="/transactions/">История операций</a></div></section><div id="collection">Ваша коллекция</div>`;
 const legacy='<div class="ncard-shop__text lootbox__descr d-flex fd-column r-gap-20"><div class="ncard-shop__text-main lootbox__descr-section ta-center"><span>167002</span><i class="diamond"></i></div><a href="/donate/">Пополнить</a></div>';
 const baseCSS='*{box-sizing:border-box}body{margin:0;padding:24px;background:#111;color:#e5eeee;font:14px Arial}.ps-wallet{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:26px;background:#1b2325;border:1px solid #344647;border-radius:18px}.ps-wallet-main,.ps-wallet-actions{display:flex;align-items:center;gap:12px}.ps-wallet-icon{background:#253f39;width:54px;height:54px;border-radius:14px}.ps-label{color:#a6b9bc;font-size:13px;margin-bottom:8px}.ncard-shop__text-caption{font-size:32px;font-weight:bold}.ps-button{padding:14px;border:1px solid #344647;border-radius:10px;color:inherit;text-decoration:none}.ps-button--primary{background:#2d7564}.diamond{display:inline-block;width:16px;height:16px;background:#65b9a1;clip-path:polygon(25% 0,75% 0,100% 35%,50% 100%,0 35%)}@media(max-width:600px){body{padding:12px}.ps-wallet{flex-direction:column;align-items:flex-start;padding:18px}.ps-wallet-actions{flex-wrap:wrap}}';
-const cache=[{amount:1000000,date:Date.now()-10000,description:'Reward'},{amount:-83000,date:Date.now()-20000,description:'Packs'}];
+const cache=[{amount:1000000,date:Date.now()-10000,description:'Reward'},{amount:-80000,date:Date.now()-20000,description:'Открытие паков карточек'},{amount:-3000,date:Date.now()-30000,description:'Подношение'}];
 const historyHTML=process.argv[2]?fs.readFileSync(process.argv[2],'utf8'):'<div class="ps-table-wrap ncard-transactions__table"><table class="ps-history-table"><tbody>'+Array.from({length:20},(_,i)=>'<tr class="new-tr-item" data-ps-flow="expense"><td class="new-tr-amount"><span>- 1600</span></td><td class="new-tr-date" data-ps-label="Баланс">86282</td><td class="new-tr-date" data-ps-label="Дата">11.09.2026 19:20:'+String(54-i).padStart(2,'0')+'</td><td data-ps-label="Описание">Открытие паков карточек</td></tr>').join('')+'</tbody></table></div>';
 let passed=0;const check=(value,message)=>{if(!value)throw Error(message);passed++;};
 (async()=>{
@@ -50,7 +50,17 @@ let passed=0;const check=(value,message)=>{if(!value)throw Error(message);passed
    const html=${JSON.stringify(historyHTML)},rows=parseTransactions(html);
    check(rows.length===20,'all 20 redesigned operations recognized');
    rows.forEach((r,i)=>{check(r.amount===-1600,'expense sign '+i);check(r.date>0&&r.description==='Открытие паков карточек','date and description '+i);});
-   check(calculateTotals(rows).spent===32000&&calculateTotals(rows).earned===0,'new history totals');
+   check(calculateTotals(rows).spent===32000&&calculateTotals(rows).earned===0&&calculateTotals(rows).nonPackSpent===0,'pack expenses only in overall total');
+   const mixed=calculateTotals([{amount:-1600,description:'Открытие паков карточек'},
+    {amount:-200,description:'Подношение'},{amount:-50,description:'Другое событие'},
+    {amount:500,description:'Награда'},{amount:100,description:'Открытие паков карточек'},
+    {amount:0,description:'Другое событие'},{amount:-10,description:''},
+    {amount:-20},{amount:-100,description:'  Открытие   паков карточек  '}]);
+   check(mixed.earned===600&&mixed.spent===1980&&mixed.nonPackSpent===280,'all other negative descriptions counted without double counting or income');
+   check(calculateTotals([]).nonPackSpent===0,'empty history starts at zero');
+   const running=calculateTotals([{amount:-100,description:'Подношение'}]);
+   calculateTotals([{amount:-1600,description:'Открытие паков карточек'},{amount:-50,description:'Комиссия'}],running);
+   check(running.spent===1750&&running.nonPackSpent===150,'incremental accumulation shares classification');
    check(rows[0].date===new Date(2026,8,11,19,20,54).getTime(),'date parsed instead of balance');
    const doc=new DOMParser().parseFromString(html,'text/html'),row=doc.querySelector('tr.new-tr-item');
    row.prepend(row.querySelector('[data-ps-label="Дата"]'));
@@ -67,6 +77,29 @@ let passed=0;const check=(value,message)=>{if(!value)throw Error(message);passed
    return passed;
   })()`);
   passed+=parserResults;
+  passed+=await page.evaluate('(async()=>{'+['calculateTotals','updateCacheIncremental'].map(extract).join('\n')+`
+   let passed=0;const check=(v,m)=>{if(!v)throw Error(m);passed++;};
+   const CACHE_KEY='cache',DATE_KEY='date',LAST_UPDATE_KEY='updated',DAY_MS=86400000;
+   const old=[{amount:-100,date:100,description:'Подношение'},{amount:-1600,date:90,description:'Открытие паков карточек'}];
+   const newer=[{amount:-200,date:400,description:'Покупка ключа'},{amount:-1600,date:300,description:'Открытие паков карточек'},{amount:50,date:200,description:'Возврат'}];
+   const saved={cache:old,date:'100',updated:'0'},progress=[];let requests=0;
+   async function load(k,d){return saved[k]??d;}
+   async function loadJSON(k,d){return structuredClone(saved[k]??d);}
+   async function save(k,v){saved[k]=v;}
+   async function saveJSON(k,v){saved[k]=structuredClone(v);}
+   async function sleep(){}
+   async function fetchPage(){requests++;return [...newer,...old];}
+   let rows=await updateCacheIncremental({maxPages:1,onTotals:t=>progress.push(t)});
+   check(rows.length===5&&requests===1,'incremental scan merges new rows once');
+   check(calculateTotals(rows).spent===3500&&calculateTotals(rows).nonPackSpent===300,'incremental scan retains old subtotal and adds new non-packs');
+   check(progress[0].nonPackSpent===300&&progress[0].spent===3500,'progress includes automatic subtotal');
+   rows=await updateCacheIncremental({maxPages:1,onTotals:t=>progress.push(t)});
+   check(requests===1&&progress.at(-1).nonPackSpent===300,'fresh cache gives same subtotal without another scan');
+   rows=await updateCacheIncremental({forceFull:true,maxPages:1,onTotals:t=>progress.push(t)});
+   check(rows.length===5&&calculateTotals(rows).nonPackSpent===300,'full recount replaces rather than adds subtotal');
+   check(progress.at(-1).spent===3500&&progress.at(-1).nonPackSpent===300,'full scan progress includes subtotal');
+   return passed;
+  })()`);
   await page.waitForFunction(()=>document.querySelector('.cv-stones-wallet__refresh')?.disabled===false && document.querySelector('.earned-diamonds')?.textContent.includes('1'));
   let result=await page.evaluate(()=>({
    wallet:document.querySelector('.ps-wallet').outerHTML,
@@ -81,7 +114,7 @@ let passed=0;const check=(value,message)=>{if(!value)throw Error(message);passed
   }));
   check(result.wallet===native.slice(0,native.indexOf('<div id="collection">')),'native balance, links and attributes untouched');
   check(result.after==='cv-stones-wallet'&&result.next==='collection','inserted after balance, before collection');
-  check(result.cards===3,'three cards');check(result.earned==='+1000000','cached earned');check(result.spent==='−83000','cached spent');check(result.extra==='12500','manual total preserved');
+  check(result.cards===3,'three cards');check(result.earned==='+1000000','cached earned');check(result.spent==='−83000','cached spent');check(result.extra==='3000','automatic subtotal derived from saved descriptions, ignores manual value');
   check(result.cache===JSON.stringify(cache),'no cache migration');check(result.requests===1,'fresh cache does not scan history pages');
   check(result.floats===0&&result.panelPosition==='static','no floating controls or stale position');
   await page.evaluate(()=>{initStones();initStones();});
@@ -96,33 +129,28 @@ let passed=0;const check=(value,message)=>{if(!value)throw Error(message);passed
    });
    check(geometry.fits,'no horizontal overflow '+width);check(geometry.all,'controls stay in card '+width);check(geometry.cols===(width>850?3:width>520?2:1),'responsive columns '+width);
   }
-  await page.locator('.cv-stones-input').fill('250');await page.getByRole('button',{name:'Добавить расходы не на паки'}).click();
-  await page.waitForFunction(()=>store.nonPackSpentStones==='12750');check(true,'manual add stored');
-  await page.locator('.cv-stones-input').fill('10');await page.locator('.cv-stones-input').press('Enter');await page.waitForFunction(()=>store.nonPackSpentStones==='12760');check(true,'Enter adds');
-  for(const invalid of ['1.5','-999999','9007199254740992']){
-   await page.locator('.cv-stones-input').fill(invalid);await page.getByRole('button',{name:'Добавить расходы не на паки'}).click();
-   check(await page.evaluate(()=>store.nonPackSpentStones)==='12760','invalid adjustment rejected '+invalid);
-  }
-  await page.evaluate(()=>{document.querySelector('.cv-stones-input').value='1';const b=document.querySelector('.cv-stones-input').nextElementSibling;b.click();b.click();});
-  await page.waitForFunction(()=>store.nonPackSpentStones==='12761');check(true,'double click counted once');
-  await page.getByRole('button',{name:'Обнулить расходы не на паки'}).click();await page.waitForFunction(()=>store.nonPackSpentStones==='0');
-  check(await page.evaluate(()=>store.animestars_transactions_cache)===JSON.stringify(cache),'manual reset leaves transaction cache');
+  check(await page.locator('.cv-stones-panel input,.cv-stones-panel button,.cv-stones-wallet__controls').count()===0,'manual input, add and reset removed');
+  check(await page.evaluate(()=>store.nonPackSpentStones)==='12500','old manual value preserved but unused');
   await page.evaluate(()=>{window.mode='ok';document.querySelector('.cv-stones-wallet__refresh').click();});
   await page.waitForFunction(()=>document.querySelector('.cv-stones-wallet__refresh').disabled===false);
   check(await page.evaluate(()=>JSON.parse(store.animestars_transactions_cache).length)===2,'recount replaces history without duplicates');
   check(await page.locator('.earned-diamonds>span').textContent()==='+1\u00a0000','recount final total');
+  check(await page.locator('.cv-stones-panel__value').textContent()==='200','non-pack recount result shown');
+  check(await page.locator('.spent-diamonds>span').textContent()==='−200','non-pack expense remains in total exactly once');
   check(await page.evaluate(()=>requests.length)===3,'one pagination and one history request in recount');
   for(const mode of ['fail','empty','partial','partial-empty']){
    const before=await page.evaluate(()=>JSON.stringify(store));await page.evaluate(mode=>{window.mode=mode;document.querySelector('.cv-stones-wallet__refresh').click();},mode);
    await page.waitForFunction(()=>document.querySelector('.cv-stones-wallet__refresh').disabled===false,{},{timeout:20000});
    check(await page.evaluate(()=>JSON.stringify(store))===before,'failed/unknown recount preserves cache and timestamps '+mode);
    check(await page.locator('.earned-diamonds>span').textContent()==='+1\u00a0000','error restores saved totals '+mode);
+   check(await page.locator('.cv-stones-panel__value').textContent()==='200','error restores saved non-pack subtotal '+mode);
   }
   await page.evaluate(html=>{window.historyFixture=html;window.mode='fixture';document.querySelector('.cv-stones-wallet__refresh').click();},historyHTML);
   await page.waitForFunction(()=>document.querySelector('.cv-stones-wallet__refresh').disabled===false);
   check(await page.evaluate(()=>JSON.parse(store.animestars_transactions_cache).length)===20,'new history passes complete recount and persists');
   check((await page.locator('.spent-diamonds>span').textContent()).replace(/\s/g,'')==='−32000','new history updates displayed spent total');
-  check(await page.evaluate(()=>store.nonPackSpentStones)==='0','recount leaves manual counter unchanged');
+  check(await page.locator('.cv-stones-panel__value').textContent()==='0','pack-only history resets automatic subtotal');
+  check(await page.evaluate(()=>store.nonPackSpentStones)==='12500','recount does not overwrite old manual value');
   await page.evaluate(()=>cleanupStonesUi());
   check(await page.locator('.cv-stones-wallet,.cv-stones-panel,.cv-stones-progress,#cv-stones-style').count()===0,'cleanup removes all module UI');
   check(await page.locator('.ps-wallet').evaluate(e=>e.outerHTML)===result.wallet,'native wallet intact after cleanup');
@@ -137,7 +165,8 @@ let passed=0;const check=(value,message)=>{if(!value)throw Error(message);passed
   const old=await setup(legacy);await old.waitForFunction(()=>document.querySelector('.cv-stones-floating-btn')?.disabled===false);
   check(await old.locator('.cv-stones-summary-row .ncard-shop__text-main').count()===1,'legacy layout still mounts');
   check(await old.locator('.cv-stones-floating-btn').count()===1,'legacy refresh retained');
-  check(await old.locator('.cv-stones-panel__value').textContent()==='12\u00a0500','legacy extra retained');
+  check(await old.locator('.cv-stones-panel__value').textContent()==='3\u00a0000','legacy automatic subtotal');
+  check(await old.locator('.cv-stones-panel input,.cv-stones-panel button').count()===0,'legacy manual controls also removed');
   await old.evaluate(()=>cleanupStonesUi());check(await old.locator('.ncard-shop__text > .ncard-shop__text-main').count()===1,'legacy caption restored');await old.close();
   const held=await setup(native,'hold');await held.waitForFunction(()=>!!window.release);
   check(await held.locator('.cv-stones-wallet__refresh').isDisabled(),'initial scan shares refresh lock');

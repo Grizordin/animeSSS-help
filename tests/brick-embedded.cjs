@@ -65,6 +65,7 @@ let passed=0;const check=(v,m)=>{if(!v)throw Error(m);passed++;};
   check(await page.evaluate(()=>store.stone_brick_settings_v3[''].ownersLimit)===1600,'owners change saved');
   await page.getByRole('spinbutton',{name:'Цель энергии',exact:true}).fill('360');await page.getByRole('spinbutton',{name:'Цель энергии',exact:true}).press('Tab');
   check(await page.evaluate(()=>store.stone_brick_settings_v3.targetEnergy)===360,'energy change saved');
+  await require('./wishlist-checkbox-hit-area.cjs')(page,'.suite-brick-wishlist','stone_brick_settings_v3',check);
   await page.getByRole('checkbox',{name:'Исключать желаемое'}).uncheck();check(await page.evaluate(()=>store.stone_brick_settings_v3.excludeWishlist)===false,'wishlist toggle saved');
   // Simulate the site's rank activation handler, then let the real module process its click.
   await page.evaluate(()=>document.querySelector('[data-rank="a"]').addEventListener('click',e=>{document.querySelector('.stone__rank-item--active').classList.remove('stone__rank-item--active');e.currentTarget.classList.add('stone__rank-item--active');}));
