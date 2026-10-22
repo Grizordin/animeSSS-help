@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.76
+// @version      3.77
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -20019,6 +20019,7 @@ function watchTradeLimitsSettings(){
     document.getElementById('suite-lab-fatigue-modal')?.remove();
     window.__suiteLabyrinthFatigueState = null;
     window.__suiteLabyrinthFatigueInstalled = false;
+    suitePositionLabyrinthFatigueCounter();
   }
 
   function initLabyrinthFatigue(){
@@ -20735,10 +20736,20 @@ function watchTradeLimitsSettings(){
   function suiteAttachLabyrinthOverlay(box){
     const arena = document.querySelector('.labyrinth__arena');
     if(!arena || !box) return false;
-    // The viewport is below the title/zoom controls, but outside the transformed map.
-    const host = arena.querySelector('#labyrinthMapViewport, .labyrinth-map-viewport') || arena;
-    if(getComputedStyle(host).position === 'static') host.style.position = 'relative';
+    // Keep helper panels outside ALL map layers: site/third-party map code may
+    // transform the viewport itself or apply centering rules to its children.
+    if(getComputedStyle(arena).position === 'static') arena.style.position = 'relative';
+    let host = arena.querySelector(':scope > #suite-labyrinth-overlays');
+    if(!host){
+      host = document.createElement('div');
+      host.id = 'suite-labyrinth-overlays';
+      host.style.cssText = 'position:absolute!important;left:0!important;right:0!important;bottom:0!important;top:0;transform:none!important;translate:none!important;margin:0!important;width:auto!important;height:auto!important;pointer-events:none!important;z-index:20;';
+      arena.appendChild(host);
+    }
     if(box.parentElement !== host) host.appendChild(box);
+    for(const [key,value] of Object.entries({position:'absolute',left:'auto',bottom:'auto',transform:'none',translate:'none',margin:'0px'})){
+      if(box.style.getPropertyValue(key)!==value || box.style.getPropertyPriority(key)!=='important') box.style.setProperty(key,value,'important');
+    }
     if(!box.__suiteMapPointerBound){
       for(const type of ['pointerdown','mousedown','touchstart','dblclick']){
         box.addEventListener(type,event=>event.stopPropagation());
@@ -20751,7 +20762,23 @@ function watchTradeLimitsSettings(){
   function suitePositionLabyrinthFatigueCounter(){
     const fatigue = document.getElementById('suite-lab-fatigue-counter');
     const emission = cfg.modLabyrinthEmission ? document.getElementById('suite-emission-timer') : null;
-    if(!fatigue && !emission) return;
+    if(!fatigue && !emission){
+      document.querySelectorAll('#suite-labyrinth-overlays:empty').forEach(el=>el.remove());
+      return;
+    }
+    const arena = document.querySelector('.labyrinth__arena');
+    if(!arena) return;
+    for(const panel of [fatigue,emission].filter(Boolean)) suiteAttachLabyrinthOverlay(panel);
+    const layer = arena.querySelector(':scope > #suite-labyrinth-overlays');
+    if(!layer) return;
+    const arenaRect = arena.getBoundingClientRect();
+    const scaleY = arena.offsetHeight ? arenaRect.height/arena.offsetHeight : 1;
+    // Anchor to the bottom of the visible header, never to moving map content.
+    const headerBottom = [...arena.querySelectorAll('.v2-mapbar, #lm-arena-bar')]
+      .map(el=>el.getBoundingClientRect()).filter(rect=>rect.height>0 && rect.width>0)
+      .reduce((bottom,rect)=>Math.max(bottom,rect.bottom),arenaRect.top);
+    const top = `${Math.max(0,(headerBottom-arenaRect.top)/(scaleY||1)-arena.clientTop)}px`;
+    if(layer.style.top!==top) layer.style.top=top;
     const hasEmission = !!(emission && emission.isConnected && getComputedStyle(emission).display !== 'none');
     const isMobile = typeof window.matchMedia === 'function' && window.matchMedia('(max-width:760px)').matches;
     if(hasEmission){emission.style.top='12px';emission.style.right='12px';}
@@ -20770,8 +20797,7 @@ function watchTradeLimitsSettings(){
     }
     // On narrow maps the site's own red emission banner occupies the same corner height.
     const panels=[hasEmission?emission:null,fatigue].filter(el=>el && getComputedStyle(el).display!=='none');
-    const host=panels[0]?.parentElement;
-    const banner=host?.querySelector('.labyrinth-emission.is-active .labyrinth-emission__banner');
+    const banner=arena.querySelector('.labyrinth-emission.is-active .labyrinth-emission__banner');
     if(banner){
       const rect=banner.getBoundingClientRect();
       const overlaps=rect.width && rect.height && panels.some(el=>{
