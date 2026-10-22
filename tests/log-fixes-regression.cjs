@@ -69,6 +69,7 @@ let postReply = {status:'ok',reward_type:'Exp',step:223};
 let postGachaReward = async () => { posts++; return postReply; };
 const normalizeRewardType = v => v;
 const extractRewardQuantity = () => 120;
+const resolveReceivedReward = (response, fallback) => ({rewardType:response.reward_type || fallback,quantity:120});
 const notify = () => {};
 let diagnosticRequestSequence = 0;
 const diagnosticSanitizeHeaders = v => v;

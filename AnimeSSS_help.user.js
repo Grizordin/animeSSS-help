@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.75
+// @version      3.76
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -93,6 +93,8 @@
     modGachaAutoloot: false,  // автолут гачи клуба
     modWantCards:     false,  // кнопка добавления в желаемое
     modQuickCardOwners:false, // быстрые фильтры обладателей карты
+    modTradeLimits:   false, // исходящие лимиты обменов
+    tradeLimitsNumbers:false, // свободные обмены числом вместо точек
     modOwnerRestrictions:false, // личные ЧС и запреты в списках обладателей
     wantButtonsAlways:false,  // кнопки желаемого видны постоянно
     mobileFloatingUiHidden:false, // мобильные плавающие кнопки и окна визуально скрыты
@@ -1297,7 +1299,7 @@
     const pending = [fn];
     const originalKeys = ['__suiteLabyrinthFatigueOriginal', '__fatigueDebugOriginal',
       '__suiteChatStoneOriginal', '__suiteXhrOriginal', '__awVisibleTabOriginal',
-      '__suiteCustomPushOriginal', '__suiteGlobalDiagnosticsOriginal', '__animeSSSTradeDebugOriginal'];
+      '__suiteCustomPushOriginal', '__suiteGlobalDiagnosticsOriginal', '__animeSSSTradeDebugOriginal', '__suiteTradeLimitsOriginal'];
     while(pending.length && seen.size < 32){
       const current = pending.pop();
       if(typeof current !== 'function' || seen.has(current)) continue;
@@ -5048,13 +5050,19 @@
     {s:'Публикация успешно убрана из ваших закладок на сайте', icon:'save', title:'Закладки', theme:'emerald'},
     {s:'Публикация успешно добавлена в ваши закладки на сайте', icon:'save', title:'Закладки', theme:'emerald'},
     // ── Коллекции и получение наград ──────────────────────
+    {r:/Набор собран!\s*Можно сдать \d+ карт(?:у|ы)?\.?/i,         icon:'check',  title:'Коллекция',   theme:'neon-green'},
+    {r:/Прогресс сбора карт обновл[её]н\.?/i,                    icon:'refresh',title:'Коллекция',   theme:'neon-blue'},
     {s:'Не удалось получить ответ сервера. Обновите страницу и проверьте награду перед повтором.', icon:'warn', title:'Награда', theme:'neon-amber'},
     {r:/За сбор полной коллекции карточек вы получили высшую награду:\s*\d[\d\s]*\s+камней духа/i, icon:'star', title:'Коллекция', theme:'neon-green'},
     {s:'При сдаче набора произошла ошибка.',                       icon:'err',    title:'Коллекция',   theme:'rose'},
     // ── Аниме и списки ────────────────────────────────────
+    {s:'Не удалось загрузить списки. Попробуйте ещё раз.',         icon:'err',    title:'Список',      theme:'neon-amber'},
+    {r:/Данно[ей] действие доступно один раз в час для каждого аниме/i, icon:'clock', title:'Аниме', theme:'neon-amber'},
     {r:/Для того чтобы оставить сво[её] мнение об аниме вы должны его посмотреть/i, icon:'warn', title:'Аниме', theme:'neon-amber'},
     {s:'Данное аниме уже есть в этом списке',                      icon:'info',   title:'Список',      theme:'neon-amber'},
     // ── Карты, переплавка и обмен ─────────────────────────
+    {r:/У вас есть \d+ карт ранга S в которых зв[её]зды не были улучшены до максимума, для улучшения новых карточек сперва закончите улучшение в старых картах/i, icon:'star', title:'Звёзды', theme:'neon-amber'},
+    {s:'Для использования автоплавки выберите разблокированные карты', icon:'lock', title:'Переплавка', theme:'neon-amber'},
     {s:'Блокировка карты снята.',                                  icon:'lock',   title:'Разблокировка', theme:'emerald'},
     {s:'Такой карты нет в наличии.',                               icon:'card',   title:'Карта',       theme:'neon-amber'},
     {r:/Вы использовали дневной лимит в \d+\s+плав(?:ку|ка|ки|ок) карт ранга [A-EАВСДЕ]\+?/i, icon:'clock', title:'Переплавка', theme:'rose'},
@@ -5070,6 +5078,9 @@
     {s:'Для продолжения необходимо авторизоваться.',              icon:'lock',   title:'Авторизация', theme:'rose'},
     {r:/Ввод промо-кода отключ[её]н с \d{1,2}:\d{2} до \d{1,2}:\d{2}/i, icon:'clock', title:'Промокод', theme:'neon-amber'},
     // ── Сообщения, изображения и клуб ─────────────────────
+    {r:/Личные сообщения временно недоступны\.\s*Система обновляется с \d{1,2}:\d{2} до \d{1,2}:\d{2}\.?/i, icon:'clock', title:'Сообщения', theme:'neon-amber'},
+    {s:'Все ваши переписки очищены',                              icon:'check',  title:'Сообщения',   theme:'emerald'},
+    {r:/Зал твоего клуба восстановил силы:\s*\+\d+\s+ход(?:а|ов)?\.?/i, icon:'bolt', title:'Клуб', theme:'neon-green'},
     {s:'Слишком много картинок/смайлов в сообщении',               icon:'warn',   title:'Сообщения',   theme:'neon-amber'},
     {s:'Не удалось загрузить изображение в предпросмотр',         icon:'err',    title:'Изображение', theme:'rose'},
     {s:'Не хватает очков вклада',                                  icon:'coin',   title:'Клуб',        theme:'neon-amber'},
@@ -6308,10 +6319,10 @@
       { id:'Card_c', label:'Карта C', rank:'C' },
       { id:'Card_d', label:'Карта D', rank:'D' },
       { id:'Card_e', label:'Карта E', rank:'E' },
-      { id:'Coins', label:'Монеты', unit:'coins' },
+      { id:'Coins', label:'Камни духа', unit:'stones' },
       { id:'Exp', label:'Опыт', unit:'exp' },
-      { id:'Stars', label:'Звезды', unit:'stars' },
-      { id:'Stone', label:'Камни', unit:'stones' },
+      { id:'Stars', label:'Звёздный рейтинг', unit:'stars' },
+      { id:'Stone', label:'Кирпич', unit:'bricks' },
     ];
     const state = {
       retryTimer:null,
@@ -6357,14 +6368,37 @@
     function saveRewardSettings(settings){ setStoredJson('reward_settings', settings); }
     function getRewardHistory(){
       const saved = getStoredJson('reward_history', []);
-      return Array.isArray(saved) ? saved : [];
+      return normalizeRewardHistory(Array.isArray(saved) ? saved : []);
     }
     function saveRewardHistoryEntry(entry){
       const dateKey = String(entry?.dateKey || getTodayKey());
-      const history = getRewardHistory().filter(item => item?.dateKey !== dateKey);
-      history.push({ ...entry, dateKey, savedAt:new Date().toISOString() });
-      history.sort((a,b) => String(b.dateKey || '').localeCompare(String(a.dateKey || '')));
-      setStoredJson('reward_history', history.slice(0, 35));
+      // One entry per reward cycle; never replace a known receipt with an unknown check.
+      // Keep older cycles too: the weekly UI is only a view, not the retention period.
+      const history = normalizeRewardHistory([...getRewardHistory(), { ...entry, dateKey, savedAt:new Date().toISOString() }]);
+      setStoredJson('reward_history', history);
+    }
+    function normalizeRewardHistory(entries){
+      const byDate = new Map();
+      const score = item => item.status === 'looted' ? (item.quantity > 0 ? 3 : 2) : item.status === 'not_looted' ? 1 : 0;
+      for(const original of entries){
+        if(!original || !/^\d{4}-\d{2}-\d{2}$/.test(String(original.dateKey || ''))) continue;
+        let item = { ...original };
+        if(item.status === 'looted'){
+          const parsed = resolveReceivedReward({ quantity:item.quantity }, item.rewardType, item.serverResponse);
+          item = { ...item, ...parsed, rewardLabel:REWARDS.find(reward => reward.id === parsed.rewardType)?.label || item.rewardLabel };
+        }
+        const previous = byDate.get(item.dateKey);
+        if(!previous || score(item) >= score(previous)) byDate.set(item.dateKey, item);
+      }
+      return [...byDate.values()].sort((a,b) => b.dateKey.localeCompare(a.dateKey));
+    }
+    function resolveReceivedReward(response, fallbackType, responseText){
+      const text = String(responseText || '').replace(/\s+/g,' ').trim();
+      let rewardType = normalizeRewardType(response?.reward_type || fallbackType);
+      // The site's Coins are spirit stones; Stone is the brick reward.
+      if(/кам(?:ень|ня|ней)\s+духа/i.test(text)) rewardType = 'Coins';
+      else if(/кирпич/i.test(text)) rewardType = 'Stone';
+      return { rewardType, quantity:extractRewardQuantity(response, rewardType, text) };
     }
     function normalizeRewardType(type){
       const raw = String(type || '').trim();
@@ -6374,10 +6408,10 @@
       const text = String(responseText || '');
       const patterns = rewardType?.startsWith('Card_')
         ? [/([\d\s]+)\s*(?:карт|карточ)/i]
-        : rewardType === 'Stone'
-          ? [/([\d\s]+)\s*(?:камн|💎)/i, /(?:камн|💎)[^\d]{0,20}([\d\s]+)/i]
-          : rewardType === 'Coins'
-            ? [/([\d\s]+)\s*(?:монет|coin)/i]
+        : rewardType === 'Coins'
+          ? [/([\d\s]+)\s*(?:кам(?:ень|ня|ней)\s+духа|💎)/i]
+          : rewardType === 'Stone'
+            ? [/([\d\s]+)\s*кирпич/i]
             : rewardType === 'Stars'
               ? [/([\d\s]+)\s*(?:зв[её]зд|star)/i]
               : rewardType === 'Exp'
@@ -6386,14 +6420,14 @@
       for(const pattern of patterns){
         const match = text.match(pattern);
         const value = match ? Number(match[1].replace(/\s+/g,'')) : 0;
-        if(Number.isFinite(value) && value > 0) return value;
+        if(Number.isSafeInteger(value) && value > 0) return value;
       }
       const candidates = [response?.reward_amount, response?.reward_count, response?.amount, response?.quantity, response?.count];
       for(const candidate of candidates){
-        const value = Number(candidate);
-        if(Number.isFinite(value) && value > 0) return value;
+        const value = typeof candidate === 'number' ? candidate : typeof candidate === 'string' ? Number(candidate.replace(/\s+/g,'')) : NaN;
+        if(Number.isSafeInteger(value) && value > 0) return value;
       }
-      return rewardType?.startsWith('Card_') ? 1 : null;
+      return null;
     }
     function formatRussianCount(value, one, few, many){
       const number = Math.abs(Math.trunc(Number(value) || 0));
@@ -6404,11 +6438,11 @@
     }
     function formatRewardAmount(reward, quantity){
       const value = Number(quantity);
-      if(!Number.isFinite(value) || value <= 0) return 'Нет информации';
+      if(quantity == null || !Number.isSafeInteger(value) || value < 0) return 'Количество неизвестно';
       if(reward.rank) return `${formatRussianCount(value,'карта','карты','карт')} ${reward.rank} ранга`;
-      if(reward.unit === 'stones') return formatRussianCount(value,'камень','камня','камней');
-      if(reward.unit === 'coins') return formatRussianCount(value,'монета','монеты','монет');
-      if(reward.unit === 'stars') return formatRussianCount(value,'звезда','звезды','звёзд');
+      if(reward.unit === 'stones') return `${formatRussianCount(value,'камень','камня','камней')} духа`;
+      if(reward.unit === 'bricks') return formatRussianCount(value,'кирпич','кирпича','кирпичей');
+      if(reward.unit === 'stars') return `${value.toLocaleString('ru-RU')} звёздного рейтинга`;
       if(reward.unit === 'exp') return `${value.toLocaleString('ru-RU')} опыта`;
       return `${value.toLocaleString('ru-RU')} × ${reward.label}`;
     }
@@ -6854,9 +6888,11 @@
           return;
         }
         stopRetrying();
-        const receivedRewardType = normalizeRewardType(response.reward_type || reward.type);
+        const { rewardType:receivedRewardType, quantity:receivedQuantity } = resolveReceivedReward(response, reward.type, responseText);
         const receivedReward = REWARDS.find(item => item.id === receivedRewardType) || null;
-        const receivedQuantity = extractRewardQuantity(response, receivedRewardType, responseText);
+        if(!receivedReward || receivedQuantity == null){
+          suiteTelemetryLog('gacha', 'reward_parse_incomplete', { rewardType:receivedRewardType, responseText:String(responseText).slice(0,500), step:response.step ?? reward.step }, 'warn');
+        }
         saveRewardHistoryEntry({
           dateKey:cycleKey,
           status:'looted',
@@ -7024,10 +7060,8 @@
         existing.remove();
         return;
       }
-      const settings = getRewardSettings();
       const dateKeys = Array.from({length:7}, (_,index) => shiftDateKey(getMoscowParts().dateKey, -index));
-      const dateSet = new Set(dateKeys);
-      const history = getRewardHistory().filter(item => dateSet.has(String(item?.dateKey || '')));
+      const history = getRewardHistory();
       const byDate = new Map(history.map(item => [String(item.dateKey), item]));
       const totals = new Map();
       for(const item of history){
@@ -7049,7 +7083,7 @@
       head.className = 'suite-gacha-dialog__head';
       const title = document.createElement('div');
       title.className = 'suite-gacha-dialog__title';
-      title.textContent = 'Полученные награды за 7 дней';
+      title.textContent = 'Полученные награды гачи';
       const close = document.createElement('button');
       close.type = 'button';
       close.className = 'suite-gacha-close';
@@ -7061,7 +7095,7 @@
       body.className = 'suite-gacha-history-body';
       const summaryTitle = document.createElement('div');
       summaryTitle.className = 'suite-gacha-history-section-title';
-      summaryTitle.textContent = 'Итого';
+      summaryTitle.textContent = 'За всё время учёта';
       const summary = document.createElement('div');
       summary.className = 'suite-gacha-history-summary';
       for(const reward of REWARDS){
@@ -7072,22 +7106,14 @@
         label.textContent = reward.label;
         const value = document.createElement('div');
         value.className = 'suite-gacha-history-card__value';
-        if(settings[reward.id] === false){
-          value.textContent = 'Не лутается';
-          value.classList.add('is-off');
-        }else if(totals.has(reward.id)){
-          value.textContent = formatRewardAmount(reward, totals.get(reward.id));
-        }else{
-          value.textContent = 'Нет информации';
-          value.classList.add('is-unknown');
-        }
+        value.textContent = formatRewardAmount(reward, totals.get(reward.id) || 0);
         card.append(label,value);
         summary.append(card);
       }
 
       const daysTitle = document.createElement('div');
       daysTitle.className = 'suite-gacha-history-section-title';
-      daysTitle.textContent = 'По дням';
+      daysTitle.textContent = 'Последние 7 дней';
       const days = document.createElement('div');
       days.className = 'suite-gacha-history-days';
       for(const dateKey of dateKeys){
@@ -7109,21 +7135,23 @@
           }
         }else if(item.status === 'not_looted'){
           const reward = REWARDS.find(entry => entry.id === normalizeRewardType(item.rewardType));
-          value.textContent = `${reward?.label || item.rewardLabel || 'Награда'} — не лутается`;
+          value.textContent = `${reward?.label || item.rewardLabel || 'Награда'} — пропущено по настройкам`;
         }else if(item.status === 'looted'){
           const reward = REWARDS.find(entry => entry.id === normalizeRewardType(item.rewardType));
-          value.textContent = reward ? formatRewardAmount(reward,item.quantity) : 'Получена награда — нет информации о типе';
-          if(item.serverResponse){
-            const note = document.createElement('span');
-            note.className = 'suite-gacha-history-day__note';
-            note.textContent = String(item.serverResponse).slice(0,500);
-            value.append(note);
-          }
+          value.textContent = reward && item.quantity > 0 ? formatRewardAmount(reward,item.quantity)
+            : item.serverResponse ? String(item.serverResponse).slice(0,500)
+            : `${reward?.label || 'Награда'} получена — количество неизвестно`;
         }else value.textContent = 'Нет информации';
         row.append(date,value);
         days.append(row);
       }
-      body.append(summaryTitle,summary,daysTitle,days);
+      const summaryNote = document.createElement('div');
+      summaryNote.className = 'suite-gacha-history-day__note';
+      const unknownDays = history.filter(item => item.status === 'no_information' || (item.status === 'looted' &&
+        (!REWARDS.some(reward => reward.id === item.rewardType) || !(item.quantity > 0)))).length;
+      summaryNote.textContent = history.length ? `По сохранённым данным с ${history[history.length - 1].dateKey.split('-').reverse().join('.')}. Нули — нет записанных наград этого типа.` : 'Пока нет сохранённых наград.';
+      if(unknownDays) summaryNote.textContent += ` Дней без точных данных: ${unknownDays}; в суммы не включены.`;
+      body.append(summaryTitle,summary,summaryNote,daysTitle,days);
       dialog.append(head,body);
       backdrop.append(dialog);
       on(backdrop,'click',event=>{
@@ -7199,7 +7227,6 @@
   const CACHE_KEY = `animestars_transactions_cache`;
   const DATE_KEY = `animestars_transactions_lastDate`;
   const LAST_UPDATE_KEY = `animestars_transactions_lastUpdate`;
-  const EXTRA_KEY = 'nonPackSpentStones';
   const STONES_EXTRA_POS_KEY = 'suite_stones_extra_panel_pos_v1';
 
   function injectStonesStyle(){
@@ -7222,16 +7249,6 @@
       .cv-stones-panel__body{padding:10px 12px;display:flex;flex-direction:column;gap:8px;}
       .cv-stones-panel__total{display:flex;justify-content:center;align-items:center;gap:8px;}
       .cv-stones-panel__value{font-size:18px;font-weight:800;color:#67e8f9;}
-      .cv-stones-input{
-        width:calc(100% - 24px);margin:0 12px;box-sizing:border-box;border:1px solid #164e63;border-radius:8px;
-        background:#0f172a;color:#e2e8f0;padding:7px 8px;font-size:12px;outline:none;
-      }
-      .cv-stones-mini-btn{
-        border:1px solid #164e63;border-radius:8px;background:#0f172a;color:#67e8f9;
-        min-width:30px;height:30px;cursor:pointer;font-weight:800;transition:background .15s,border-color .15s,transform .15s;
-      }
-      .cv-stones-panel > .cv-stones-mini-btn{width:calc(100% - 24px);margin:0 12px;}
-      .cv-stones-mini-btn:hover{background:#123044;border-color:#0891b2;transform:translateY(-1px);}
       .cv-stones-floating-btn{
         position:fixed;top:50%;right:20px;transform:translateY(-50%);z-index:999;
         width:52px;height:52px;border-radius:14px;border:1px solid rgba(34,211,238,.45);
@@ -7269,13 +7286,11 @@
       .cv-stones-wallet .cv-stones-panel__header{padding:0;margin-bottom:14px;background:none;color:#b5cbcd;font-size:13px;font-weight:400;cursor:default;}
       .cv-stones-wallet .cv-stones-panel__total{justify-content:space-between;gap:12px;}
       .cv-stones-wallet .cv-stones-panel__value{font-size:clamp(20px,2.4vw,30px);line-height:1.2;color:#f0d09d;overflow-wrap:anywhere;min-width:0;}
-      .cv-stones-wallet__controls{display:flex;gap:8px;margin-top:12px;}
-      .cv-stones-wallet .cv-stones-input{width:100%;min-width:0;flex:1;margin:0;padding:9px 10px;border-color:#344e4c;background:#1b2728;color:#e5eeee;font:inherit;font-size:12px;}
-      .cv-stones-wallet .cv-stones-mini-btn,.cv-stones-wallet__refresh{
+      .cv-stones-wallet__refresh{
         width:auto;height:auto;min-height:34px;margin:0;padding:8px 12px;border:1px solid #3c6059;border-radius:9px;
         background:#263f39;color:#d8f5ed;font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;
       }
-      .cv-stones-wallet .cv-stones-mini-btn:hover,.cv-stones-wallet__refresh:hover{background:#31594e;border-color:#609f8e;transform:none;}
+      .cv-stones-wallet__refresh:hover{background:#31594e;border-color:#609f8e;transform:none;}
       .cv-stones-wallet :is(button,input):focus-visible{outline:2px solid #87d9c4;outline-offset:3px;}
       .cv-stones-wallet button:disabled{opacity:.5;cursor:wait;}
       .cv-stones-wallet .cv-stones-progress{position:static;max-width:none;margin-top:12px;padding:0;background:none;border:0;box-shadow:none;color:#b5cbcd;font:inherit;font-size:12px;}
@@ -7382,12 +7397,16 @@
     }
   }
 
-  function calculateTotals(transactions) {
-    let earned = 0, spent = 0;
+  function calculateTotals(transactions, totals = { earned: 0, spent: 0, nonPackSpent: 0 }) {
     for (const tr of transactions) {
-      if (tr.amount > 0) earned += tr.amount; else spent += -tr.amount;
+      if (tr.amount > 0) totals.earned += tr.amount;
+      else if (tr.amount < 0) {
+        totals.spent += -tr.amount;
+        const description = String(tr.description || '').replace(/\s+/g, ' ').trim();
+        if (description !== 'Открытие паков карточек') totals.nonPackSpent += -tr.amount;
+      }
     }
-    return { earned, spent };
+    return totals;
   }
 
   function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -7408,10 +7427,7 @@
       return cached;
     }
 
-    let earned = 0, spent = 0;
-    for (const tr of cached) {
-      if (tr.amount > 0) earned += tr.amount; else spent += -tr.amount;
-    }
+    const totals = calculateTotals(cached);
 
     let page = 1;
     let newEntries = [];
@@ -7430,10 +7446,10 @@
       for (const tr of transactions) {
         if (!forceFull && tr.date <= knownLatestDate) { stop = true; break; }
         newEntries.push(tr);
-        if (tr.amount > 0) earned += tr.amount; else spent += -tr.amount;
+        calculateTotals([tr], totals);
       }
 
-      onTotals?.({ earned, spent });
+      onTotals?.({ ...totals });
 
       if (typeof showProgress === 'function' && forceFull) showProgress(page, maxPages);
 
@@ -7622,6 +7638,7 @@
       const updateTotalsUI = (totals) => {
         earnedDiv.querySelector('span').textContent = `+${formatStones(totals.earned)}`;
         spentDiv.querySelector('span').textContent = `−${formatStones(totals.spent)}`;
+        extraTotal.textContent = formatStones(totals.nonPackSpent);
       };
 
       const refreshBtn = document.createElement('button');
@@ -7674,30 +7691,8 @@
       extraTotal.textContent = '0';
       totalWrapper.appendChild(extraTotal);
 
-      const resetBtn = document.createElement('button');
-      resetBtn.textContent = '🗑';
-      resetBtn.className = 'cv-stones-mini-btn';
-      resetBtn.title = 'Обнулить значение';
-      resetBtn.type = 'button';
-      resetBtn.setAttribute('aria-label','Обнулить расходы не на паки');
-      totalWrapper.appendChild(resetBtn);
-
       extraBox.appendChild(totalWrapper);
-
-      const input = document.createElement('input');
-      input.type = 'number';
-      input.placeholder = 'Введите число';
-      input.setAttribute('aria-label','Сумма расходов не на паки');
-      input.step = '1';
-      input.className = 'cv-stones-input';
-      extraBox.appendChild(input);
-
-      const addBtn = document.createElement('button');
-      addBtn.textContent = '+';
-      addBtn.type = 'button';
-      addBtn.setAttribute('aria-label','Добавить расходы не на паки');
-      addBtn.className = 'cv-stones-mini-btn';
-      extraBox.appendChild(addBtn);
+      extraBox.title = 'Все списания из истории, кроме «Открытие паков карточек». Уже входят в общие траты.';
 
       if(walletSummary){
         extraTitle.classList.add('cv-stones-wallet__label');
@@ -7705,11 +7700,8 @@
         icon.className = 'cv-stones-wallet__icon';icon.textContent = '◇';icon.setAttribute('aria-hidden','true');
         extraTitle.prepend(icon);
         const note = document.createElement('p');
-        note.className = 'cv-stones-wallet__hint';note.textContent = 'Ручной учёт · отдельно от итогов истории';
-        const controls = document.createElement('div');
-        controls.className = 'cv-stones-wallet__controls';
-        addBtn.textContent = 'Добавить';
-        controls.append(input,addBtn);extraBox.append(note,controls);
+        note.className = 'cv-stones-wallet__hint';note.textContent = 'Автоматически по истории · уже входят в общие траты';
+        extraBox.appendChild(note);
         flexWrapper.appendChild(extraBox);
       }else{
       document.body.appendChild(extraBox);
@@ -7722,24 +7714,6 @@
       makeDraggable(extraBox,extraTitle,saveStonesPanelPos);
       }
 
-      async function loadExtra() { extraTotal.textContent = formatStones(+await load(EXTRA_KEY, '0') || 0); }
-      async function addExtra() {
-        const current = +await load(EXTRA_KEY, '0') || 0;
-        const toAdd = Number(input.value);
-        const newVal = current + toAdd;
-        if(!Number.isSafeInteger(toAdd) || !toAdd || !Number.isSafeInteger(newVal) || newVal < 0) return;
-        await save(EXTRA_KEY, newVal.toString());
-        extraTotal.textContent = formatStones(newVal);
-        input.value = '';
-      }
-      async function resetExtra() { await save(EXTRA_KEY, '0'); extraTotal.textContent = '0'; }
-
-      const lockedAddExtra = withButtonLock(addBtn,addExtra);
-      addBtn.addEventListener('click', lockedAddExtra);
-      resetBtn.addEventListener('click', withButtonLock(addBtn,resetExtra));
-      input.addEventListener('keydown', (e) => { if (e.key === 'Enter'){e.preventDefault();lockedAddExtra();} });
-
-      await loadExtra();
       if(!flexWrapper.isConnected) return;
       updateTotalsUI(calculateTotals(await loadJSON(CACHE_KEY, [])));
       // Share the same lock with manual recount to avoid overlapping history scans.
@@ -9062,8 +9036,9 @@
     function makeBrickWishlistSection(settings){
       const wrap=el('div',{style:'display:flex;flex-direction:column;gap:5px;'});
       wrap.className='suite-brick-wishlist';
-      const row=document.createElement('label');row.style.cssText='display:flex;align-items:center;gap:7px;cursor:pointer;';
+      const row=document.createElement('div');row.style.cssText='display:flex;align-items:center;gap:7px;';
       const chk=document.createElement('input');chk.type='checkbox';chk.checked=!!settings.excludeWishlist;chk.style.cssText='width:15px;height:15px;cursor:pointer;accent-color:#6b46c1;';
+      chk.setAttribute('aria-label','Исключать желаемое');
       row.append(chk,el('span',{style:'font-weight:600;',text:'🔒 Исключать желаемое'}));
       const hint=el('div',{style:'font-size:11px;color:#718096;padding-left:22px;',text:`Ник: ${suiteGetCurrentUserName()||'не найден'}`});
       chk.addEventListener('change',()=>{settings.excludeWishlist=chk.checked;saveBrickSettings(settings);gmStoreDelete(BRICK_WISHLIST_KEY);renderBrickBody(document.getElementById('stone-brick-body'));});
@@ -9696,8 +9671,9 @@
     function makeRemeltWishlistSection(settings){
       const wrap=remeltEl('div',{style:'display:flex;flex-direction:column;gap:5px;'});
       wrap.className='suite-remelt-wishlist';
-      const row=document.createElement('label');row.style.cssText='display:flex;align-items:center;gap:7px;cursor:pointer;';
+      const row=document.createElement('div');row.style.cssText='display:flex;align-items:center;gap:7px;';
       const chk=document.createElement('input');chk.type='checkbox';chk.checked=!!settings.excludeWishlist;chk.style.cssText='width:15px;height:15px;cursor:pointer;accent-color:#c2410c;';
+      chk.setAttribute('aria-label','Исключать желаемое');
       row.append(chk,remeltEl('span',{style:'font-weight:600;',text:'🔒 Исключать желаемое'}));
       const hint=remeltEl('div',{style:'font-size:11px;color:#718096;padding-left:22px;',text:`Ник: ${suiteGetCurrentUserName()||'не найден'}`});
       chk.addEventListener('change',()=>{settings.excludeWishlist=chk.checked;saveRemeltSettings(settings);gmStoreDelete(REMELT_WISHLIST_KEY);renderRemeltBody(document.getElementById('remelt-panel-body'));});
@@ -10885,6 +10861,8 @@
     modWantCards: 'Добавляет инструменты для добавления в желаемое в библиотеке карт и на странице аниме.',
     modQuickCardOwners: 'Позволяет быстро выбирать обладателей карты у которых она открыта, онлайн и соклуб/друг',
     modOwnerRestrictions: 'Визуально отображает пользователей в ЧС или с запретом во всех обладателях. Обновляет оба списка раз в сутки.',
+    modTradeLimits: 'Отображает доступные обмены с пользователем\nФон: зелёный — есть свободные; жёлтый — все заняты, есть ожидающие; красный — лимит подтверждён. Перелив с оранжевым — данные уточняются.\nТочки: зелёная — свободно, жёлтая — ожидает/уточняется, красная — обмен принят.\nСброс в 00:00 МСК.',
+    tradeLimitsNumbers: 'Свободные обмены вместо точек: 3/3 — доступны все, 0/3 — свободных нет.',
     wantButtonsAlways: 'Показывает кнопки всегда, а не только при наведении, если выключить функцию кнопки будут появляться только при наведения на ряд карт.',
     modNoNeedCards: 'Добавляет инструменты для работы с ненужными картами на странице ваших карт.',
     noNeedButtonsAlways: 'Показывает кнопки всегда, а не только при наведении, если выключить функцию кнопки будут появляться только при наведения на ряд карт.',
@@ -11198,6 +11176,7 @@
     if(key==='modSuggestionAuthors'){ if(cfg.modSuggestionAuthors) initSuggestionAuthors(); else cleanupSuggestionAuthors(); return; }
     if(key==='modQuickCardOwners'){ if(cfg.modQuickCardOwners) initQuickCardOwners(); else cleanupQuickCardOwners(); return; }
     if(key==='modOwnerRestrictions'){ if(cfg.modOwnerRestrictions) initOwnerRestrictions(); else cleanupOwnerRestrictions(); return; }
+    if(key==='modTradeLimits' || key==='tradeLimitsNumbers'){syncTradeLimits();return;}
     if(key==='modWantCards'){
       if(cfg.modWantCards) initWantCards();
       else if(typeof window.__suiteWantCardsCleanup==='function') window.__suiteWantCardsCleanup();
@@ -11649,6 +11628,15 @@
     visualSection.appendChild(makeCustomPushScaleRow());
 
     const cardsSection = makeSection('cards','🃏 Карты');
+    const tradeLimitsRow=makeToggle('modTradeLimits','↔ Лимиты обменов');
+    tradeLimitsRow.dataset.suiteTradeSetting='modTradeLimits';
+    const tradeNumbersRow=makeToggle('tradeLimitsNumbers','↳ Показывать числа');
+    tradeNumbersRow.dataset.suiteTradeLimitsNumbers='';
+    tradeNumbersRow.dataset.suiteTradeSetting='tradeLimitsNumbers';
+    tradeNumbersRow.style.cssText+=';padding-left:22px;border-left:2px solid #334155;margin-left:12px';
+    tradeNumbersRow.style.opacity=cfg.modTradeLimits?'1':'0.35';
+    tradeNumbersRow.querySelector('input').disabled=!cfg.modTradeLimits;
+    cardsSection.append(tradeLimitsRow,tradeNumbersRow);
     const autoLootRow = makeToggle('modAutoLootCards', '🃏 Автолут карт');
     autoLootRow.querySelector('input').addEventListener('change', () => {
       if(cfg.modAutoLootCards) initAutoLootCards();
@@ -12601,6 +12589,993 @@
     window.addEventListener('pageshow',scheduleCheck);
   }
 
+  // BEGIN EMBEDDED TRADE LIMITS
+  function createSuiteTradeLimits(host) {
+  'use strict';
+  const VERSION = '0.1.9', SCHEMA = 2, PREFIX = host?.prefix || 'as_trade_limits_debug_v1:', MINUTE = 60000;
+  const clean = x => String(x || '').replace(/\s+/g, ' ').trim();
+  const nick = x => String(x || '').trim().toLowerCase();
+  const lookup = (object,key) => object && Object.hasOwn(object,key) ? object[key] : undefined;
+  const id = x => /^\d+$/.test(String(x || '')) ? String(x) : '';
+  const day = (time = Date.now()) => new Date(time + 10800000).toISOString().slice(0, 10);
+  function msk(text) {
+    const m = clean(text).match(/^(\d{2})\.(\d{2})\.(\d{4}) (\d{2}):(\d{2}):(\d{2})$/);
+    if (!m) return NaN;
+    const iso = `${m[3]}-${m[2]}-${m[1]}T${m[4]}:${m[5]}:${m[6]}`;
+    const time = Date.parse(iso + '+03:00');
+    return Number.isFinite(time) && new Date(time + 10800000).toISOString().slice(0, 19) === iso ? time : NaN;
+  }
+  function responseDate(value) {
+    if(!/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/.test(String(value||'')))return null;
+    const at=Date.parse(value);return Number.isFinite(at) && new Date(at).toUTCString()===value?at:null;
+  }
+  function sendRequestIds(address,method,body) {
+    const u=url(address);
+    if(!u || u.pathname!=='/index.php' || u.searchParams.get('controller')!=='ajax' || u.searchParams.get('mod')!=='trade_ajax' || String(method).toUpperCase()!=='POST')return null;
+    try {
+      const params=typeof body==='string'?new URLSearchParams(body):body;
+      if(typeof params?.get!=='function' || params.get('action')!=='trade_card')return null;
+      const ownerCardId=id(params.get('trade_id')),cardId=id(params.get('original_card'));
+      return ownerCardId&&cardId?{ownerCardId,cardId}:null;
+    }catch{return null;}
+  }
+  function url(value, base = host?.origin || 'https://animesss.tv/') {
+    try { const u = new URL(value, base); return u.origin === new URL(host?.origin || 'https://animesss.tv/').origin ? u : null; } catch { return null; }
+  }
+  function ownerName(href) {
+    const u = url(href);
+    if (!u) return '';
+    if (u.pathname === '/user/cards/') return String(u.searchParams.get('name') || '').trim();
+    const m = u.pathname.match(/^\/user\/([^/]+)\/$/);
+    try { return m ? decodeURIComponent(m[1]).trim() : ''; } catch { return ''; }
+  }
+  function account(doc) {
+    const names = [...doc.querySelectorAll('.ap-profile-actions .ap-profile-action[href]')]
+      .map(a => ownerName(a.getAttribute('href'))).filter(Boolean);
+    return names.length && new Set(names.map(nick)).size === 1 ? names[0] : '';
+  }
+  function ownerTileSelector(pathname) {
+    if(/^\/cards\/users\/(?:trade\/)?$/.test(pathname))return 'a.card-show__owner';
+    if(/^\/cards\/[1-9]\d*\/(?:stars|awakened)\/?$/.test(pathname))return 'a.card-show__owner';
+    return '';
+  }
+  function inert(html) {
+    const t = document.createElement('template'); t.innerHTML = html; return t.content;
+  }
+  const cardIds = (root, selector) => [...root.querySelectorAll(selector)].map(a => {
+    const u = url(a.getAttribute('href')); return u?.pathname === '/cards/users/' ? id(u.searchParams.get('id')) : '';
+  }).filter(Boolean);
+  function offerPage(doc) {
+    const root = doc.querySelector('#tradeOffer');
+    if (!root) return null;
+    const name = String(root.dataset.receiver || '').trim(), ownerCardId = id(root.dataset.tradeId);
+    const cardId = id(root.dataset.originalId), linkId = cardIds(root, '.to-art-stage .noffer__img')[0];
+    if (!name || !ownerCardId || !cardId || (linkId && linkId !== cardId)) return null;
+    const titles = [...root.querySelectorAll('.message-info__title')].map(e => clean(e.textContent));
+    const messages = [...root.querySelectorAll('.message-info__content')].map(e => clean(e.textContent));
+    return {name, ownerCardId, cardId,
+      success: messages.includes('Обмен отправлен, дождитесь его рассмотрения получателем'),
+      limit: titles.includes('Достигнут лимит предложений'),
+      ready: !!root.querySelector('.trade__send-trade-btn')};
+  }
+  function nextPage(doc, current, kind) {
+    const u = url(current), here = Number(u?.pathname.match(/\/page\/(\d+)\//)?.[1] || 1);
+    if (!u) return null;
+    const root = kind === 'offers' ? '/trades/offers/' : '/trades/history/';
+    const candidates = [...doc.querySelectorAll('#pagination a[href], .pagination a[href]')].map(a => url(a.getAttribute('href'))).filter(Boolean);
+    return candidates.find(v => v.pathname === `${root}page/${here + 1}/` &&
+      (kind !== 'history' || (nick(v.searchParams.get('trader')) === nick(u.searchParams.get('trader')) &&
+       nick(v.searchParams.get('name')) === nick(u.searchParams.get('name')) && (v.searchParams.get('kind')||'') === (u.searchParams.get('kind')||''))))?.href || null;
+  }
+  function parseOffers(doc, current) {
+    const tab = [...doc.querySelectorAll('a.ncard__tabs-btn[href]')].find(a => url(a.getAttribute('href'))?.pathname === '/trades/offers/');
+    const count = clean(tab?.textContent).match(/^Отправленные\s*\((\d+)\)$/);
+    if (!count || !doc.querySelector('.trade__list')) throw Error('OFFERS_MARKUP');
+    const rows = [...doc.querySelectorAll('.trade__list .trade__list-item')].map(a => {
+      const u = url(a.getAttribute('href')), offerId = id(u?.pathname.match(/^\/trades\/offers\/(\d+)\/$/)?.[1]);
+      const label = String(a.querySelector('.trade__list-name')?.textContent||'').trim();
+      const name = label.startsWith('для ') ? label.slice(4).trim() : '';
+      const sentAt = msk(a.querySelector('.trade__list-date')?.textContent);
+      if (!name || !offerId || !Number.isFinite(sentAt)) throw Error('OFFERS_ROW');
+      return {name, offerId, sentAt, exact: true};
+    });
+    return {rows, total: Number(count[1]), next: nextPage(doc, current, 'offers')};
+  }
+  function parseHistory(doc, current, name, own, kind='') {
+    const u = url(current), active = doc.querySelector('.kind_active a[href]');
+    const activeUrl = url(active?.getAttribute('href'));
+    if (!['','calsel_sender'].includes(kind) || !u || (u.searchParams.get('kind')||'')!==kind || !activeUrl || (activeUrl.searchParams.get('kind')||'')!==kind ||
+        nick(activeUrl.searchParams.get('name')) !== nick(own) || nick(activeUrl.searchParams.get('trader')) !== nick(name) ||
+        !doc.querySelector('.history__list')) throw Error('HISTORY_MARKUP');
+    const rows = [...doc.querySelectorAll('.history__list .history__item')].map(el => {
+      const other = ownerName(el.querySelector('.history__name a')?.getAttribute('href'));
+      const sentAt = msk(el.querySelector('.history__date')?.textContent);
+      const gained = cardIds(el, '.history__body--gained .history__body-item');
+      const lost = cardIds(el, '.history__body--lost .history__body-item');
+      if (nick(other) !== nick(name) || !Number.isFinite(sentAt) || !gained.length || !lost.length) throw Error('HISTORY_ROW');
+      return {sentAt, gained, lost, outcome:kind?'rejected':'accepted', key: (kind?kind+':':'')+JSON.stringify([nick(other), sentAt, [...gained].sort(), [...lost].sort()])};
+    });
+    if (rows.some((r, i) => i && r.sentAt > rows[i - 1].sentAt)) throw Error('HISTORY_ORDER');
+    return {rows, next: nextPage(doc, current, 'history')};
+  }
+  function parseNotices(doc) {
+    const found = new Map();
+    for (const el of doc.querySelectorAll('.dropdown-item[id^="delete-"]')) {
+      const noticeId = id(el.id.slice(7)), text = clean(el.querySelector('.font-weight-bold')?.textContent);
+      const name = ownerName(el.querySelector('.font-weight-bold a[href^="/user/"]')?.getAttribute('href'));
+      const kind = text.includes('согласился с вашим предложением на обмен') ? 'accepted' :
+        text.includes('отказался от вашего предложения на обмен') ? 'rejected' : '';
+      const at = msk(el.querySelector('.small.text-gray-500')?.textContent);
+      if (noticeId && name && kind && Number.isFinite(at)) found.set(noticeId, {noticeId, name, kind, at});
+    }
+    return [...found.values()];
+  }
+  function fresh(own, now = Date.now()) {
+    return {version: VERSION, schema: SCHEMA, account: nick(own), day: day(now), people: {}, notices: {}, seen: {}, log: [], notificationDue: 0, listAt: 0, badge: null};
+  }
+  function person(state, name) {
+    const key = nick(name);
+    if (!Object.hasOwn(state.people, key)) Object.defineProperty(state.people, key, {enumerable:true, writable:true, configurable:true,
+      value:{name, trades:{}, signals:[], confirmedLimit:false, lastFinished:0, next:0, revision:0, checking:false, error:'', failures:0}});
+    return state.people[key];
+  }
+  function summary(p) {
+    if (!p) return {known:false, accepted:0, pending:0, free:3, color:'green'};
+    const rows = Object.values(p.trades), accepted = rows.filter(r => r.status === 'accepted').length;
+    const pending = rows.filter(r => r.status === 'pending').length;
+    const a = p.confirmedLimit ? 3 : Math.min(3, accepted), free = Math.max(0, 3 - a - pending);
+    return {known:rows.length > 0 || p.confirmedLimit, accepted:a, pending:Math.min(3-a,pending), free,
+      color:a === 3 ? 'red' : free === 0 ? 'yellow' : 'green'};
+  }
+  function normalizeTrade(row) {
+    const t={...row};
+    // Old v0.1.0 events and records used one ambiguous field. Only the source-specific data decides its meaning.
+    if(t.tradeId && !t.ownerCardId && !t.offerId) {
+      if(t.cardId)t.ownerCardId=id(t.tradeId);else t.offerId=id(t.tradeId);
+    }
+    delete t.tradeId;
+    t.recordId=t.ownerCardId?'send:'+t.ownerCardId+':'+(t.startedAt||t.sentAt):'offer:'+t.offerId;
+    return t;
+  }
+  function timingWindow(t) {
+    if(!Number.isFinite(t.serverDateAt))return null;
+    let duration=t.requestDurationMs,source=t.durationSource||'request';
+    if(!Number.isFinite(duration) && Number.isFinite(t.startedAt) && Number.isFinite(t.observedAt)){
+      duration=t.observedAt-t.startedAt;source='legacy-click-span';
+    }
+    if(!Number.isFinite(duration) || duration<0 || duration>120000)return null;
+    return {durationMs:duration,source,estimatedAt:t.serverDateAt-duration,from:t.serverDateAt-duration-1000,to:t.serverDateAt+1000,paddingMs:1000};
+  }
+  function timeMatch(t,at) {
+    if(!Number.isFinite(at) || day(at)!==day(t.sentAt))return '';
+    if(t.exact && at===t.sentAt)return 'exact';
+    // Once the site's offer/history timestamp is known it must not drift again.
+    if(t.offerId || t.historyKey)return '';
+    if(Number.isFinite(t.serverDateAt)){
+      const w=timingWindow(t);
+      return w && at>=w.from && at<=w.to ? (w.source==='legacy-click-span'?'legacy-window':'request-window') : '';
+    }
+    return !t.exact && at>=(t.startedAt||t.sentAt)-5000 && at<=t.sentAt+5000?'local-window':'';
+  }
+  function uniqueTimePairs(locals,remotes,compatible,allowFallback=true) {
+    const found=[],takenLocal=new Set(),takenRemote=new Set();
+    // Reserve mutually unique exact matches before considering request intervals.
+    for(const exact of [true,false]){
+      if(!exact && !allowFallback)break;
+      const pairs=locals.filter(t=>!takenLocal.has(t)).map(local=>({local,candidates:remotes.filter(remote=>{
+        const method=timeMatch(local,remote.sentAt);
+        return !takenRemote.has(remote) && compatible(local,remote) && method && (exact?method==='exact':method!=='exact');
+      })}));
+      for(const {local,candidates}of pairs){
+        if(candidates.length!==1 || pairs.filter(p=>p.candidates.includes(candidates[0])).length!==1)continue;
+        const remote=candidates[0];found.push({local,remote,method:timeMatch(local,remote.sentAt)});
+        takenLocal.add(local);takenRemote.add(remote);
+      }
+      // An ambiguous exact group cannot be reassigned to a weaker interval match.
+      if(exact)for(const p of pairs)if(p.candidates.length){takenLocal.add(p.local);for(const r of p.candidates)takenRemote.add(r);}
+    }
+    return found;
+  }
+  function linkable(local,remote) {
+    if(nick(local.name)!==nick(remote.name) || (local.cardId && remote.cardId && local.cardId!==remote.cardId))return false;
+    if(local.status==='rejected' && remote.status==='accepted' || local.status==='accepted' && remote.status==='rejected')return false;
+    return !!timeMatch(local,remote.sentAt);
+  }
+  function linkTrades(p) {
+    const rows=Object.values(p.trades),locals=rows.filter(t=>t.ownerCardId && !t.offerId),remotes=rows.filter(t=>t.offerId && !t.ownerCardId);
+    let merged=0;
+    for(const {local,remote,method}of uniqueTimePairs(locals,remotes,linkable)) {
+      local.timeMatch={source:'offers',method,siteSentAt:remote.sentAt,deltaSeconds:Number.isFinite(local.serverDateAt)?(remote.sentAt-local.serverDateAt)/1000:null};
+      local.offerId=remote.offerId;local.sentAt=remote.sentAt;local.exact=true;
+      if(!local.cardId && remote.cardId)local.cardId=remote.cardId;
+      if(remote.status==='accepted' || remote.status==='rejected') {
+        local.status=remote.status;
+        for(const k of ['historyKey','acceptanceNotice','rejectionNotice'])if(remote[k])local[k]=remote[k];
+      }
+      delete p.trades[remote.recordId];merged++;
+    }
+    return merged;
+  }
+  function putTrade(state, row, now = Date.now(), deferLink=false) {
+    if (!Number.isFinite(row.sentAt) || day(row.sentAt) !== state.day || (row.sentAt > now + 5000 && row.serverDateAt!==row.sentAt)) return false;
+    row=normalizeTrade(row);
+    if(!row.offerId && !row.ownerCardId)return false;
+    const p = person(state, row.name), old = Object.values(p.trades).find(t=>
+      row.offerId && t.offerId===row.offerId || row.ownerCardId && t.recordId===row.recordId);
+    if (old) {
+      if (old.cardId && row.cardId && old.cardId !== row.cardId) { p.error='ID_CONFLICT'; return false; }
+      if (row.exact && (!row.serverDateAt || (!old.offerId && old.status==='pending'))) { old.sentAt=row.sentAt; old.exact=true; }
+      if (row.cardId) old.cardId=row.cardId;
+      if(Number.isFinite(row.serverDateAt)){old.serverDateAt=row.serverDateAt;old.observedAt=row.observedAt;old.timeSource='response-date';}
+      for(const key of ['requestStartedAt','requestDurationMs','durationSource'])if(row[key]!==undefined)old[key]=row[key];
+      if(!deferLink)linkTrades(p);
+      return false;
+    }
+    p.trades[row.recordId]={...row, status:'pending'};
+    if(!deferLink)linkTrades(p);
+    p.revision++; p.next=Math.max(now,p.lastFinished+MINUTE); return true;
+  }
+  function auditSendTimes(s, now=Date.now()) {
+    for(const p of Object.values(s.people))for(const t of Object.values(p.trades)) {
+      if(!Number.isFinite(t.serverDateAt))continue;
+      let status='waiting',candidates=[];
+      if(t.offerId || t.historyKey){status=t.sentAt===t.serverDateAt?'matched':t.timeMatch?'adjusted':'mismatch';candidates=[{offerId:t.offerId||'',sentAt:t.sentAt}];}
+      else {
+        const remotes=Object.values(p.trades).filter(r=>r.offerId && !r.ownerCardId && Math.abs(r.sentAt-t.serverDateAt)<=MINUTE);
+        const exact=remotes.filter(r=>timeMatch(t,r.sentAt));
+        if(exact.length){status='ambiguous';candidates=exact;}
+        else if(remotes.length){status='mismatch';candidates=remotes;}
+      }
+      const detail={ownerCardId:t.ownerCardId,serverDateAt:t.serverDateAt,status,window:timingWindow(t),match:t.timeMatch||null,candidates:candidates.map(r=>({offerId:r.offerId,sentAt:r.sentAt,deltaSeconds:(r.sentAt-t.serverDateAt)/1000})).sort((a,b)=>a.offerId.localeCompare(b.offerId))};
+      for(const [kind,check]of Object.entries(t.historyTimeChecks||{})){
+        const signature=JSON.stringify(check.detail);
+        if(check.logged===signature)continue;
+        s.log.push({at:now,code:'HISTORY_TIME_CHECK',name:p.name,detail:{ownerCardId:t.ownerCardId,kind,...check.detail}});
+        check.logged=signature;
+      }
+      if(JSON.stringify(t.timeCheck?.detail)===JSON.stringify(detail))continue;
+      t.timeCheck={at:now,detail};
+      s.log.push({at:now,code:'SEND_TIME_'+status.toUpperCase(),name:p.name,detail});s.log=s.log.slice(-160);
+    }
+    s.log=s.log.slice(-160);
+  }
+  function repairPendingTimes(s,now=Date.now()) {
+    if(s.timingRepair===1)return {changed:false,merged:0};
+    let merged=0,legacy=0;
+    for(const p of Object.values(s.people)){
+      for(const t of Object.values(p.trades)){
+        if(t.status!=='pending' || t.offerId || t.historyKey || Number.isFinite(t.requestDurationMs))continue;
+        const w=timingWindow(t);if(!w)continue;
+        t.requestDurationMs=w.durationMs;t.durationSource=w.source;legacy++;
+      }
+      const count=linkTrades(p);merged+=count;
+      if(count){p.error='';p.failures=0;p.revision++;p.next=Math.max(now,p.lastFinished+MINUTE);}
+    }
+    s.timingRepair=1;s.log.push({at:now,code:'TIMING_REPAIR',name:'',detail:{merged,legacy}});
+    auditSendTimes(s,now);return {changed:true,merged,legacy};
+  }
+  function putOffers(state,rows,now=Date.now()) {
+    // Link only after the entire snapshot is inserted, not greedily against its first row.
+    for(const row of rows)putTrade(state,row,now,true);
+    for(const p of Object.values(state.people)) {
+      linkTrades(p);
+      if(!p.limitObservedAt && !p.signals.length && !Object.values(p.trades).some(t=>t.status==='pending'))p.next=0;
+    }
+    auditSendTimes(state,now);
+  }
+  function migrate(state,now=Date.now()) {
+    if(state.schema===SCHEMA)return {changed:false,merged:0};
+    let merged=0;
+    for(const p of Object.values(state.people)) {
+      const converted={};
+      for(const [key,row] of Object.entries(p.trades)) {
+        const t=normalizeTrade(row);if(!t.ownerCardId && !t.offerId)t.recordId='legacy:'+key;
+        converted[t.recordId]=t;
+      }
+      p.trades=converted;merged+=linkTrades(p);
+      if(p.error==='CARD_ID_UNAVAILABLE' || p.error==='NETWORK_OR_RESPONSE'){p.error='';p.failures=0;}
+      if(!p.confirmedLimit && Object.values(p.trades).some(t=>t.status==='pending'))p.next=Math.max(now,p.lastFinished+MINUTE);
+    }
+    state.schema=SCHEMA;state.version=VERSION;
+    return {changed:true,merged};
+  }
+  function matches(row, trade) {
+    return !!trade.cardId && row.gained.includes(trade.cardId) && !!timeMatch(trade,row.sentAt);
+  }
+  function historyTimePairs(p,rows,complete,pendingIds,outcome) {
+    const used=new Set(Object.values(p.trades).map(t=>t.historyKey).filter(Boolean));
+    const pending=Object.values(p.trades).filter(t=>t.status==='pending' && !(t.offerId && pendingIds?.has(t.offerId)));
+    const available=rows.filter(r=>!used.has(r.key) && (outcome==='rejected'?r.outcome==='rejected':r.outcome!=='rejected'));
+    const pairs=uniqueTimePairs(pending,available,(t,r)=>matches(r,t),complete);
+    for(const t of pending){
+      const pair=pairs.find(x=>x.local===t),near=available.filter(r=>r.gained.includes(t.cardId)||Math.abs(r.sentAt-t.sentAt)<=MINUTE);
+      const detail={cardId:t.cardId||'',serverDateAt:t.serverDateAt??null,window:timingWindow(t),complete,status:pair?'matched':'unresolved',method:pair?.method||null,candidateCount:near.length,candidates:near.slice(0,10).map(r=>({sentAt:r.sentAt,gained:r.gained,cardMatches:r.gained.includes(t.cardId),timeMatch:timeMatch(t,r.sentAt),deltaSeconds:Number.isFinite(t.serverDateAt)?(r.sentAt-t.serverDateAt)/1000:null}))};
+      t.historyTimeChecks ||= {};const old=t.historyTimeChecks[outcome];t.historyTimeChecks[outcome]={detail,logged:old?.logged};
+    }
+    return pairs;
+  }
+  function reconcile(p, rows, complete, signals = [], pendingIds = null) {
+    const newlyAccepted=[];
+    for (const {local:t,remote:r,method}of historyTimePairs(p,rows,complete,pendingIds,'accepted')) {
+      t.timeMatch={source:'history',method,siteSentAt:r.sentAt,deltaSeconds:Number.isFinite(t.serverDateAt)?(r.sentAt-t.serverDateAt)/1000:null};
+      t.status='accepted'; t.historyKey=r.key; t.sentAt=r.sentAt; t.exact=true;newlyAccepted.push(t);
+    }
+    // Notifications trigger history checks; absence never proves a refusal.
+    const resolved = [];
+    for(const signal of signals.filter(s=>s.kind==='accepted').sort((a,b)=>a.at-b.at)) {
+      const candidate=newlyAccepted.find(t=>t.sentAt<=signal.at+5000 && !t.acceptanceNotice);
+      if(candidate){candidate.acceptanceNotice=signal.noticeId;resolved.push(signal.noticeId);}
+    }
+    if (summary(p).accepted === 3) p.confirmedLimit=true;
+    return resolved;
+  }
+  function reconcileCancelled(p, rows, complete, signals=[], pendingIds=null) {
+    if(!complete)return [];
+    const resolved=[];
+    for(const {local:t,remote:r,method}of historyTimePairs(p,rows,complete,pendingIds,'rejected')) {
+      t.timeMatch={source:'cancelled-history',method,siteSentAt:r.sentAt,deltaSeconds:Number.isFinite(t.serverDateAt)?(r.sentAt-t.serverDateAt)/1000:null};
+      t.status='rejected';t.historyKey=r.key;t.sentAt=r.sentAt;t.exact=true;
+      const signal=signals.find(s=>s.kind==='rejected' && s.at+5000>=t.sentAt && !resolved.includes(s.noticeId));
+      if(signal){t.rejectionNotice=signal.noticeId;resolved.push(signal.noticeId);}
+    }
+    return resolved;
+  }
+  function nextCheckKey(s, now=Date.now()) {
+    const eligible=key=>{const p=lookup(s.people,key);return p && !p.confirmedLimit && p.next>0;};
+    s.round=(Array.isArray(s.round)?s.round:[]).filter(eligible);
+    if(!s.round.length)s.round=Object.keys(s.people).filter(eligible).sort((a,b)=>s.people[a].next-s.people[b].next);
+    const index=s.round.findIndex(key=>s.people[key].next<=now);
+    return index<0?null:s.round.splice(index,1)[0];
+  }
+  function bufferNotices(s, notices) {
+    s.unmatchedNotices ||= {};
+    for(const n of notices)if(day(n.at)===s.day && !s.notices[n.noticeId])s.unmatchedNotices[n.noticeId]=n;
+  }
+  function drainNotices(s, now=Date.now()) {
+    const attached=[];
+    for(const [key,n]of Object.entries(s.unmatchedNotices||{})) {
+      if(day(n.at)!==s.day || s.notices[key]){delete s.unmatchedNotices[key];continue;}
+      const p=lookup(s.people,nick(n.name));
+      if(!p)continue;
+      if(p.confirmedLimit){s.notices[key]=n.at;delete s.unmatchedNotices[key];continue;}
+      if(!Object.values(p.trades).some(t=>t.status==='pending' && t.sentAt<=n.at+5000))continue;
+      s.notices[key]=n.at;delete s.unmatchedNotices[key];
+      if(!p.signals.some(x=>x.noticeId===key))p.signals.push(n);
+      p.revision++;p.reason='notification';p.next=Math.max(now,p.lastFinished+MINUTE);attached.push(n);
+    }
+    return attached;
+  }
+  function rateWait(times, now) {
+    const recent=times.filter(t => now-t < MINUTE);
+    return Math.max(0, (recent.at(-1) || 0)+700-now, recent.length >= 90 ? recent[recent.length-90]+MINUTE-now : 0);
+  }
+  function observeBadge(s, count, at) {
+    if (!Number.isInteger(count) || count<0 || at<(s.badgeAt||0)) return;
+    // The baseline is shared by all pages/tabs. A page load is not a new notification.
+    const first=s.badge==null, increased=!first && count>s.badge;
+    if (count===0) s.notificationDue=0;
+    else if ((increased || (first && at-s.listAt>20000)) && !s.notificationDue) s.notificationDue=at+20000;
+    s.badge=count;s.badgeAt=at;
+  }
+  function observeNoticeBatch(s, data, at) {
+    const legacy=Array.isArray(data), notices=legacy?data:data.notices;
+    if(!legacy && data.source==='response' && at>=s.listAt) {
+      s.listAt=at;s.notificationDue=0;
+      if(Number.isInteger(data.count) && data.count>=0 && at>=(s.badgeAt||0)) {s.badge=data.count;s.badgeAt=at;}
+    }
+    bufferNotices(s,notices||[]);
+  }
+  function fingerprint(text) {
+    // Storage keys must not contain whole lists of offers/HTML.
+    let a=2166136261,b=5381;
+    for(const c of String(text)){a=Math.imul(a^c.charCodeAt(0),16777619);b=Math.imul(b,33)^c.charCodeAt(0);}
+    return (a>>>0).toString(16)+(b>>>0).toString(16);
+  }
+  const Core={day,msk,nick,ownerName,account,ownerTileSelector,offerPage,parseOffers,parseHistory,parseNotices,fresh,person,putTrade,putOffers,linkTrades,migrate,summary,matches,reconcile,reconcileCancelled,nextCheckKey,bufferNotices,drainNotices,observeNoticeBatch,rateWait,observeBadge,responseDate,sendRequestIds,auditSendTimes,timingWindow,timeMatch,repairPendingTimes};
+  if (typeof module !== 'undefined' && module.exports) { module.exports=Core; return; }
+  if (typeof document === 'undefined') return;
+
+  const pageWindow = typeof unsafeWindow === 'undefined' ? window : unsafeWindow;
+  const nativeFetch = window.fetch.bind(window), sleep = ms => new Promise(r => setTimeout(r,ms));
+  const tabId=crypto.randomUUID(), eventPrefix=PREFIX+'event:', statePrefix=PREFIX+'state:';
+  let own='', state=null, leader=false, halted=false, observerTimer=0, prepared=null, clickedAt=0, lastScan='', dialog=null;
+  let storageError='', liveError='', running=true, observedAccount='';
+  let settings=host ? host.settings() : GM_getValue(PREFIX+'settings',{enabled:true, mode:'dots'});
+  const emitted=new Set(), confirmedHere=new Set();
+  const stateKey=()=>statePrefix+encodeURIComponent(nick(own));
+  const activeTab=()=>document.visibilityState==='visible' && document.hasFocus();
+  function log(code, name='', detail='') {
+    if (!state) return;
+    if(host){
+      state.metrics ||= {checks:0,errors:0,requests:0};
+      if(code==='CHECK_START')state.metrics.checks++;
+      if(code==='CHECK_ERROR' && !['CONTEXT_CHANGED','TAB_INACTIVE'].includes(detail) || code==='CHECK_DONE' && !['red','green','yellow'].includes(detail) || code==='NOTICES_ERROR')state.metrics.errors++;
+    }
+    state.log.push({at:Date.now(),code,name,detail}); state.log=state.log.slice(-160);
+  }
+  function save() {
+    if(host && !host.ownsLock()) return false;
+    try { state.version=VERSION; GM_setValue(stateKey(), state); if(host)for(const entry of state.log)host.report(entry); return true; } catch { storageError='Не удалось сохранить данные. Проверки остановлены.'; halted=true; host?.report({code:'STORAGE_ERROR'}); return false; }
+  }
+  function emit(kind, data, signature) {
+    const who=account(document);
+    const fp=nick(who)+':'+day()+':'+kind+':'+fingerprint(signature);
+    if (!who || !settings.enabled || (host && !host.settings().enabled) || emitted.has(fp)) return;
+    try {
+      const key=eventPrefix+crypto.randomUUID();
+      GM_setValue(key,{kind,data,account:nick(who),day:day(),at:Date.now(),fingerprint:fp});
+      emitted.add(fp); if (emitted.size>1500) emitted.clear();
+    } catch { storageError='Не удалось записать событие. Проверьте хранилище Tampermonkey.'; host?.report({code:'STORAGE_ERROR'}); }
+  }
+  function requestCheck(p, kind, at=Date.now()) {
+    if (p.confirmedLimit) return;
+    p.revision++; p.reason=kind; p.next=Math.max(at,p.lastFinished+MINUTE);
+  }
+  function consume() {
+    for (const key of GM_listValues().filter(k=>k.startsWith(eventPrefix))) {
+      const e=GM_getValue(key,null);
+      if (!e) continue;
+      if (e.day!==state.day) { GM_deleteValue(key); continue; }
+      if (e.account!==state.account) continue;
+      if (state.seen[e.fingerprint]) { GM_deleteValue(key); continue; }
+      const d=e.data;
+      if (e.kind==='send') {
+        if (putTrade(state,d)) { log('SEND_CONFIRMED',d.name,d.ownerCardId||d.tradeId); }
+        if(d.timeSource)log(d.serverDateAt!=null?'SEND_SERVER_DATE':'SEND_DATE_UNAVAILABLE',d.name,{ownerCardId:d.ownerCardId,serverDateAt:d.serverDateAt??null,observedAt:d.observedAt,requestStartedAt:d.requestStartedAt,requestDurationMs:d.requestDurationMs,durationSource:d.durationSource,window:timingWindow(d),transport:d.transport});
+        auditSendTimes(state);
+      } else if (e.kind==='offers') {
+        putOffers(state,d.rows);
+      } else if (e.kind==='limit') {
+        const p=person(state,d.name); p.limitObservedAt=e.at; requestCheck(p,'limit'); log('LIMIT_SEEN',d.name);
+      } else if (e.kind==='notices') {
+        observeNoticeBatch(state,d,e.at);
+      } else if (e.kind==='badge') {
+        observeBadge(state,d.count,e.at);
+      } else if (e.kind==='check') {
+        const p=lookup(state.people,nick(d.name));
+        if (p && (p.signals.length || Object.values(p.trades).some(t=>t.status==='pending') || p.limitObservedAt)) requestCheck(p,'manual');
+      }
+      state.seen[e.fingerprint]=e.at;
+      const oldKeys=Object.keys(state.seen);if(oldKeys.length>3000)for(const k of oldKeys.slice(0,oldKeys.length-3000))delete state.seen[k];
+      if(!save())return;
+      GM_deleteValue(key);
+    }
+    const attached=drainNotices(state);
+    for(const n of attached)log('NOTICE_'+n.kind.toUpperCase(),n.name,n.noticeId);
+    if(attached.length)save();
+  }
+  function ensureContext(token) {
+    if (!running || !settings.enabled || (host && (!host.settings().enabled || !host.ownsLock())) || halted || token!==state?.day || token!==day() || nick(account(document))!==state.account) throw Error('CONTEXT_CHANGED');
+  }
+  async function get(path, token, json=false) {
+    const target=url(path);
+    if (!target || !(/^\/trades\/(offers|history)\//.test(target.pathname) || target.pathname==='/user/cards/' ||
+      /^\/cards\/\d+\/trade\/$/.test(target.pathname) || (target.pathname==='/ajax/notifications/' && target.searchParams.get('action')==='list'))) throw Error('URL_NOT_ALLOWED');
+    while (true) {
+      ensureContext(token);
+      if(!activeTab())throw Error('TAB_INACTIVE');
+      const now=Date.now(), times=GM_getValue(PREFIX+'requests',[]).filter(t=>now-t<MINUTE), wait=rateWait(times,now);
+      if (wait>0) { await sleep(Math.min(wait,1000)); continue; }
+      times.push(now); GM_setValue(PREFIX+'requests',times); break;
+    }
+    const controller=new AbortController(), timer=setTimeout(()=>controller.abort(),15000);
+    if(host){state.metrics ||= {checks:0,errors:0,requests:0};state.metrics.requests++;}
+    try {
+      const response=await nativeFetch(target.href,{method:'GET',credentials:'same-origin',cache:'no-store',signal:controller.signal,redirect:'error'});
+      ensureContext(token);
+      if (!response.ok) throw Error('HTTP_'+response.status);
+      const text=await response.text(); ensureContext(token);
+      if (text.length>5000000) throw Error('RESPONSE_TOO_LARGE');
+      if (json) return JSON.parse(text);
+      const doc=inert(text);
+      if (nick(account(doc))!==state.account) throw Error('ACCOUNT_OR_LOGIN');
+      return doc;
+    } catch (e) {
+      const message=/^(HTTP_\d+|CONTEXT_CHANGED|ACCOUNT_OR_LOGIN|RESPONSE_TOO_LARGE)$/.test(e.message) ? e.message : 'NETWORK_OR_RESPONSE';
+      if (/^HTTP_(401|403|429)$/.test(message) || message==='ACCOUNT_OR_LOGIN') { state.pauseUntil=Date.now()+300000; }
+      throw Error(message);
+    } finally { clearTimeout(timer); }
+  }
+  async function offers(token) {
+    let path='/trades/offers/', total=null, rows=[], pages=0;
+    const seen=new Set();
+    while (path && pages++<30) {
+      const part=parseOffers(await get(path,token),path);
+      if (total!==null && total!==part.total) throw Error('OFFERS_CHANGED');
+      total=part.total;
+      for (const row of part.rows) { if (seen.has(row.offerId)) throw Error('OFFERS_CHANGED'); seen.add(row.offerId); rows.push(row); }
+      path=part.next;
+    }
+    if (path || rows.length!==total) throw Error('OFFERS_INCOMPLETE');
+    putOffers(state,rows);
+    return rows;
+  }
+  async function history(p,token,kind='') {
+    let path='/trades/history/?name='+encodeURIComponent(own)+'&trader='+encodeURIComponent(p.name)+(kind?'&kind='+kind:''), rows=[], pages=0, last=Infinity;
+    while (path && pages++<12) {
+      const part=parseHistory(await get(path,token),path,p.name,own,kind);
+      if (part.rows[0]?.sentAt>last) throw Error('HISTORY_CHANGED');
+      const today=part.rows.filter(r=>day(r.sentAt)===token);
+      rows.push(...today); last=part.rows.at(-1)?.sentAt ?? last;
+      if (part.rows.some(r=>day(r.sentAt)<token) || !part.next) return {rows,complete:true};
+      path=part.next;
+    }
+    throw Error('HISTORY_INCOMPLETE');
+  }
+  async function probe(p,token) {
+    const doc=await get('/user/cards/?name='+encodeURIComponent(p.name)+'&locked=0',token);
+    const card=[...doc.querySelectorAll('.anime-cards__item[data-can-trade="1"][data-owner-id]')]
+      .find(el=>nick(el.dataset.profile)===nick(p.name) && id(el.dataset.ownerId));
+    if (!card) throw Error('NO_PROBE_CARD');
+    const page=offerPage(await get('/cards/'+card.dataset.ownerId+'/trade/',token));
+    if (!page || nick(page.name)!==nick(p.name)) throw Error('PROBE_MARKUP');
+    return page.limit ? 'limit' : page.ready ? 'available' : 'unknown';
+  }
+  async function verify(p) {
+    const token=state.day, revision=p.revision, start=Date.now();
+    p.checking=true; p.error=''; save(); log('CHECK_START',p.name,p.reason||'pending');
+    try {
+      if (p.signals.length) {
+        const resolved=[];
+        const kinds=p.signals.every(s=>s.kind==='rejected')?['calsel_sender','']:['','calsel_sender'];
+        for(const kind of kinds) {
+          const result=await history(p,token,kind);
+          resolved.push(...(kind?reconcileCancelled:reconcile)(p,result.rows,result.complete,p.signals));
+          if(!Object.values(p.trades).some(t=>t.status==='pending'))break;
+        }
+        p.signals=p.signals.filter(s=>!resolved.includes(s.noticeId));
+        if(!Object.values(p.trades).some(t=>t.status==='pending'))p.signals=[];
+        if (Object.values(p.trades).some(t=>t.status==='pending')) p.error='HISTORY_UNRESOLVED';
+      } else {
+        const list=await offers(token), mine=list.filter(t=>nick(t.name)===nick(p.name) && day(t.sentAt)===token);
+        const pendingIds=new Set(mine.map(t=>t.offerId));
+        if (!mine.length && (summary(p).accepted+summary(p).pending>=3 || p.limitObservedAt)) {
+          const result=p.limitObservedAt && start-p.limitObservedAt<20000 ? 'limit' : await probe(p,token);
+          if (result==='limit') {
+            // A send in another tab after the snapshot invalidates its "no pending" conclusion.
+            const newer=GM_listValues().filter(k=>k.startsWith(eventPrefix)).some(k=>{
+              const e=GM_getValue(k,null);return e?.account===state.account && e.day===token && e.kind==='send' && nick(e.data.name)===nick(p.name);
+            });
+            if(newer)throw Error('NEW_SEND_DURING_CHECK');
+            p.confirmedLimit=true; log('LIMIT_CONFIRMED',p.name);
+          }
+          else if (result==='unknown') throw Error('PROBE_UNKNOWN');
+        }
+        if (!p.confirmedLimit && Object.values(p.trades).some(t=>t.status==='pending' && !pendingIds.has(t.offerId))) {
+          const result=await history(p,token); reconcile(p,result.rows,result.complete,[],pendingIds);
+          if(Object.values(p.trades).some(t=>t.status==='pending' && !pendingIds.has(t.offerId))) {
+            const cancelled=await history(p,token,'calsel_sender');reconcileCancelled(p,cancelled.rows,cancelled.complete,[],pendingIds);
+          }
+          if (Object.values(p.trades).some(t=>t.status==='pending' && !pendingIds.has(t.offerId))) p.error='MISSING_WITHOUT_REFUSAL';
+        }
+        p.limitObservedAt=0;
+      }
+      ensureContext(token); p.failures=p.error?p.failures+1:0; log('CHECK_DONE',p.name,p.error||summary(p).color);
+    } catch (e) {
+      if(e.message==='TAB_INACTIVE' || (host && e.message==='CONTEXT_CHANGED')){p.error='';log('CHECK_PAUSED',p.name,'Вкладка неактивна или модуль выключен');}
+      else {p.failures++; p.error=e.message; log('CHECK_ERROR',p.name,e.message);}
+    }
+    finally {
+      p.checking=false; p.lastFinished=Date.now();
+      p.next=p.lastFinished+Math.min(300000,MINUTE*Math.max(1,2**Math.min(p.failures,3)));
+      if (p.confirmedLimit || (!p.error && !p.limitObservedAt && !p.signals.length && !Object.values(p.trades).some(t=>t.status==='pending') && p.revision===revision)) p.next=0;
+      if (token===day() && nick(account(document))===state.account) {auditSendTimes(state);save();}
+    }
+  }
+  async function notificationFallback(token) {
+    state.notificationDue=0;
+    const hash=String(pageWindow.dle_login_hash||'');
+    if (!hash) { log('NOTICES_NO_SESSION_HASH'); state.notificationDue=Date.now()+60000; save(); return; }
+    const params=new URLSearchParams({action:'list',notif_id:'false',delete_kind:'false',delete_sort:'false',user_hash:hash,_:String(Date.now())});
+    try { observeResponse(await get('/ajax/notifications/?'+params,token,true)); log('NOTICES_FALLBACK'); }
+    catch (e) { log('NOTICES_ERROR','',e.message); state.notificationDue=Date.now()+60000; }
+    save();
+  }
+  async function work() {
+    const name=account(document); if (!name || !settings.enabled || halted || !activeTab()) return;
+    if (!host && !navigator.locks) { liveError='Нет Web Locks: фоновые проверки отключены во избежание дублей.'; return; }
+    const withLock=host ? host.withLock : callback=>navigator.locks.request(PREFIX+'worker',{ifAvailable:true},callback);
+    await withLock(async lock=>{
+      if (!lock) return;
+      leader=true; own=name;
+      state=GM_getValue(stateKey(),null);
+      if(host && state?.account===nick(own) && state.day<day())host.daily(state);
+      if (!state || state.day!==day() || state.account!==nick(own)) state=fresh(own);
+      if(state.schema!==SCHEMA) {
+        const backup=PREFIX+'backup:0.1.0:'+state.account+':'+state.day;
+        try {if(!GM_getValue(backup,null))GM_setValue(backup,state);}catch{storageError='Не удалось сохранить резервную копию. Миграция остановлена.';halted=true;leader=false;return;}
+        const result=migrate(state);log('MIGRATED_IDS','',String(result.merged)+' пар объединено');
+      }
+      if(state.timingRepair!==1){
+        const backup=PREFIX+'backup:timing-0.1.9:'+state.account+':'+state.day;
+        try{if(Object.keys(state.people).length && !GM_getValue(backup,null))GM_setValue(backup,state);}
+        catch{storageError='Не удалось сохранить резервную копию. Исправление времени остановлено.';halted=true;leader=false;return;}
+        repairPendingTimes(state);
+      }
+      for (const p of Object.values(state.people)) { if (p.checking) { p.checking=false; p.next=Math.max(p.next,Date.now()+MINUTE); } }
+      save();
+      try {
+        while (running && settings.enabled && (!host || (host.settings().enabled && host.ownsLock())) && !halted && activeTab() && nick(account(document))===nick(own)) {
+          if (state.day!==day()) { if(host)host.daily(state);state=fresh(own); prepared=null; save(); }
+          consume();
+          if ((state.pauseUntil||0)>Date.now()) { await sleep(1000); continue; }
+          if (state.notificationDue && state.notificationDue<=Date.now()) await notificationFallback(state.day);
+          else {
+            const key=nextCheckKey(state);
+            if(key!==null)await verify(state.people[key]);
+            else await sleep(1000);
+          }
+        }
+      } finally { leader=false; }
+    });
+  }
+  function observeResponse(data) {
+    try {
+      if(!settings.enabled || (host && !host.settings().enabled))return;
+      if (!data || typeof data!=='object' || (typeof data.notice_list!=='string' && typeof data.notice_list_small!=='string')) return;
+      const html=String(data.notice_list||data.notice_list_small||'');
+      if (html.length>1000000) return;
+      const notices=parseNotices(inert(html));
+      const count=/^\d+$/.test(String(data.notice_count))?Number(data.notice_count):null;
+      emit('notices',{notices,count,source:'response'},'response:'+Date.now()+':'+tabId);
+    } catch { /* Never affect the site's own request. */ }
+  }
+  function isNotifications(value) { const u=url(value); return u?.pathname==='/ajax/notifications/' && u.searchParams.get('action')==='list'; }
+  function sendContext() {
+    if(!settings.enabled || (host && !host.settings().enabled))return null;
+    return prepared && clickedAt && Date.now()-clickedAt<120000?{...prepared,startedAt:clickedAt,requestDay:day()}:null;
+  }
+  function requestTiming(ctx) {
+    return {requestStartedAt:ctx.requestStartedAt,observedAt:Date.now(),requestDurationMs:Math.max(0,performance.now()-ctx.requestPerfAt),durationSource:'request'};
+  }
+  function observeSend(ctx, ids, data, dateHeader, status, transport, timing) {
+    try {
+      if(!ctx || !ids || ids.ownerCardId!==ctx.ownerCardId || ids.cardId!==ctx.cardId || ctx.account!==nick(account(document)) || ctx.requestDay!==day() || status<200 || status>=300)return;
+      if(typeof data?.html!=='string' || data.html.length>1000000)return;
+      const success=[...inert(data.html).querySelectorAll('.message-info__content')].some(el=>clean(el.textContent)==='Обмен отправлен, дождитесь его рассмотрения получателем');
+      if(!success)return;
+      const now=Date.now(),serverDateAt=responseDate(dateHeader);
+      if(serverDateAt!==null && day(serverDateAt)!==day(now))return;
+      emit('send',{name:ctx.name,ownerCardId:ctx.ownerCardId,cardId:ctx.cardId,startedAt:ctx.startedAt,sentAt:serverDateAt??now,exact:serverDateAt!==null,serverDateAt,...timing,timeSource:serverDateAt!==null?'response-date':'local-fallback',transport},'send-time:'+ctx.ownerCardId+':'+ctx.startedAt+':'+transport);
+      confirmedHere.add(ctx.ownerCardId);
+      if(clickedAt===ctx.startedAt){prepared=null;clickedAt=0;}
+    }catch{/* Diagnostics must never interfere with sending. */}
+  }
+  const xhrRequests=new WeakMap();
+  const sendAwaiting=new Map();
+  function awaitingSend(ctx,delta) {
+    const count=(sendAwaiting.get(ctx.startedAt)||0)+delta;
+    if(count>0)sendAwaiting.set(ctx.startedAt,count);else sendAwaiting.delete(ctx.startedAt);
+  }
+  function hooks() {
+    if(!settings.enabled)return;
+    try {
+      const flag=host?'__suiteTradeLimits':'__asTradeLimits';
+      const installed=fn=>host?host.hookInstalled(fn,flag):fn?.[flag];
+      const proto=pageWindow.XMLHttpRequest?.prototype;
+      if (proto && !installed(proto.open)) {
+        const original=proto.open;
+        function open(method,address) {
+          if(host && !host.settings().enabled)return original.apply(this,arguments);
+          xhrRequests.set(this,{method,address});
+          const capture=isNotifications(address);
+          const who=nick(account(document)), requestDay=day();
+          this.addEventListener('load',function () { if (capture && who && who===nick(account(document)) && requestDay===day() && this.status>=200 && this.status<300) {
+            try { observeResponse(this.responseType==='json'?this.response:JSON.parse(this.responseText)); } catch { /* non-JSON */ }
+          } },{once:true});
+          return original.apply(this,arguments);
+        }
+        open[flag]=true;open.__suiteTradeLimitsOriginal=original; proto.open=open;
+      }
+      if(proto && !installed(proto.send)) {
+        const original=proto.send;
+        function send(body) {
+          let release=()=>{};
+          try {
+            const req=xhrRequests.get(this),ctx=sendContext(),ids=req&&sendRequestIds(req.address,req.method,body);
+            if(ctx && ids){
+              let pending=true,received=null;awaitingSend(ctx,1);
+              const onState=()=>{if(this.readyState===4 && !received)received=requestTiming(ctx);};
+              release=()=>{if(pending){pending=false;this.removeEventListener('readystatechange',onState);awaitingSend(ctx,-1);}};
+              this.addEventListener('readystatechange',onState);
+              this.addEventListener('loadend',function(){try{observeSend(ctx,ids,this.responseType==='json'?this.response:JSON.parse(this.responseText),this.getResponseHeader('Date'),this.status,'xhr',received||requestTiming(ctx));}catch{}finally{release();}},{once:true});
+              ctx.requestStartedAt=Date.now();ctx.requestPerfAt=performance.now();
+            }
+          }catch{}
+          try{return original.apply(this,arguments);}catch(error){release();throw error;}
+        }
+        send[flag]=true;send.__suiteTradeLimitsOriginal=original;proto.send=send;
+      }
+      if (typeof pageWindow.fetch==='function' && !installed(pageWindow.fetch)) {
+        const original=pageWindow.fetch;
+        function fetch(input,init) {
+          if(host && !host.settings().enabled)return original.apply(this,arguments);
+          const who=nick(account(document)),requestDay=day();
+          const address=typeof input==='string'?input:input?.url,method=init?.method||input?.method||'GET',ctx=sendContext();
+          let body=Promise.resolve(init?.body);
+          if(ctx && !init?.body && typeof input?.clone==='function'){try{body=input.clone().text();}catch{}}
+          const ids=body.then(b=>{const found=sendRequestIds(address,method,b);if(ctx && found)awaitingSend(ctx,1);return found;}).catch(()=>null);
+          let result;
+          if(ctx){ctx.requestStartedAt=Date.now();ctx.requestPerfAt=performance.now();}
+          try{result=original.apply(this,arguments);}catch(error){if(ctx)ids.then(found=>{if(found)awaitingSend(ctx,-1);});throw error;}
+          if(ctx)result.then(r=>{const timing=requestTiming(ctx);let copy=null;try{if(r.ok)copy=r.clone();}catch{}return ids.then(async found=>{if(found)try{if(copy)observeSend(ctx,found,await copy.json(),r.headers.get('Date'),r.status,'fetch',timing);}finally{awaitingSend(ctx,-1);}});},()=>ids.then(found=>{if(found)awaitingSend(ctx,-1);})).catch(()=>{});
+          if (isNotifications(typeof input==='string'?input:input?.url)) result.then(r=>{
+            if (r.ok) r.clone().json().then(data=>{if(who && who===nick(account(document)) && requestDay===day())observeResponse(data);}).catch(()=>{});
+          }).catch(()=>{});
+          return result;
+        }
+        fetch[flag]=true;fetch.__suiteTradeLimitsOriginal=original; pageWindow.fetch=fetch;
+      }
+    } catch { liveError='Не удалось подключить перехват уведомлений; доступно наблюдение DOM.';host?.report({code:'HOOK_INSTALL_FAILED'}); }
+  }
+  function scan() {
+    observerTimer=0;
+    if(host)settings=host.settings();
+    const name=account(document);
+    if (nick(name)!==observedAccount) { observedAccount=nick(name); prepared=null; clickedAt=0; lastScan=''; }
+    if (!name) { if(host)render(); return; }
+    if (settings.enabled) {
+      const p=offerPage(document), now=Date.now();
+      if (p?.ready) prepared={...p, account:nick(name)};
+      if (p?.success && prepared && prepared.ownerCardId===p.ownerCardId && prepared.account===nick(name) && clickedAt && !sendAwaiting.has(clickedAt) && now-clickedAt<120000 && day(clickedAt)===day(now)) {
+        emit('send',{name:p.name,ownerCardId:p.ownerCardId,cardId:p.cardId,sentAt:now,startedAt:clickedAt,exact:false,serverDateAt:null,observedAt:now,timeSource:'local-fallback',transport:'dom'},'send:'+day()+':'+p.ownerCardId+':'+clickedAt);
+        confirmedHere.add(p.ownerCardId);liveError='';
+        prepared=null; clickedAt=0;
+      } else if (p?.success && !prepared && !confirmedHere.has(p.ownerCardId)) liveError='Экран отправленного обмена: дату уточняем при посещении «Отправленные».';
+      if (p?.limit) emit('limit',p,'limit:'+day()+':'+nick(p.name)+':'+tabId);
+      if (/^\/trades\/offers\/(?:page\/\d+\/)?$/.test(location.pathname)) {
+        try { const data=parseOffers(document,location.href); emit('offers',data,'offers:'+JSON.stringify(data.rows)); } catch { /* not loaded */ }
+      }
+      const notices=parseNotices(document.querySelector('#alertsDropdownList')||document.createDocumentFragment());
+      if (notices.length) emit('notices',{notices,source:'dom'},'dom:'+notices.map(n=>n.noticeId).sort().join(','));
+      const badge=document.querySelector('#MainBadgeCounter');
+      if (badge) {
+        const value=Number(badge.dataset.count ?? clean(badge.textContent));
+        if (Number.isInteger(value) && value>=0 && String(value)!==lastScan) {
+          lastScan=String(value); emit('badge',{count:value},'badge:'+tabId+':'+now+':'+value);
+        }
+      }
+    }
+    render();
+  }
+  document.addEventListener('click',e=>{
+    if(!settings.enabled || (host && !host.settings().enabled))return;
+    if (e.target instanceof Element && e.target.closest('#tradeOffer .trade__send-trade-btn')) {
+      const p=offerPage(document); if (p?.ready) { prepared={...p,account:nick(account(document))}; clickedAt=Date.now(); }
+    }
+  },true);
+
+  const CSS=`
+  .astl-tile.astl-green{background:linear-gradient(135deg,#173a2bc9,#18231f)!important}
+  .astl-tile.astl-yellow{background:linear-gradient(135deg,#65501cc9,#29241a)!important}
+  .astl-tile.astl-red{background:linear-gradient(135deg,#652c37c9,#2d1a20)!important}
+  .astl-tile.astl-checking{background:linear-gradient(110deg,var(--astl-base,#224535),#956125,var(--astl-base,#224535))!important;background-size:220% 100%!important;animation:astl-check 2s ease-in-out infinite}
+  .astl-red{--astl-base:#652c37}.astl-yellow{--astl-base:#65501c}
+  .card-show__owner.astl-tile{height:auto;min-height:92px;padding-bottom:7px;box-sizing:border-box}
+  .card-show__owner.astl-tile.card-show__owner--online{border-color:#88ffbd!important;box-shadow:inset 0 0 0 1px #88ffbd,0 0 0 1px #10251b,0 0 0 2px #63f5a5,0 0 9px #63f5a559!important}
+  .astl-mark{display:flex;align-items:center;justify-content:center;gap:5px;min-height:16px;margin:4px 0 0;font:600 11px/16px system-ui;color:#e0e8e4;width:100%}
+  .astl-dot{display:block;width:7px;height:7px;border-radius:50%;box-shadow:0 0 0 1px #ffffff26}
+  .astl-dot.green{background:#4cdd96}.astl-dot.red{background:#ff6d82}.astl-dot.yellow{background:#ffd35d}
+  #astl-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:10px 0 18px;padding:10px 12px;border:1px solid #ffffff20;border-radius:12px;background:#1b2025;color:#ced6df;font:12px/1.4 system-ui}
+  #astl-bar button,#astl-panel button,#astl-panel select{border:1px solid #ffffff30;border-radius:8px;background:#272c35;color:#eee;padding:7px 10px;font:inherit;cursor:pointer}
+  #astl-bar .astl-status{flex:1;min-width:140px}
+  #astl-panel{box-sizing:border-box;width:min(720px,calc(100vw - 24px));max-height:85vh;overflow:auto;background:#191d24;color:#e1e6ed;border:1px solid #495365;border-radius:16px;padding:20px;font:14px/1.5 system-ui}
+  #astl-panel::backdrop{background:#000a}#astl-panel h2{margin:0 0 12px;font-size:20px}#astl-panel p{margin:10px 0}
+  #astl-panel .astl-actions{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}#astl-panel label{display:flex;gap:10px;align-items:center}
+  #astl-panel pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;background:#10141b;padding:12px;border-radius:8px;max-height:230px;overflow:auto}
+  @keyframes astl-check{50%{background-position:100% 0}}@media(prefers-reduced-motion:reduce){.astl-checking{animation:none!important}}
+  `;
+  function node(tag,cls,text) { const e=document.createElement(tag); if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e; }
+  function loadView() {
+    const who=account(document); if (!who) return null;
+    const s=GM_getValue(statePrefix+encodeURIComponent(nick(who)),null); return s?.day===day()?s:null;
+  }
+  function render() {
+    if (!document.body) return;
+    if (!document.getElementById('astl-style')) { const style=node('style');style.id='astl-style';style.textContent=CSS;document.head.append(style); }
+    const view=loadView(), who=nick(account(document));
+    const ownerSelector=ownerTileSelector(location.pathname);
+    const preserveBackground=/^\/cards\/[1-9]\d*\/awakened\/?$/.test(location.pathname);
+    const list=!host && location.pathname==='/cards/users/'?document.querySelector('.card-show__owner-wrapper'):null;
+    if(!list)document.getElementById('astl-bar')?.remove();
+    if (list && !document.getElementById('astl-bar')) {
+      const bar=node('div');bar.id='astl-bar';bar.append(node('strong','','Лимиты трейдов · отладка'),node('span','astl-status'));
+      const button=node('button','','Настройки / журнал');button.type='button';button.onclick=openPanel;bar.append(button);list.before(bar);
+    }
+    const status=document.querySelector('#astl-bar .astl-status');
+    const msg=!settings.enabled?'Выключено':storageError||liveError||(!who?'Не определён аккаунт':(!activeTab()?'Пауза: вкладка неактивна':view?.pauseUntil>Date.now()?'Пауза после ошибки сайта':'Исходящие · МСК · свободно / 3'));
+    if (status && status.textContent!==msg) status.textContent=msg;
+    for (const el of document.querySelectorAll('.astl-tile'+(ownerSelector?','+ownerSelector:''))) {
+      const name=ownerName(el.getAttribute('href')), p=lookup(view?.people,nick(name));
+      const active=!!ownerSelector && el.matches(ownerSelector) && settings.enabled && !!who && !!name && nick(name)!==who;
+      if (!active) { for(const c of [...el.classList])if(c.startsWith('astl-'))el.classList.remove(c);el.querySelector('.astl-mark')?.remove();delete el.dataset.astlSignature;continue; }
+      const s=summary(p), signature=JSON.stringify([s,p?.checking,p?.error,settings.mode,preserveBackground]);
+      if (el.dataset.astlSignature===signature) continue;
+      el.dataset.astlSignature=signature;
+      for (const c of [...el.classList]) if(c.startsWith('astl-'))el.classList.remove(c);
+      el.classList.add('astl-tile');
+      if(!preserveBackground){
+        el.classList.add('astl-'+s.color);
+        if(p?.checking || p?.error)el.classList.add('astl-checking');
+      }
+      el.querySelector('.astl-mark')?.remove();
+      const mark=node('span','astl-mark');
+      const desc=`Вы → ${name}: свободно ${s.free}/3, принято ${s.accepted}, ожидает/уточняется ${s.pending}.`+(s.known?'':' Сегодня нет записанных отправок.');
+      mark.title=desc+(p?.error?' Требуется уточнение: '+p.error:'');mark.setAttribute('aria-label',mark.title);
+      if(settings.mode==='numbers')mark.textContent=s.free+'/3';
+      else for(let i=0;i<3;i++)mark.append(node('i','astl-dot '+(i<s.accepted?'red':i<s.accepted+s.pending?'yellow':'green')));
+      el.append(mark);
+    }
+    if(dialog?.open) {
+      const pre=dialog.querySelector('pre'), v=view||fresh(account(document));
+      const lines=Object.values(v.people).map(p=>`${p.name}: ${summary(p).free}/3; принято ${summary(p).accepted}; ожидает ${summary(p).pending}${p.error?' · '+p.error:''}`);
+      const report=[`Версия ${VERSION} · ${v.day} МСК`,leader?'Эта вкладка обрабатывает очередь':'Очередь работает только в активной вкладке AnimeSSS',msg,...lines,'',...v.log.slice(-25).map(l=>new Date(l.at).toISOString()+` ${l.code} ${l.name} ${typeof l.detail==='object'?JSON.stringify(l.detail):l.detail}`)].join('\n');
+      if(pre.textContent!==report)pre.textContent=report;
+    }
+  }
+  function configure(key,value) { if(host)return;settings={...GM_getValue(PREFIX+'settings',settings),[key]:value};GM_setValue(PREFIX+'settings',settings);render(); }
+  function openPanel() {
+    if(host)return;
+    if(!document.body)return;
+    if(!dialog) {
+      dialog=node('dialog');dialog.id='astl-panel';dialog.append(node('h2','','Лимиты трейдов · отладка'));
+      dialog.append(node('p','','Отдельный скрипт. Только чтение: обмены не отправляет, не принимает и не отменяет. Учитываются ваши исходящие предложения. Если за сегодня нет записанных отправок, показаны три свободных места без дополнительных проверок.'));
+      const label=node('label','','Наблюдение и фоновые проверки');const toggle=node('input');toggle.type='checkbox';toggle.checked=settings.enabled;toggle.onchange=()=>configure('enabled',toggle.checked);label.prepend(toggle);dialog.append(label);
+      const select=node('select');for(const [v,t]of [['dots','Три кружка'],['numbers','Количество свободных: 0–3 / 3']]){const o=node('option','',t);o.value=v;select.append(o);}select.value=settings.mode;select.onchange=()=>configure('mode',select.value);dialog.append(select);
+      dialog.append(node('p','','Зелёный — есть место; жёлтый — места заняты, но есть ожидающие; красный — подтверждён полный лимит. Оранжевый перелив — проверка или неопределённость. Очередь работает только в активной вкладке AnimeSSS. В 00:00 МСК история сбрасывается.'));
+      const actions=node('div','astl-actions');
+      const check=node('button','','Проверить ожидающие');check.onclick=()=>{for(const p of Object.values(loadView()?.people||{}))emit('check',{name:p.name},'manual:'+nick(p.name)+':'+Date.now());};
+      const exportBtn=node('button','','Скачать диагностику');exportBtn.onclick=()=>{
+        const data={version:VERSION,exportedAt:new Date().toISOString(),state:loadView(),errors:[storageError,liveError].filter(Boolean)};
+        const a=node('a'), blob=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));a.href=blob;a.download='animesss-trade-limits-'+day()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(blob),2000);
+      };
+      const close=node('button','','Закрыть');close.onclick=()=>dialog.close();actions.append(check,exportBtn);
+      actions.append(close);dialog.append(actions,node('pre'));document.body.append(dialog);
+    }
+    if(!dialog.open)dialog.showModal();render();
+  }
+  if(!host){
+    GM_registerMenuCommand('Лимиты трейдов — настройки и журнал',openPanel);
+    GM_addValueChangeListener(PREFIX+'settings',(_k,_o,v)=>{if(v)settings=v;scan();});
+  }
+  const observer=new MutationObserver(records=>{
+    if(records.every(r=>r.target instanceof Element && (r.target.closest('#astl-bar,#astl-panel,.astl-mark') ||
+      (r.type==='childList' && [...r.addedNodes,...r.removedNodes].every(n=>n instanceof Element && n.classList.contains('astl-mark'))))))return;
+    if(!observerTimer)observerTimer=setTimeout(scan,100);
+  });
+  let observing=false;
+  function refresh(){
+    if(host)settings=host.settings();
+    if(settings.enabled && !observing){observer.observe(document,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['data-count']});observing=true;}
+    if(!settings.enabled){observer.disconnect();observing=false;prepared=null;clickedAt=0;}
+    if(settings.enabled || !host || dialog?.open || document.querySelector('.astl-tile')){scan();hooks();}
+  }
+  refresh();
+  setInterval(refresh,2000);
+  let attempting=false;
+  setInterval(()=>{if(!attempting){attempting=true;work().catch(()=>{liveError='Ошибка фоновой очереди. См. диагностику.';host?.report({code:'WORKER_ERROR'});}).finally(()=>attempting=false);}},1500);
+  window.addEventListener('pagehide',()=>{running=false;});
+  window.addEventListener('pageshow',()=>{running=true;});
+  if(host)return {refresh};
+  }
+// Embedded by embed-trade-limits.cjs. No standalone runtime or external dependency.
+function createTradeLimitsHost() {
+  const prefix='suite_trade_limits_v1:', tab=crypto.randomUUID();
+  const claimPrefix=prefix+'claim:', claimKey=claimPrefix+tab, ttl=15000;
+  let held=false, claim=null, conflict=false;
+  const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+  const visible=()=>document.visibilityState==='visible' && document.hasFocus();
+  function readSetting(key){
+    const preference=readSettingPreference(key);
+    return preference ? preference.value === true : gmGet(SETTINGS_KEY,{})[key] === true;
+  }
+  function settings(){return {enabled:!conflict && readSetting('modTradeLimits'),mode:readSetting('tradeLimitsNumbers')?'numbers':'dots'};}
+  const claims=()=>GM_listValues().filter(k=>k.startsWith(claimPrefix)).map(k=>({key:k,...GM_getValue(k,{})})).filter(c=>c.until>Date.now());
+  const earlier=(a,b)=>a.ticket<b.ticket || (a.ticket===b.ticket && a.key<b.key);
+  function ownsLock(){
+    const value=GM_getValue(claimKey,null);
+    return held && !!value && value.token===claim?.token && value.until>Date.now();
+  }
+  function report(entry){
+    try {
+      const code=String(entry.code||'');
+      if(!['CHECK_ERROR','NOTICES_ERROR','SEND_TIME_ADJUSTED','SEND_TIME_MISMATCH','SEND_TIME_AMBIGUOUS','SEND_DATE_UNAVAILABLE','STORAGE_ERROR','WORKER_ERROR','HOOK_INSTALL_FAILED','STANDALONE_CONFLICT'].includes(code) && !(code==='CHECK_DONE' && !['red','green','yellow'].includes(entry.detail)))return;
+      if(['CONTEXT_CHANGED','TAB_INACTIVE'].includes(entry.detail))return;
+      const now=Date.now(), account=suiteGetCurrentUserName().trim().toLowerCase();
+      // Old entries remain in the local ring buffer; do not resend resolved incidents.
+      if(Number.isFinite(entry.at) && now-entry.at>5*60000)return;
+      const key=prefix+'reports:'+account;
+      const recent=gmGet(key,{}), signature=JSON.stringify([code,entry.name||'',typeof entry.detail==='string'?entry.detail:'']);
+      if(recent[signature] && now-recent[signature]<15*60000)return;
+      for(const k of Object.keys(recent))if(now-recent[k]>=15*60000)delete recent[k];
+      if(Object.keys(recent).length>=80)return;
+      recent[signature]=now;gmStoreSet(key,recent);
+      suiteTelemetryLog('trade_limits',code.toLowerCase(),{peer:entry.name||'',detail:entry.detail||'',trackerVersion:'0.1.9'},/ERROR|FAILED/.test(code)?'error':'warn');
+    }catch{/* Logging must not affect tracking. */}
+  }
+  async function withLock(callback){
+    if(!settings().enabled || !visible())return;
+    // GM storage is shared between .tv and .com; Web Locks alone are not.
+    // Bakery tickets prevent a newly focused tab from preempting an active writer.
+    const token=crypto.randomUUID();
+    let heartbeat=0;
+    try {
+      claim={token,choosing:true,ticket:0,until:Date.now()+ttl};GM_setValue(claimKey,claim);
+      const ticket=1+Math.max(0,...claims().filter(c=>c.key!==claimKey).map(c=>Number(c.ticket)||0));
+      claim={token,choosing:false,ticket,until:Date.now()+ttl};GM_setValue(claimKey,claim);
+      await pause(250);
+      if(!settings().enabled || !visible() || claims().some(c=>c.key!==claimKey && (c.choosing || earlier(c,{...claim,key:claimKey}))))return;
+      held=true;
+      for(const key of GM_listValues().filter(k=>k.startsWith(claimPrefix) && k!==claimKey)){
+        if((GM_getValue(key,null)?.until||0)<Date.now()-60000)GM_deleteValue(key);
+      }
+      heartbeat=setInterval(()=>{
+        try {if(ownsLock()){claim.until=Date.now()+ttl;GM_setValue(claimKey,claim);}}
+        catch{held=false;report({code:'STORAGE_ERROR'});}
+      },2000);
+      if(ownsLock())await callback(true);
+    } finally {
+      held=false;clearInterval(heartbeat);
+      if(GM_getValue(claimKey,null)?.token===token)GM_deleteValue(claimKey);
+      claim=null;
+    }
+  }
+  function daily(state){
+    if(!state || !state.account || !/^\d{4}-\d{2}-\d{2}$/.test(state.day))return;
+    const key=prefix+'daily:'+state.account;
+    if(GM_getValue(key,'')===state.day)return;
+    const totals={day:state.day,users:0,sent:0,accepted:0,rejected:0,pending:0,confirmedLimits:0,checks:state.metrics?.checks||0,errors:state.metrics?.errors||0,requests:state.metrics?.requests||0,timingAdjustments:0};
+    for(const p of Object.values(state.people||{})){
+      totals.users++;if(p.confirmedLimit)totals.confirmedLimits++;
+      for(const t of Object.values(p.trades||{})){
+        totals.sent++;if(Object.hasOwn(totals,t.status))totals[t.status]++;
+        if(t.timeMatch && t.timeMatch.deltaSeconds)totals.timingAdjustments++;
+      }
+    }
+    // A compact summary, not a list of peers or a dump of their trade history.
+    GM_setValue(key,state.day);
+    if(totals.sent || totals.checks || totals.errors)suiteTelemetryLog('trade_limits','daily_summary',totals,'info');
+  }
+  function detectConflict(){
+    const page=getPageWindow();
+    conflict=suiteFunctionChainHas(page.fetch,'__asTradeLimits') || suiteFunctionChainHas(page.XMLHttpRequest?.prototype.open,'__asTradeLimits');
+    if(conflict)report({code:'STANDALONE_CONFLICT',detail:'Выключите отдельный скрипт лимитов обменов и обновите страницу.'});
+    return conflict;
+  }
+  return {prefix,origin:location.origin,settings,withLock,ownsLock,report,daily,detectConflict,hookInstalled:suiteFunctionChainHas};
+}
+
+let suiteTradeLimits=null;
+function initTradeLimits(){
+  if(window.top!==window || !/^https:\/\/animesss\.(tv|com)$/.test(location.origin))return;
+  if(!suiteTradeLimits){
+    const host=createTradeLimitsHost();
+    if(host.detectConflict())return;
+    suiteTradeLimits=createSuiteTradeLimits(host);
+  }
+  suiteTradeLimits?.refresh();
+}
+function syncTradeLimits(){
+  if(cfg.modTradeLimits || suiteTradeLimits)initTradeLimits();
+  document.querySelectorAll('[data-suite-trade-limits-numbers]').forEach(row=>{
+    const input=row.querySelector('input');input.disabled=!cfg.modTradeLimits;
+    row.style.opacity=cfg.modTradeLimits?'1':'0.35';input.checked=!!cfg.tradeLimitsNumbers;
+  });
+}
+function watchTradeLimitsSettings(){
+  for(const key of ['modTradeLimits','tradeLimitsNumbers']){
+    GM_addValueChangeListener(SETTING_VALUE_PREFIX+key,()=>{
+      const preference=readSettingPreference(key);
+      if(preference){cfg[key]=preference.value===true;savedCfgSnapshot[key]=cfg[key];}
+      document.querySelectorAll(`[data-suite-trade-setting="${key}"] input`).forEach(input=>input.checked=!!cfg[key]);
+      syncTradeLimits();
+    });
+  }
+  syncTradeLimits();
+}
+
+  // END EMBEDDED TRADE LIMITS
+
   async function init(){
     window.__suiteMainInitStartedAt = window.__suiteMainInitStartedAt || Date.now();
     suiteStartModule('mobile_ui', null, suiteApplyMobileFloatingUiVisibility);
@@ -12636,6 +13611,7 @@
     suiteStartModule('gacha', 'modGachaAutoloot', initGachaAutoloot);
     suiteStartModule('quick_card_owners', 'modQuickCardOwners', initQuickCardOwners);
     suiteStartModule('owner_restrictions', 'modOwnerRestrictions', initOwnerRestrictions);
+    suiteStartModule('trade_limits', null, watchTradeLimitsSettings);
     suiteStartModule('vote_cards', 'modVoteCardsToggle', initVoteCardsToggle);
     suiteStartModule('suggestion_authors', 'modSuggestionAuthors', initSuggestionAuthors);
     suiteStartModule('autowatch', 'modAutoLootCards', initAutoLootCards);
@@ -18787,11 +19763,18 @@
     return Number.isFinite(number) ? number : null;
   }
 
+  function suiteLabyrinthFatigueLimit(value){
+    if(typeof value !== 'number' && typeof value !== 'string') return null;
+    const number = suiteLabyrinthFatigueNumber(value);
+    return Number.isSafeInteger(number) && number > 0 ? number : null;
+  }
+
   function suiteLabyrinthFatigueResponseSummary(data){
     if(!data || typeof data !== 'object') return null;
     const counter = data.fatigue_counter && typeof data.fatigue_counter === 'object'
       ? {
           value:suiteLabyrinthFatigueNumber(data.fatigue_counter.value),
+          limit:suiteLabyrinthFatigueLimit(data.fatigue_counter.limit) ?? suiteLabyrinthFatigueLimit(data.fatigue_counter.max),
           skipped:!!data.fatigue_counter.skipped,
           title:String(data.fatigue_counter.title || '').slice(0, 500),
           text:String(data.fatigue_counter.text || '').slice(0, 1000),
@@ -18839,6 +19822,70 @@
     return contexts;
   }
 
+  function suiteLabyrinthFatigueCaptureState(){
+    // Shared by sandbox/page hooks and module restarts; weak keys do not retain requests.
+    return window.__suiteLabyrinthFatigueCaptureState ||= {
+      bindings:new WeakMap(), xhr:new WeakMap(), responses:new WeakSet(), promises:new WeakSet(),
+      duplicates:0, reportedDuplicates:0, duplicateReportedAt:0,
+    };
+  }
+
+  function suiteLabyrinthFatigueEnsureHook(owner, key, createHook, originalKey, label){
+    const state = suiteLabyrinthFatigueCaptureState();
+    let bindings = state.bindings.get(owner);
+    if(!bindings){ bindings = {}; state.bindings.set(owner, bindings); }
+    const entry = bindings[key] ||= { covered:new WeakSet(), calls:0, pending:null };
+    const original = owner[key];
+    if(typeof original !== 'function' || entry.covered.has(original)
+      || suiteFunctionChainHas(original, '__suiteLabyrinthFatigueHooked')) return;
+    // An opaque wrapper is not proof of removal. Allow one probe, not another
+    // wrapper every 1.5 seconds while waiting for the next real request.
+    if(entry.pending && Date.now() - entry.pending.at < 60000) return;
+    const observer = createHook(original);
+    function hooked(){
+      const rootAtCall = owner[key];
+      const calls = ++entry.calls;
+      try{ return observer.apply(this, arguments); }
+      finally{
+        if(entry.pending?.wrapper === hooked){
+          entry.pending = null;
+          // The old observer survived inside the third-party wrapper. Remove
+          // this probe when still at the top; never overwrite a newer wrapper.
+          try{
+            if(entry.calls > calls && owner[key] === hooked) owner[key] = original;
+            const current = owner[key];
+            if(typeof current === 'function' && (current === rootAtCall || current === original)) entry.covered.add(current);
+          }catch(e){ /* Observing a request must never change its result. */ }
+        }
+      }
+    }
+    hooked.__suiteLabyrinthFatigueHooked = true;
+    hooked.__suiteLabyrinthFatigueHookContext = label;
+    hooked[originalKey] = original;
+    owner[key] = hooked;
+    entry.covered.add(hooked);
+    entry.pending = { wrapper:hooked, at:Date.now() };
+  }
+
+  function suiteLabyrinthFatigueHookPresent(owner, key){
+    const fn = owner?.[key];
+    return typeof fn === 'function' && (
+      suiteLabyrinthFatigueCaptureState().bindings.get(owner)?.[key]?.covered.has(fn)
+      || suiteFunctionChainHas(fn, '__suiteLabyrinthFatigueHooked')
+    );
+  }
+
+  function suiteLabyrinthFatigueRecordDuplicate(key){
+    const state = suiteLabyrinthFatigueCaptureState();
+    state.duplicates++;
+    if(state.duplicateReportedAt && Date.now() - state.duplicateReportedAt < 60000) return;
+    suiteTelemetryLog('fatigue', 'duplicate_steps_suppressed', {
+      count:state.duplicates - state.reportedDuplicates, total:state.duplicates, lastKey:key,
+    });
+    state.reportedDuplicates = state.duplicates;
+    state.duplicateReportedAt = Date.now();
+  }
+
   function suiteLabyrinthFatigueHookHealth(){
     return suiteLabyrinthFatigueHookContexts().map(({ label, target }) => {
       try{
@@ -18849,11 +19896,11 @@
           label,
           xhrAvailable,
           xhrHookPresent:!xhrAvailable || (
-            suiteFunctionChainHas(xhrPrototype.open, '__suiteLabyrinthFatigueHooked')
-            && suiteFunctionChainHas(xhrPrototype.send, '__suiteLabyrinthFatigueHooked')
+            suiteLabyrinthFatigueHookPresent(xhrPrototype, 'open')
+            && suiteLabyrinthFatigueHookPresent(xhrPrototype, 'send')
           ),
           fetchAvailable,
-          fetchHookPresent:!fetchAvailable || suiteFunctionChainHas(target.fetch, '__suiteLabyrinthFatigueHooked'),
+          fetchHookPresent:!fetchAvailable || suiteLabyrinthFatigueHookPresent(target, 'fetch'),
         };
       }catch(e){
         return { label, xhrAvailable:false, xhrHookPresent:false, fetchAvailable:false, fetchHookPresent:false };
@@ -18862,6 +19909,7 @@
   }
 
   function installLabyrinthFatigueStepHook(){
+    const capture = suiteLabyrinthFatigueCaptureState();
     const dispatch = payload => {
       setTimeout(() => {
         const handler = window.__suiteLabyrinthFatigueStepHandler;
@@ -18872,24 +19920,21 @@
       try{
         const xhrPrototype = target.XMLHttpRequest?.prototype;
         if(xhrPrototype){
-          if(typeof xhrPrototype.open === 'function' && !suiteFunctionChainHas(xhrPrototype.open, '__suiteLabyrinthFatigueHooked')){
-            const originalOpen = xhrPrototype.open;
-            const hookedOpen = function(method, url){
-              this.__suiteLabyrinthFatigueUrl = String(url || '');
+          suiteLabyrinthFatigueEnsureHook(xhrPrototype, 'open', originalOpen => function(method, url){
+              capture.xhr.set(this, { url:String(url || ''), pending:null });
               return originalOpen.apply(this, arguments);
-            };
-            hookedOpen.__suiteLabyrinthFatigueHooked = true;
-            hookedOpen.__suiteLabyrinthFatigueHookContext = label;
-            hookedOpen.__suiteXhrOriginal = originalOpen;
-            xhrPrototype.open = hookedOpen;
-          }
-          if(typeof xhrPrototype.send === 'function' && !suiteFunctionChainHas(xhrPrototype.send, '__suiteLabyrinthFatigueHooked')){
-            const originalSend = xhrPrototype.send;
-            const hookedSend = function(body){
-              const url = this.__suiteLabyrinthFatigueUrl || '';
-              if(suiteLabyrinthFatigueIsStepRequest(url, body)){
+            }, '__suiteXhrOriginal', label);
+          suiteLabyrinthFatigueEnsureHook(xhrPrototype, 'send', originalSend => function(body){
+              const record = capture.xhr.get(this);
+              let listener = null;
+              if(record && !record.pending && typeof window.__suiteLabyrinthFatigueStepHandler === 'function'
+                && suiteLabyrinthFatigueIsStepRequest(record.url, body)){
                 const startedAt = Date.now();
-                this.addEventListener('loadend', function(){
+                const ticket = {};
+                record.pending = ticket;
+                listener = function(){
+                  if(capture.xhr.get(this) !== record || record.pending !== ticket) return;
+                  record.pending = null;
                   let data = null;
                   let rawText = '';
                   try{
@@ -18905,30 +19950,32 @@
                     durationMs:Date.now() - startedAt,
                     response:suiteLabyrinthFatigueResponseSummary(data),
                   });
-                }, { once:true });
+                };
+                this.addEventListener('loadend', listener, { once:true });
               }
-              return originalSend.apply(this, arguments);
-            };
-            hookedSend.__suiteLabyrinthFatigueHooked = true;
-            hookedSend.__suiteLabyrinthFatigueHookContext = label;
-            hookedSend.__suiteXhrOriginal = originalSend;
-            xhrPrototype.send = hookedSend;
-          }
-          const xhrHookPresent = suiteFunctionChainHas(xhrPrototype.open, '__suiteLabyrinthFatigueHooked')
-            && suiteFunctionChainHas(xhrPrototype.send, '__suiteLabyrinthFatigueHooked');
+              try{ return originalSend.apply(this, arguments); }
+              catch(error){
+                if(listener){ this.removeEventListener('loadend', listener); record.pending = null; }
+                throw error;
+              }
+            }, '__suiteXhrOriginal', label);
+          const xhrHookPresent = suiteLabyrinthFatigueHookPresent(xhrPrototype, 'open')
+            && suiteLabyrinthFatigueHookPresent(xhrPrototype, 'send');
           try{ Object.defineProperty(xhrPrototype, '__suiteLabyrinthFatigueHooked', { value:xhrHookPresent, configurable:true }); }
           catch(e){ xhrPrototype.__suiteLabyrinthFatigueHooked = xhrHookPresent; }
         }
 
-        if(typeof target.fetch === 'function' && !suiteFunctionChainHas(target.fetch, '__suiteLabyrinthFatigueHooked')){
-          const originalFetch = target.fetch;
-          function hookedFetch(resource, init){
+        suiteLabyrinthFatigueEnsureHook(target, 'fetch', originalFetch => function(resource, init){
             const url = typeof resource === 'string' ? resource : resource?.url || '';
-            const shouldCapture = suiteLabyrinthFatigueIsStepRequest(url, init?.body);
+            const shouldCapture = typeof window.__suiteLabyrinthFatigueStepHandler === 'function'
+              && suiteLabyrinthFatigueIsStepRequest(url, init?.body);
             const startedAt = shouldCapture ? Date.now() : 0;
             const request = originalFetch.apply(this, arguments);
-            if(shouldCapture){
+            if(shouldCapture && !capture.promises.has(request)){
+              capture.promises.add(request);
               request.then(response => {
+                if(capture.responses.has(response)) return;
+                capture.responses.add(response);
                 response.clone().text().then(text => {
                   let data = null;
                   try{ data = JSON.parse(text); }catch(e){}
@@ -18944,13 +19991,7 @@
               });
             }
             return request;
-          }
-          try{ Object.defineProperty(hookedFetch, '__suiteLabyrinthFatigueHooked', { value:true }); }catch(e){}
-          try{ Object.defineProperty(hookedFetch, '__suiteLabyrinthFatigueHookContext', { value:label }); }catch(e){}
-          try{ Object.defineProperty(hookedFetch, '__suiteLabyrinthFatigueOriginal', { value:originalFetch }); }
-          catch(e){ hookedFetch.__suiteLabyrinthFatigueOriginal = originalFetch; }
-          target.fetch = hookedFetch;
-        }
+          }, '__suiteLabyrinthFatigueOriginal', label);
       }catch(error){
         suiteSelfDiagnosticIssue('fatigue', 'step_hook_install_failed', { context:label, error });
       }
@@ -19026,6 +20067,10 @@
         version:2,
         user,
         value:null,
+        limit:10,
+        limitSource:'default',
+        limitConfirmed:false,
+        counterTotalSteps:null,
         skipped:false,
         coord:null,
         updatedAt:0,
@@ -19045,10 +20090,16 @@
       const empty = makeEmptyState();
       if(!data || typeof data !== 'object' || Number(data.version) !== 2) return empty;
       const value = suiteLabyrinthFatigueNumber(data.value);
+      const savedLimit = suiteLabyrinthFatigueLimit(data.limit) || 10;
+      const exceedsLimit = Number.isFinite(value) && value > savedLimit;
       return {
         ...empty,
         user:String(data.user || user),
-        value:Number.isFinite(value) ? Math.max(0, Math.min(10, value)) : null,
+        value:Number.isFinite(value) ? Math.max(0, value) : null,
+        limit:exceedsLimit ? value : savedLimit,
+        limitSource:exceedsLimit ? 'lower_bound' : ['server','observed','lower_bound'].includes(data.limitSource) ? data.limitSource : 'default',
+        limitConfirmed:!exceedsLimit && !!data.limitConfirmed && ['server','observed'].includes(data.limitSource),
+        counterTotalSteps:suiteLabyrinthFatigueNumber(data.counterTotalSteps),
         skipped:!!data.skipped,
         coord:normalizeCoord(data.coord),
         updatedAt:Number(data.updatedAt || 0),
@@ -19068,6 +20119,41 @@
     }
 
     function saveState(){ gmSet(STORAGE_KEY, runtime.state); }
+
+    function syncFatigueLimit(response, previousValue, resetType = '', previousTotalSteps = null){
+      const oldLimit = runtime.state.limit;
+      const oldSource = runtime.state.limitSource;
+      const oldConfirmed = runtime.state.limitConfirmed;
+      const explicitLimit = suiteLabyrinthFatigueLimit(response.fatigue_counter?.limit);
+      const value = suiteLabyrinthFatigueNumber(response.fatigue_counter?.value);
+      const consecutive = Number.isSafeInteger(previousTotalSteps) && Number.isSafeInteger(response.total_steps)
+        && response.total_steps === previousTotalSteps + 1;
+      if(explicitLimit){
+        runtime.state.limit = explicitLimit;
+        runtime.state.limitSource = 'server';
+        runtime.state.limitConfirmed = true;
+      }else if(resetType === 'fatigue' && value === 0 && !response.fatigue_counter?.skipped
+        && consecutive && suiteLabyrinthFatigueLimit(previousValue)){
+        // The site triggers fatigue on the step AFTER the accumulated threshold.
+        // Never learn from a gap, trap, mimic, shield or skipped-counter reset.
+        runtime.state.limit = previousValue;
+        runtime.state.limitSource = 'observed';
+        runtime.state.limitConfirmed = true;
+      }
+      if(Number.isFinite(value) && value > runtime.state.limit){
+        // A higher counter proves the old threshold is stale, not the exact new maximum.
+        runtime.state.limit = value;
+        runtime.state.limitSource = 'lower_bound';
+        runtime.state.limitConfirmed = false;
+      }
+      const changed = oldLimit !== runtime.state.limit || oldSource !== runtime.state.limitSource
+        || oldConfirmed !== runtime.state.limitConfirmed;
+      if(changed) suiteTelemetryLog('fatigue', 'limit_updated', {
+        previousLimit:oldLimit, limit:runtime.state.limit, source:runtime.state.limitSource,
+        confirmed:runtime.state.limitConfirmed, value, previousValue, totalSteps:response.total_steps,
+      });
+      return changed;
+    }
 
     function readCurrentCoord(){
       return normalizeCoord(getPageWindow()?.labyrinthData?.mapData?.current);
@@ -19166,17 +20252,22 @@
         const skippedCounterReset = !!response.fatigue_counter.skipped
           && counterValue === 0
           && Number(previousValue) > 0;
-        let changed = false;
+        let changed = syncFatigueLimit(response, previousValue);
         if(skippedCounterReset){
           if(!runtime.state.skipped){ runtime.state.skipped = true; changed = true; }
         }else if(Number.isFinite(counterValue)){
-          const nextValue = Math.max(0, Math.min(10, counterValue));
+          const nextValue = Math.max(0, counterValue);
           if(runtime.state.value !== nextValue){ runtime.state.value = nextValue; changed = true; }
           const nextSkipped = !!response.fatigue_counter.skipped;
           if(runtime.state.skipped !== nextSkipped){ runtime.state.skipped = nextSkipped; changed = true; }
         }
         if(coord && !sameCoord(runtime.state.coord, coord)){
           runtime.state.coord = coord;
+          changed = true;
+        }
+        const observedCounterStep = Number.isFinite(counterValue) && !skippedCounterReset ? response.total_steps : null;
+        if(runtime.state.counterTotalSteps !== observedCounterStep){
+          runtime.state.counterTotalSteps = observedCounterStep;
           changed = true;
         }
         const accuracyChanged = Number.isFinite(runtime.state.value) && !runtime.cacheExact;
@@ -19199,9 +20290,16 @@
         return changed || accuracyChanged;
       }
 
-      if(runtime.pageStepKey === observedKey) return false;
+      if(runtime.pageStepKey === observedKey || runtime.lastProcessedPageKey === observedKey){
+        runtime.pageStepKey = observedKey;
+        // The site can change an explicit limit without a new move.
+        if(!syncFatigueLimit(response, runtime.state.value)) return false;
+        runtime.state.updatedAt = Date.now();
+        runtime.localUpdateAt = runtime.state.updatedAt;
+        saveState();renderBox();
+        return true;
+      }
       runtime.pageStepKey = observedKey;
-      if(runtime.lastProcessedPageKey === observedKey) return false;
       suiteTelemetryLog('fatigue', 'page_state_fallback_used', {
         counter:response.fatigue_counter,
         event:response.event,
@@ -19273,7 +20371,13 @@
       const observedKey = pageStepKey(response, coord);
       const key = stepKey(response, coord);
       if(runtime.lastProcessedPageKey === observedKey || runtime.state.recentStepKeys.includes(key)){
-        suiteTelemetryLog('fatigue', 'duplicate_step_ignored', { key, response });
+        if(runtime.lastProcessedPageKey === observedKey && suiteLabyrinthFatigueLimit(response.fatigue_counter?.limit)
+          && syncFatigueLimit(response, runtime.state.value)){
+          runtime.state.updatedAt = Date.now();
+          runtime.localUpdateAt = runtime.state.updatedAt;
+          saveState();renderBox();
+        }
+        suiteLabyrinthFatigueRecordDuplicate(key);
         return;
       }
       runtime.lastProcessedPageKey = observedKey;
@@ -19293,13 +20397,16 @@
           response,
         });
       }else if(Number.isFinite(counterValue)){
-        runtime.state.value = Math.max(0, Math.min(10, counterValue));
+        runtime.state.value = Math.max(0, counterValue);
         runtime.state.skipped = !!response.fatigue_counter.skipped;
       }else{
         runtime.state.skipped = false;
       }
 
       const resetType = detectResetEvent(response, previousValue);
+      syncFatigueLimit(response, previousValue, resetType, runtime.state.counterTotalSteps);
+      // A response without a counter breaks the observation chain.
+      runtime.state.counterTotalSteps = Number.isFinite(counterValue) && !skippedCounterReset ? response.total_steps : null;
       const movesBeforeReset = runtime.state.movesSincePrevious;
       if(resetType){
         addResetEvent(resetType, response, coord, movesBeforeReset);
@@ -19334,6 +20441,8 @@
         title:response.title,
         text:response.text,
         fatigueCounter:response.fatigue_counter,
+        fatigueLimit:runtime.state.limit,
+        fatigueLimitConfirmed:runtime.state.limitConfirmed,
         fatigue:response.fatigue,
         stepBack:response.step_back,
         step:response.step,
@@ -19371,6 +20480,9 @@
     suiteTelemetryLog('fatigue', 'module_initialized', {
       version:runtime.state.version,
       value:runtime.state.value,
+      limit:runtime.state.limit,
+      limitSource:runtime.state.limitSource,
+      limitConfirmed:runtime.state.limitConfirmed,
       skipped:runtime.state.skipped,
       coord:runtime.state.coord,
       cacheExact:runtime.cacheExact,
@@ -19379,10 +20491,7 @@
     });
 
     function attachBox(){
-      const arena = document.querySelector('.labyrinth__arena');
-      if(!arena) return false;
-      const arenaStyle = getComputedStyle(arena);
-      if(arenaStyle.position === 'static') arena.style.position = 'relative';
+      if(!document.querySelector('.labyrinth__arena')) return false;
 
       if(!runtime.box){
         const box = document.createElement('div');
@@ -19401,7 +20510,7 @@
         runtime.box = box;
       }
 
-      if(runtime.box.parentElement !== arena) arena.appendChild(runtime.box);
+      if(!suiteAttachLabyrinthOverlay(runtime.box)) return false;
       suitePositionLabyrinthFatigueCounter();
       return true;
     }
@@ -19412,17 +20521,21 @@
       const approxEl = runtime.box.querySelector('[data-lab-fatigue="approx"]');
       const fillEl = runtime.box.querySelector('[data-lab-fatigue="fill"]');
       const value = suiteLabyrinthFatigueNumber(runtime.state.value);
-      const percent = Number.isFinite(value) ? Math.max(0, Math.min(100, value * 10)) : 0;
+      const limit = suiteLabyrinthFatigueLimit(runtime.state.limit) || 10;
+      const approximate = !runtime.cacheExact || !runtime.state.limitConfirmed;
+      const percent = Number.isFinite(value) ? Math.max(0, Math.min(100, Math.round(value / limit * 1000) / 10)) : 0;
       if(percentEl) percentEl.textContent = Number.isFinite(value) ? `${percent}%` : '—';
-      if(approxEl) approxEl.hidden = !Number.isFinite(value) || runtime.cacheExact;
+      if(approxEl) approxEl.hidden = !Number.isFinite(value) || !approximate;
       if(fillEl) fillEl.style.width = `${percent}%`;
-      runtime.box.classList.toggle('is-ready', percent >= 100);
-      runtime.box.classList.toggle('is-approximate', Number.isFinite(value) && !runtime.cacheExact);
+      runtime.box.classList.toggle('is-ready', percent >= 100 && !approximate);
+      runtime.box.classList.toggle('is-approximate', Number.isFinite(value) && approximate);
       const hints = [];
+      hints.push(`Порог усталости: ${limit}${runtime.state.limitConfirmed ? '' : ' (уточняется)'}.`);
+      if(Number.isFinite(value)) hints.push(`Счётчик: ${value}.`);
       if(!Number.isFinite(value)) hints.push('Счётчик появится после первого хода.');
       if(Number.isFinite(value) && !runtime.cacheExact) hints.push('Сохранённое значение получено в другой комнате и может быть неточным.');
       if(runtime.state.skipped) hints.push('Последний ход не добавил усталость.');
-      if(percent >= 100) hints.push('Следующий засчитанный ход вызовет усталость.');
+      if(percent >= 100 && !approximate) hints.push('Следующий засчитанный ход вызовет усталость.');
       runtime.box.title = hints.join('\n');
       suitePositionLabyrinthFatigueCounter();
     }
@@ -19619,38 +20732,56 @@
     }, 1500);
   }
 
+  function suiteAttachLabyrinthOverlay(box){
+    const arena = document.querySelector('.labyrinth__arena');
+    if(!arena || !box) return false;
+    // The viewport is below the title/zoom controls, but outside the transformed map.
+    const host = arena.querySelector('#labyrinthMapViewport, .labyrinth-map-viewport') || arena;
+    if(getComputedStyle(host).position === 'static') host.style.position = 'relative';
+    if(box.parentElement !== host) host.appendChild(box);
+    if(!box.__suiteMapPointerBound){
+      for(const type of ['pointerdown','mousedown','touchstart','dblclick']){
+        box.addEventListener(type,event=>event.stopPropagation());
+      }
+      box.__suiteMapPointerBound = true;
+    }
+    return true;
+  }
+
   function suitePositionLabyrinthFatigueCounter(){
     const fatigue = document.getElementById('suite-lab-fatigue-counter');
-    if(!fatigue) return;
-
     const emission = cfg.modLabyrinthEmission ? document.getElementById('suite-emission-timer') : null;
+    if(!fatigue && !emission) return;
     const hasEmission = !!(emission && emission.isConnected && getComputedStyle(emission).display !== 'none');
     const isMobile = typeof window.matchMedia === 'function' && window.matchMedia('(max-width:760px)').matches;
-    if(isMobile){
-      const emissionHeight = hasEmission
-        ? Math.ceil(emission.getBoundingClientRect().height || emission.offsetHeight || 80)
-        : 0;
-      fatigue.style.top = hasEmission ? `${12 + emissionHeight + 12}px` : '12px';
-      fatigue.style.right = '12px';
-      return;
+    if(hasEmission){emission.style.top='12px';emission.style.right='12px';}
+    if(fatigue){
+      fatigue.style.top='12px';fatigue.style.right='12px';
+      if(hasEmission){
+        const emissionWidth=Math.ceil(emission.getBoundingClientRect().width || 172);
+        const fatigueWidth=Math.ceil(fatigue.getBoundingClientRect().width || 180);
+        const hostWidth=fatigue.parentElement?.clientWidth || window.innerWidth;
+        if(!isMobile && emissionWidth+fatigueWidth+36<=hostWidth){
+          fatigue.style.right=`${24+emissionWidth}px`;
+        }else{
+          fatigue.style.top=`${24+Math.ceil(emission.getBoundingClientRect().height || 80)}px`;
+        }
+      }
     }
-
-    fatigue.style.top = '12px';
-    if(!hasEmission){
-      fatigue.style.right = '12px';
-      return;
-    }
-
-    const emissionWidth = Math.ceil(emission.getBoundingClientRect().width || emission.offsetWidth || 172);
-    const fatigueWidth = Math.ceil(fatigue.getBoundingClientRect().width || fatigue.offsetWidth || 180);
-    const hostWidth = fatigue.parentElement?.getBoundingClientRect().width || window.innerWidth;
-    if(emissionWidth + fatigueWidth + 36 <= hostWidth){
-      fatigue.style.top = '12px';
-      fatigue.style.right = `${12 + emissionWidth + 12}px`;
-    }else{
-      const emissionHeight = Math.ceil(emission.getBoundingClientRect().height || emission.offsetHeight || 80);
-      fatigue.style.top = `${12 + emissionHeight + 12}px`;
-      fatigue.style.right = '12px';
+    // On narrow maps the site's own red emission banner occupies the same corner height.
+    const panels=[hasEmission?emission:null,fatigue].filter(el=>el && getComputedStyle(el).display!=='none');
+    const host=panels[0]?.parentElement;
+    const banner=host?.querySelector('.labyrinth-emission.is-active .labyrinth-emission__banner');
+    if(banner){
+      const rect=banner.getBoundingClientRect();
+      const overlaps=rect.width && rect.height && panels.some(el=>{
+        const r=el.getBoundingClientRect();
+        return r.left<rect.right+12 && r.right>rect.left-12 && r.top<rect.bottom+12 && r.bottom>rect.top;
+      });
+      if(overlaps){
+        const shift=Math.max(0,rect.bottom+12-Math.min(...panels.map(el=>el.getBoundingClientRect().top)));
+        for(const panel of panels)panel.style.top=`${parseFloat(panel.style.top)+shift}px`;
+      }
     }
   }
 
@@ -19709,11 +20840,7 @@
     const subEl = box.querySelector('.suite-emission-sub');
 
     function attachTimer(){
-      const arena = document.querySelector('.labyrinth__arena');
-      if(!arena) return false;
-      const arenaStyle = getComputedStyle(arena);
-      if(arenaStyle.position === 'static') arena.style.position = 'relative';
-      if(box.parentElement !== arena) arena.appendChild(box);
+      if(!suiteAttachLabyrinthOverlay(box)) return false;
       suitePositionLabyrinthFatigueCounter();
       return true;
     }
