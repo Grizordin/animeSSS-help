@@ -42,7 +42,8 @@ let checks=0;const ok=(v,m)=>{assert.ok(v,m);checks++;};
     const r=x=>{const b=x.getBoundingClientRect();return {left:b.left,right:b.right,top:b.top,bottom:b.bottom};};
     const a=r(f),b=r(e),c=r(v),bar=r(document.querySelector('.v2-mapbar')),banner=r(document.querySelector('.labyrinth-emission__banner'));
     const overlap=(x,y)=>x.left<y.right&&x.right>y.left&&x.top<y.bottom&&x.bottom>y.top;
-    return {mounted:f.parentElement===v&&e.parentElement===v,below:a.top>=bar.bottom+11&&b.top>=bar.bottom+11,inside:[a,b].every(x=>x.left>=c.left&&x.right<=c.right),panels:!overlap(a,b),banner:!overlap(a,banner)&&!overlap(b,banner),value:f.querySelector('[data-lab-fatigue="percent"]').textContent,timer:e.querySelector('.suite-emission-value').textContent};
+    const layer=document.getElementById('suite-labyrinth-overlays');
+    return {mounted:f.parentElement===layer&&e.parentElement===layer&&layer.parentElement===v.parentElement,below:a.top>=bar.bottom+11&&b.top>=bar.bottom+11,inside:[a,b].every(x=>x.left>=c.left&&x.right<=c.right),panels:!overlap(a,b),banner:!overlap(a,banner)&&!overlap(b,banner),value:f.querySelector('[data-lab-fatigue="percent"]').textContent,timer:e.querySelector('.suite-emission-value').textContent};
    });
    for(const field of ['mounted','below','inside','panels','banner'])ok(result[field],field+' at '+width);
    ok(result.value==='30%','fatigue value unchanged '+width);ok(/^\d{2}:\d{2}$/.test(result.timer),'timer ticks '+width);
@@ -55,27 +56,62 @@ let checks=0;const ok=(v,m)=>{assert.ok(v,m);checks++;};
    return {bubbled,opened:modalOpened,stable:before===f.getBoundingClientRect().top};
   });
   ok(stable.bubbled===0,'details button does not initiate map panning');ok(stable.opened===1,'details button still works');ok(stable.stable,'map zoom does not move panels');
+  await page.setViewportSize({width:1280,height:900});
+  const regression=await page.evaluate(()=>{
+   const arena=document.querySelector('.labyrinth__arena'),viewport=document.getElementById('labyrinthMapViewport'),bar=document.querySelector('.v2-mapbar');
+   document.querySelector('.labyrinth-emission').classList.remove('is-active');
+   const f=document.getElementById(ROOT_ID),e=document.getElementById('suite-emission-timer');
+   const anchored=()=>{
+    suitePositionLabyrinthFatigueCounter();
+    const a=arena.getBoundingClientRect(),b=bar.getBoundingClientRect(),r=e.getBoundingClientRect(),s=f.getBoundingClientRect();
+    return Math.abs(r.top-b.bottom-12)<1&&Math.abs(a.right-arena.clientLeft-r.right-12)<1&&Math.abs(s.top-r.top)<1&&s.right+11<=r.left;
+   };
+   const base=anchored();
+   // Model map-centering CSS and pan/zoom applied to the viewport, not just its map child.
+   const conflicting=document.createElement('style');conflicting.textContent='.labyrinth-map-viewport > div{left:50%!important;top:50%!important;transform:translate(-50%,-50%)!important}';document.head.append(conflicting);
+   viewport.style.transform='translate(85px,70px) scale(.7)';
+   const transformed=anchored();
+   // Repair positional styles retained from a previous parent or another script.
+   for(const box of [f,e]){box.style.left='50%';box.style.transform='translate(-50%,-50%)';}
+   const stale=anchored();
+   conflicting.remove();viewport.style.transform='';bar.style.height='120px';const resized=anchored();bar.style.height='';
+   bar.style.display='none';suitePositionLabyrinthFatigueCounter();
+   const folded=Math.abs(e.getBoundingClientRect().top-document.getElementById('lm-arena-bar').getBoundingClientRect().bottom-12)<1;
+   bar.style.display='';const unfolded=anchored();
+   const background=document.elementFromPoint(arena.getBoundingClientRect().left+30,bar.getBoundingClientRect().bottom+150);
+   return {base,transformed,stale,resized,folded,unfolded,clickThrough:background?.id!=='suite-labyrinth-overlays'};
+  });
+  for(const [name,value] of Object.entries(regression))ok(value,'header anchored: '+name);
   const toggles=await page.evaluate(()=>{
    cfg.modLabyrinthEmission=false;cleanupLabyrinthEmission();suitePositionLabyrinthFatigueCounter();
    const solo=runtime.box.style.right==='12px'&&!document.getElementById('suite-emission-timer');
    cfg.modLabyrinthEmission=true;initLabyrinthEmission();runtime.box.remove();runtime.box=null;
    return solo;
   });ok(toggles,'emission can be disabled independently');await page.waitForTimeout(800);
-  ok(await page.locator('#labyrinthMapViewport > #suite-emission-timer').count()===1,'emission works alone');
+  ok(await page.locator('#suite-labyrinth-overlays > #suite-emission-timer').count()===1,'emission works alone');
   await page.evaluate(()=>{attachBox();renderBox();document.querySelector('.labyrinth-emission').classList.remove('is-active');suitePositionLabyrinthFatigueCounter();});
   ok(await page.locator('#suite-emission-timer').evaluate(e=>e.style.top==='12px'),'banner clearance removed when native emission ends');
   await page.evaluate(()=>{
    const old=document.getElementById('labyrinthMapViewport'),replacement=old.cloneNode(true);
    replacement.querySelectorAll('#suite-emission-timer,#suite-lab-fatigue-counter').forEach(el=>el.remove());old.replaceWith(replacement);attachBox();renderBox();
   });await page.waitForTimeout(600);
-  ok(await page.locator('#labyrinthMapViewport > #suite-emission-timer').count()===1,'emission reattaches after AJAX replacement');
-  ok(await page.locator('#labyrinthMapViewport > #suite-lab-fatigue-counter').count()===1,'fatigue reattaches without duplicates');
+  ok(await page.locator('#suite-labyrinth-overlays > #suite-emission-timer').count()===1,'emission survives viewport replacement');
+  ok(await page.locator('#suite-labyrinth-overlays > #suite-lab-fatigue-counter').count()===1,'fatigue survives viewport replacement without duplicates');
+  await page.evaluate(()=>{
+   const arena=document.querySelector('.labyrinth__arena'),replacement=arena.cloneNode(true);
+   replacement.querySelector('#suite-labyrinth-overlays')?.remove();arena.replaceWith(replacement);attachBox();renderBox();
+  });await page.waitForTimeout(600);
+  ok(await page.locator('.labyrinth__arena > #suite-labyrinth-overlays > #suite-emission-timer').count()===1,'emission reattaches after entire arena replacement');
+  ok(await page.locator('.labyrinth__arena > #suite-labyrinth-overlays > #suite-lab-fatigue-counter').count()===1,'fatigue reattaches after entire arena replacement');
+  await page.setViewportSize({width:390,height:900});await page.evaluate(()=>suitePositionLabyrinthFatigueCounter());
   await page.screenshot({path:path.join(__dirname,'..','tmp','labyrinth-overlays-mobile.png')});
   await page.setViewportSize({width:1280,height:800});await page.evaluate(()=>suitePositionLabyrinthFatigueCounter());
   await page.screenshot({path:path.join(__dirname,'..','tmp','labyrinth-overlays-desktop.png')});
   await page.evaluate(()=>{document.getElementById('labyrinthMapViewport').remove();attachBox();});await page.waitForTimeout(600);
-  ok(await page.locator('.labyrinth__arena > #suite-emission-timer').count()===1,'legacy arena fallback for emission');
-  ok(await page.locator('.labyrinth__arena > #suite-lab-fatigue-counter').count()===1,'legacy arena fallback for fatigue');
+  ok(await page.locator('.labyrinth__arena > #suite-labyrinth-overlays > #suite-emission-timer').count()===1,'legacy arena fallback for emission');
+  ok(await page.locator('.labyrinth__arena > #suite-labyrinth-overlays > #suite-lab-fatigue-counter').count()===1,'legacy arena fallback for fatigue');
+  await page.evaluate(()=>{runtime.box.remove();cfg.modLabyrinthEmission=false;cleanupLabyrinthEmission();});
+  ok(await page.locator('#suite-labyrinth-overlays').count()===0,'empty layer removed after both modules stop');
   console.log('LABYRINTH_OVERLAY_LAYOUT_OK '+checks+' checks');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});
