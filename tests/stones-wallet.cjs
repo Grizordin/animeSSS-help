@@ -45,7 +45,7 @@ let passed=0;const check=(value,message)=>{if(!value)throw Error(message);passed
    return page;
   }
   const page=await setup();
-  const parserResults=await page.evaluate('(()=>{'+['parseDateSafe','parseTransactions','calculateTotals'].map(extract).join('\n')+`
+  const parserResults=await page.evaluate('(()=>{'+['parseDateSafe','parseTransactions','isNonPackExpense','calculateTotals'].map(extract).join('\n')+`
    let passed=0;const check=(v,m)=>{if(!v)throw Error(m);passed++;};
    const html=${JSON.stringify(historyHTML)},rows=parseTransactions(html);
    check(rows.length===20,'all 20 redesigned operations recognized');
@@ -77,7 +77,7 @@ let passed=0;const check=(value,message)=>{if(!value)throw Error(message);passed
    return passed;
   })()`);
   passed+=parserResults;
-  passed+=await page.evaluate('(async()=>{'+['calculateTotals','updateCacheIncremental'].map(extract).join('\n')+`
+  passed+=await page.evaluate('(async()=>{'+['isNonPackExpense','calculateTotals','updateCacheIncremental'].map(extract).join('\n')+`
    let passed=0;const check=(v,m)=>{if(!v)throw Error(m);passed++;};
    const CACHE_KEY='cache',DATE_KEY='date',LAST_UPDATE_KEY='updated',DAY_MS=86400000;
    const old=[{amount:-100,date:100,description:'Подношение'},{amount:-1600,date:90,description:'Открытие паков карточек'}];
@@ -129,7 +129,63 @@ let passed=0;const check=(value,message)=>{if(!value)throw Error(message);passed
    });
    check(geometry.fits,'no horizontal overflow '+width);check(geometry.all,'controls stay in card '+width);check(geometry.cols===(width>850?3:width>520?2:1),'responsive columns '+width);
   }
-  check(await page.locator('.cv-stones-panel input,.cv-stones-panel button,.cv-stones-wallet__controls').count()===0,'manual input, add and reset removed');
+  check(await page.locator('.cv-stones-panel input,.cv-stones-panel button:not(.cv-stones-history-btn),.cv-stones-wallet__controls').count()===0,'manual input, add and reset removed');
+  const beforeHistory=await page.evaluate(()=>({requests:requests.length,store:JSON.stringify(store)}));
+  await page.click('.cv-stones-history-btn');
+  await page.waitForSelector('.cv-stones-history__row');
+  check(await page.locator('.cv-stones-history__row').count()===1,'history includes only non-pack expenses');
+  check(await page.locator('.cv-stones-history__amount').textContent()==='−3\u00a0000','history amount');
+  check(await page.locator('.cv-stones-history__description').textContent()==='Подношение','history description');
+  check(await page.locator('.cv-stones-history').evaluate(d=>d.open&&d.matches(':modal')),'accessible native modal');
+  check(await page.locator('.cv-stones-history button').count()===1,'only close button, no pagination');
+  await page.keyboard.press('Escape');
+  check(await page.locator('.cv-stones-history').count()===0,'Escape closes history');
+  check(await page.evaluate(()=>JSON.stringify(store))===beforeHistory.store,'opening history leaves storage unchanged');
+  check(await page.evaluate(()=>requests.length)===beforeHistory.requests,'opening history makes no requests');
+  // A large saved ledger: scrolling appends rows without paging or fetching.
+  await page.evaluate(()=>{
+   const date=new Date(2026,9,23,7,31,42).getTime();
+   store.animestars_transactions_cache=JSON.stringify([
+    {amount:-1600,date:date+2000,description:'  Открытие   паков карточек  '},
+    {amount:900,date:date+1000,description:'Награда'},
+    ...Array.from({length:121},(_,i)=>({amount:-i-1,date:date-i*1000,description:i===0?'<img src=x onerror="window.injected=true">':i===120?'':('Трата '+i+' '+ 'длинноеописание'.repeat(8))}))
+   ].reverse());
+  });
+  await page.click('.cv-stones-history-btn');
+  await page.waitForSelector('.cv-stones-history__row');
+  check(await page.locator('.cv-stones-history__row').count()===50,'long ledger initially renders only 50 rows');
+  check(await page.locator('.cv-stones-history__date').first().textContent()==='23.10.2026 07:31:42','site wall-clock timestamp preserved with seconds and descending order');
+  check(await page.locator('.cv-stones-history img').count()===0,'description rendered as text, not executable HTML');
+  check((await page.locator('.cv-stones-history__summary').textContent()).includes('121 записей'),'summary counts all expenses, excludes packs and income');
+  for(const count of [100,121]){
+   await page.locator('.cv-stones-history__list').evaluate(el=>el.scrollTop=el.scrollHeight);
+   await page.waitForFunction(n=>document.querySelectorAll('.cv-stones-history__row').length===n,count);
+   check(true,'scroll appended rows up to '+count);
+  }
+  check(await page.locator('.cv-stones-history__description').last().textContent()==='Без описания','missing description fallback');
+  await page.addStyleTag({content:await page.evaluate('(()=>{'+extract('suiteBuildLightThemeCss')+';return suiteBuildLightThemeCss();})()')});
+  for(const dark of [false,true])for(const width of [1366,390,320]){
+   await page.setViewportSize({width,height:800});
+   await page.evaluate(dark=>document.body.classList.toggle('dt-is-active',dark),dark);
+   const g=await page.locator('.cv-stones-history').evaluate(d=>{
+    const r=d.getBoundingClientRect(),list=d.querySelector('.cv-stones-history__list');
+    return {fits:r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight&&list.scrollWidth<=list.clientWidth,bg:getComputedStyle(d).backgroundColor};
+   });
+   check(g.fits,'history fits '+width+' dark='+dark);
+   check(g.bg===(dark?'rgb(27, 35, 37)':'rgb(255, 255, 255)'),'history theme '+width+' dark='+dark);
+  }
+  if(process.env.STONES_SCREENSHOTS){
+   fs.mkdirSync(path.join(__dirname,'..','output','stones-wallet'),{recursive:true});
+   await page.locator('.cv-stones-history__list').evaluate(el=>el.scrollTop=0);
+   await page.screenshot({path:path.join(__dirname,'..','output','stones-wallet','history-mobile.png')});
+   await page.setViewportSize({width:1366,height:900});
+   await page.evaluate(()=>document.body.classList.remove('dt-is-active'));
+   await page.screenshot({path:path.join(__dirname,'..','output','stones-wallet','history-light.png')});
+  }
+  await page.click('[data-history="close"]');
+  check(await page.locator('.cv-stones-history').count()===0,'close button removes history');
+  check(await page.evaluate(()=>requests.length)===beforeHistory.requests,'scroll and theme changes make no requests');
+  await page.evaluate(saved=>Object.assign(store,JSON.parse(saved)),beforeHistory.store);
   check(await page.evaluate(()=>store.nonPackSpentStones)==='12500','old manual value preserved but unused');
   await page.evaluate(()=>{window.mode='ok';document.querySelector('.cv-stones-wallet__refresh').click();});
   await page.waitForFunction(()=>document.querySelector('.cv-stones-wallet__refresh').disabled===false);
@@ -150,9 +206,12 @@ let passed=0;const check=(value,message)=>{if(!value)throw Error(message);passed
   check(await page.evaluate(()=>JSON.parse(store.animestars_transactions_cache).length)===20,'new history passes complete recount and persists');
   check((await page.locator('.spent-diamonds>span').textContent()).replace(/\s/g,'')==='−32000','new history updates displayed spent total');
   check(await page.locator('.cv-stones-panel__value').textContent()==='0','pack-only history resets automatic subtotal');
+  await page.click('.cv-stones-history-btn');
+  await page.waitForFunction(()=>document.querySelector('.cv-stones-history__list')?.textContent.includes('нет трат'));
+  check(await page.locator('.cv-stones-history__row').count()===0,'pack-only history shows empty state');
   check(await page.evaluate(()=>store.nonPackSpentStones)==='12500','recount does not overwrite old manual value');
   await page.evaluate(()=>cleanupStonesUi());
-  check(await page.locator('.cv-stones-wallet,.cv-stones-panel,.cv-stones-progress,#cv-stones-style').count()===0,'cleanup removes all module UI');
+  check(await page.locator('.cv-stones-wallet,.cv-stones-panel,.cv-stones-progress,.cv-stones-history,#cv-stones-style').count()===0,'cleanup removes all module UI including open modal');
   check(await page.locator('.ps-wallet').evaluate(e=>e.outerHTML)===result.wallet,'native wallet intact after cleanup');
   await page.evaluate(()=>{window.mode='cached';initStones();});await page.waitForFunction(()=>document.querySelector('.cv-stones-wallet__refresh')?.disabled===false);
   check(await page.locator('.cv-stones-wallet').count()===1,'re-enable works');
@@ -166,7 +225,12 @@ let passed=0;const check=(value,message)=>{if(!value)throw Error(message);passed
   check(await old.locator('.cv-stones-summary-row .ncard-shop__text-main').count()===1,'legacy layout still mounts');
   check(await old.locator('.cv-stones-floating-btn').count()===1,'legacy refresh retained');
   check(await old.locator('.cv-stones-panel__value').textContent()==='3\u00a0000','legacy automatic subtotal');
-  check(await old.locator('.cv-stones-panel input,.cv-stones-panel button').count()===0,'legacy manual controls also removed');
+  check(await old.locator('.cv-stones-panel input,.cv-stones-panel button:not(.cv-stones-history-btn)').count()===0,'legacy manual controls also removed');
+  // Legacy fixture deliberately stores 9999px coordinates and stubs dragging.
+  // Place it on screen before exercising the new button with a real click.
+  await old.locator('.cv-stones-panel').evaluate(el=>Object.assign(el.style,{left:'20px',top:'20px'}));
+  await old.click('.cv-stones-history-btn');await old.waitForSelector('.cv-stones-history__row');
+  check(await old.locator('.cv-stones-history__description').textContent()==='Подношение','history works in legacy layout too');
   await old.evaluate(()=>cleanupStonesUi());check(await old.locator('.ncard-shop__text > .ncard-shop__text-main').count()===1,'legacy caption restored');await old.close();
   const held=await setup(native,'hold');await held.waitForFunction(()=>!!window.release);
   check(await held.locator('.cv-stones-wallet__refresh').isDisabled(),'initial scan shares refresh lock');

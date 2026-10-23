@@ -2701,6 +2701,12 @@
     rule('.suite-gacha-history-card__value.is-unknown,.suite-lab-fatigue-approx','color:#805000!important;');
     rule('.aw-compact-name,.suite-gacha-history-section-title,.suite-gacha-history-day__date,.suite-suggestion-meta,.suite-suggestion-empty,#missing-panel .item span,.suite-lab-fatigue-head,.suite-emission-head,.cv-stones-panel__value','color:#125875!important;text-shadow:none!important;');
     rule('.suite-suggestion-meta',soft);
+    rule('.cv-stones-history',surface+'color-scheme:light;');
+    rule('.cv-stones-history__head',blue);
+    rule('.cv-stones-history__summary,.cv-stones-history__date','color:#516477!important;');
+    rule('.cv-stones-history__amount','color:#9c2540!important;');
+    rule('.cv-stones-history__row','border-color:#c7d5df!important;');
+    rule('.cv-stones-history-btn,.cv-stones-history button',blue);
     rule('.suite-suggestion-author,.suite-author-badge',blue);
     rule('.suite-suggestion-author a,.suite-author-badge a','color:inherit!important;border-bottom-color:currentColor!important;');
     rule('.suite-author-badge.suite-pending',soft);
@@ -7508,6 +7514,23 @@
       .cv-stones-wallet__refresh:hover{background:#31594e;border-color:#609f8e;transform:none;}
       .cv-stones-wallet :is(button,input):focus-visible{outline:2px solid #87d9c4;outline-offset:3px;}
       .cv-stones-wallet button:disabled{opacity:.5;cursor:wait;}
+      .cv-stones-history-btn,.cv-stones-history button{box-sizing:border-box;border:1px solid #3c6059;border-radius:9px;background:#263f39;color:#d8f5ed;padding:8px 12px;font:600 12px/1.3 'Segoe UI',Arial,sans-serif;cursor:pointer;}
+      .cv-stones-history-btn{align-self:center;margin:10px 12px 0;}
+      .cv-stones-wallet .cv-stones-history-btn{margin:12px 0 0;}
+      .cv-stones-history{box-sizing:border-box;width:min(760px,calc(100vw - 24px));max-width:none;max-height:calc(100dvh - 24px);padding:0;border:1px solid #344647;border-radius:16px;background:#1b2325;color:#e5eeee;font:14px/1.5 'Segoe UI',Arial,sans-serif;box-shadow:0 20px 65px #0009;overflow:hidden;}
+      .cv-stones-history[open]{display:flex;flex-direction:column;}
+      .cv-stones-history::backdrop{background:#0009;}
+      .cv-stones-history__head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;background:#253b37;flex-shrink:0;}
+      .cv-stones-history__head h2{margin:0;color:inherit;font:700 16px/1.3 'Segoe UI',Arial,sans-serif;}
+      .cv-stones-history__summary{margin:0;padding:12px 18px;color:#b5cbcd;font-size:12px;flex-shrink:0;}
+      .cv-stones-history__list{overflow:auto;overscroll-behavior:contain;min-height:0;padding:0 18px;}
+      .cv-stones-history__row{display:grid;grid-template-columns:110px 155px minmax(0,1fr);gap:12px;padding:12px 0;border-top:1px solid #344647;align-items:start;}
+      .cv-stones-history__amount{color:#ff9daa;font-weight:700;overflow-wrap:anywhere;}
+      .cv-stones-history__date{color:#b5cbcd;font-size:12px;}
+      .cv-stones-history__description{white-space:pre-wrap;overflow-wrap:anywhere;min-width:0;}
+      .cv-stones-history button:disabled{opacity:.45;cursor:default;}
+      .cv-stones-history :focus-visible{outline:2px solid #87d9c4;outline-offset:2px;}
+      @media(max-width:520px){.cv-stones-history__row{grid-template-columns:minmax(0,1fr) auto;gap:6px 12px;}.cv-stones-history__description{grid-column:1/-1;}.cv-stones-history__head{padding:12px;}.cv-stones-history__list{padding:0 12px;}}
       .cv-stones-wallet .cv-stones-progress{position:static;max-width:none;margin-top:12px;padding:0;background:none;border:0;box-shadow:none;color:#b5cbcd;font:inherit;font-size:12px;}
       @media(max-width:850px){.cv-stones-wallet__grid{grid-template-columns:repeat(2,minmax(0,1fr));}.cv-stones-wallet .cv-stones-panel{grid-column:1/-1;}}
       @media(max-width:520px){
@@ -7612,13 +7635,16 @@
     }
   }
 
+  function isNonPackExpense(tr) {
+    return !!tr && tr.amount < 0 && String(tr.description || '').replace(/\s+/g, ' ').trim() !== 'Открытие паков карточек';
+  }
+
   function calculateTotals(transactions, totals = { earned: 0, spent: 0, nonPackSpent: 0 }) {
     for (const tr of transactions) {
       if (tr.amount > 0) totals.earned += tr.amount;
       else if (tr.amount < 0) {
         totals.spent += -tr.amount;
-        const description = String(tr.description || '').replace(/\s+/g, ' ').trim();
-        if (description !== 'Открытие паков карточек') totals.nonPackSpent += -tr.amount;
+        if (isNonPackExpense(tr)) totals.nonPackSpent += -tr.amount;
       }
     }
     return totals;
@@ -7792,6 +7818,53 @@
     };
   }
 
+  async function openStonesExpenseHistory() {
+    if(document.querySelector('.cv-stones-history'))return;
+    const dialog=document.createElement('dialog');
+    dialog.className='cv-stones-history';
+    dialog.setAttribute('aria-labelledby','cv-stones-history-title');
+    dialog.innerHTML='<div class="cv-stones-history__head"><h2 id="cv-stones-history-title">Траты не на паки</h2><button type="button" data-history="close" autofocus aria-label="Закрыть историю">✕</button></div><p class="cv-stones-history__summary" role="status">Загрузка сохранённой истории…</p><div class="cv-stones-history__list" tabindex="0" aria-label="Список трат"></div>';
+    const close=()=>{dialog.close();dialog.remove();};
+    dialog.querySelector('[data-history="close"]').addEventListener('click',close);
+    dialog.addEventListener('cancel',event=>{event.preventDefault();close();});
+    dialog.addEventListener('click',event=>{
+      if(event.target!==dialog)return;
+      const r=dialog.getBoundingClientRect();
+      if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)close();
+    });
+    document.body.appendChild(dialog);
+    dialog.showModal();
+    const stored=await loadJSON(CACHE_KEY,[]);
+    const rows=(Array.isArray(stored)?stored:[]).filter(isNonPackExpense).sort((a,b)=>b.date-a.date);
+    if(!dialog.isConnected)return;
+    const summary=dialog.querySelector('.cv-stones-history__summary');
+    const list=dialog.querySelector('.cv-stones-history__list');
+    let shown=0;
+    const total=calculateTotals(rows).nonPackSpent.toLocaleString('ru-RU');
+    summary.textContent=`Сохранённая история на момент открытия · ${rows.length} записей · ${total} камней. Дата и время — как в истории сайта.`;
+    function appendRows(){
+      const batch=rows.slice(shown,shown+50),fragment=document.createDocumentFragment();
+      for(const tr of batch){
+        const row=document.createElement('div');row.className='cv-stones-history__row';
+        const amount=document.createElement('span');amount.className='cv-stones-history__amount';amount.textContent='−'+(-tr.amount).toLocaleString('ru-RU');
+        const date=document.createElement('span');date.className='cv-stones-history__date';
+        // Existing cache uses local Date construction for site wall-clock values.
+        // Read the same components back; converting to another zone would shift them.
+        const d=new Date(tr.date),pad=n=>String(n).padStart(2,'0');
+        date.textContent=Number.isFinite(d.getTime()) ? `${pad(d.getDate())}.${pad(d.getMonth()+1)}.${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}` : 'Дата неизвестна';
+        const description=document.createElement('span');description.className='cv-stones-history__description';description.textContent=String(tr.description || '').trim() || 'Без описания';
+        row.append(amount,date,description);fragment.appendChild(row);
+      }
+      shown+=batch.length;
+      list.appendChild(fragment);
+    }
+    list.addEventListener('scroll',()=>{
+      if(shown<rows.length && list.scrollTop+list.clientHeight>=list.scrollHeight-200)appendRows();
+    },{passive:true});
+    appendRows();
+    if(!rows.length)list.textContent='В сохранённой истории нет трат не на паки. Для обновления используйте «Пересчитать историю».';
+  }
+
   async function main() {
     try {
       const wallet = document.querySelector('.ps-wallet');
@@ -7908,6 +7981,11 @@
 
       extraBox.appendChild(totalWrapper);
       extraBox.title = 'Все списания из истории, кроме «Открытие паков карточек». Уже входят в общие траты.';
+      const historyBtn=document.createElement('button');
+      historyBtn.type='button';historyBtn.className='cv-stones-history-btn';
+      historyBtn.textContent='История трат';
+      historyBtn.addEventListener('click',openStonesExpenseHistory);
+      extraBox.appendChild(historyBtn);
 
       if(walletSummary){
         extraTitle.classList.add('cv-stones-wallet__label');
@@ -7954,6 +8032,7 @@
   }
 
   function cleanupStonesUi(){
+    document.querySelectorAll('.cv-stones-history').forEach(el=>{el.close();el.remove();});
     document.querySelectorAll('.cv-stones-wallet').forEach(el=>el.remove());
     const container = document.querySelector('.ncard-shop__text.lootbox__descr.d-flex.fd-column.r-gap-20');
     const captionBlock = container?.querySelector('.ncard-shop__text-main.lootbox__descr-section.ta-center');
