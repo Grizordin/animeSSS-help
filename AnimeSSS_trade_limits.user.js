@@ -781,6 +781,19 @@
   .astl-mark{display:flex;align-items:center;justify-content:center;gap:5px;min-height:16px;margin:4px 0 0;font:600 11px/16px system-ui;color:#e0e8e4;width:100%}
   .astl-dot{display:block;width:7px;height:7px;border-radius:50%;box-shadow:0 0 0 1px #ffffff26}
   .astl-dot.green{background:#4cdd96}.astl-dot.red{background:#ff6d82}.astl-dot.yellow{background:#ffd35d}
+  /* The site removes all three dark-theme markers for its light theme.
+     CSS reacts immediately; no observer, polling or requests are needed.
+     Scope paint/text to colored tiles: awakened owners retain native fills. */
+  body:not(.dt-is-active):not(.dle_theme_dark):not([data-theme="dark"]) .astl-tile.astl-green{background:linear-gradient(135deg,#d7efdf,#edf8f1)!important;--astl-base:#d7efdf}
+  body:not(.dt-is-active):not(.dle_theme_dark):not([data-theme="dark"]) .astl-tile.astl-yellow{background:linear-gradient(135deg,#fff0b8,#fff8df)!important;--astl-base:#fff0b8}
+  body:not(.dt-is-active):not(.dle_theme_dark):not([data-theme="dark"]) .astl-tile.astl-red{background:linear-gradient(135deg,#f8d9df,#fff0f2)!important;--astl-base:#f8d9df}
+  body:not(.dt-is-active):not(.dle_theme_dark):not([data-theme="dark"]) .astl-tile.astl-checking{background:linear-gradient(110deg,var(--astl-base,#d7efdf),#f7c786,var(--astl-base,#d7efdf))!important;background-size:220% 100%!important}
+  body:not(.dt-is-active):not(.dle_theme_dark):not([data-theme="dark"]) .astl-tile:is(.astl-green,.astl-yellow,.astl-red,.astl-checking),
+  body:not(.dt-is-active):not(.dle_theme_dark):not([data-theme="dark"]) .astl-tile:is(.astl-green,.astl-yellow,.astl-red,.astl-checking) :is(.card-show__owner-name,.astl-mark){color:#202b35!important}
+  body:not(.dt-is-active):not(.dle_theme_dark):not([data-theme="dark"]) .astl-tile:is(.astl-green,.astl-yellow,.astl-red,.astl-checking) .astl-dot.green{background:#15824f}
+  body:not(.dt-is-active):not(.dle_theme_dark):not([data-theme="dark"]) .astl-tile:is(.astl-green,.astl-yellow,.astl-red,.astl-checking) .astl-dot.yellow{background:#a66a00}
+  body:not(.dt-is-active):not(.dle_theme_dark):not([data-theme="dark"]) .astl-tile:is(.astl-green,.astl-yellow,.astl-red,.astl-checking) .astl-dot.red{background:#c53050}
+  body:not(.dt-is-active):not(.dle_theme_dark):not([data-theme="dark"]) .astl-tile:is(.astl-green,.astl-yellow,.astl-red,.astl-checking).card-show__owner--online{border-color:#078449!important;box-shadow:inset 0 0 0 1px #078449,0 0 0 1px #fff,0 0 0 2px #16985e,0 0 8px #16985e40!important}
   #astl-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:10px 0 18px;padding:10px 12px;border:1px solid #ffffff20;border-radius:12px;background:#1b2025;color:#ced6df;font:12px/1.4 system-ui}
   #astl-bar button,#astl-panel button,#astl-panel select{border:1px solid #ffffff30;border-radius:8px;background:#272c35;color:#eee;padding:7px 10px;font:inherit;cursor:pointer}
   #astl-bar .astl-status{flex:1;min-width:140px}

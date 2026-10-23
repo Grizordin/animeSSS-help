@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.77
+// @version      3.78
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -2660,6 +2660,131 @@
       }
     }
   `;
+  // Theme is owned by the site. CSS reacts to all three native dark markers,
+  // including a theme switch while a helper window is already open. No polling.
+  function suiteBuildLightThemeCss(){
+    const light='body:not(.dt-is-active):not(.dle_theme_dark):not([data-theme="dark"])';
+    const rules=[];
+    // Prefix each top-level selector independently: an unrelated ID in a
+    // selector list must not raise every class rule's specificity via :is().
+    const rule=(selectors,css)=>{
+      let depth=0,start=0;const scoped=[];
+      for(let i=0;i<=selectors.length;i++){
+        const char=selectors[i];
+        if(char==='('||char==='[')depth++;
+        if(char===')'||char===']')depth--;
+        if(i===selectors.length||(char===','&&!depth)){scoped.push(`${light} ${selectors.slice(start,i).trim()}`);start=i+1;}
+      }
+      rules.push(`${scoped.join(',')}{${css}}`);
+    };
+    const surface='background:#fff!important;color:#233345!important;border-color:#c7d5df!important;box-shadow:0 8px 28px rgba(31,55,73,.14)!important;';
+    const soft='background:#f0f5f8!important;color:#233345!important;border-color:#c7d5df!important;box-shadow:none!important;';
+    const blue='background:#e0f1f9!important;color:#125875!important;border-color:#98c3d5!important;box-shadow:none!important;';
+    const green='background:#e0f3e8!important;color:#16603c!important;border-color:#96c9ac!important;box-shadow:none!important;';
+    const amber='background:#fff1d2!important;color:#805000!important;border-color:#d8b569!important;box-shadow:none!important;';
+    const red='background:#ffe5e9!important;color:#9c2540!important;border-color:#dfa3ae!important;box-shadow:none!important;';
+    const purple='background:#eee7fb!important;color:#633598!important;border-color:#baa2d7!important;box-shadow:none!important;';
+    // The helper menu, its tooltips/mobile launcher and custom notifications
+    // intentionally retain one shared style in both site themes.
+    rule('#cv-stats-panel,#suite-hotkeys-panel>div,#suite-hotkeys-panel>button,#cv-auto-open-panel,#aw-active-tab-panel,.aw-modal-box,.suite-gacha-dialog,.suite-suggestion-modal,.cv-stones-panel,.cv-stones-wallet,.cv-stones-progress,#missing-panel,.suite-lab-fatigue-modal-box,#suite-lab-fatigue-counter,#suite-emission-timer,#cv-confirm-overlay>div,#cv-pack-confirm-overlay>div',surface+'color-scheme:light;');
+    rule('.aw-modal-head,.suite-gacha-dialog__head,.suite-suggestion-topbar,.suite-suggestion-rankbar,#missing-panel-header,.cv-stones-panel__header',blue);
+    rule('.aw-card,.aw-item,.aw-empty,.aw-preview,.suite-gacha-history-card,.suite-gacha-history-day,.suite-gacha-reward-row,.cv-stones-wallet__card,.cv-stones-wallet .cv-stones-panel,#missing-panel .item,.suite-lab-fatigue-event',soft);
+    rule('.aw-title,.aw-modal-title,.aw-card-value,.aw-item-title,.aw-preview b,.suite-gacha-dialog__title,.suite-gacha-history-card__value,.suite-gacha-history-day__value,.suite-suggestion-title,#missing-panel-title,#missing-panel-collapse-btn,.suite-lab-fatigue-modal-title,.suite-lab-fatigue-value,.suite-emission-value,.suite-lab-fatigue-gap,.suite-lab-fatigue-gap.is-live', 'color:#233345!important;text-shadow:none!important;');
+    rule('.aw-line,.aw-card-label,.aw-item-sub,.aw-form-sub,.aw-input-label,.aw-stat-pct,.aw-stat-table thead tr th,.suite-gacha-history-card__label,.suite-gacha-history-day__note,.cv-stones-wallet__hint,.cv-stones-wallet__label,.cv-stones-wallet .cv-stones-panel__header,.cv-stones-wallet .cv-stones-progress,.suite-lab-fatigue-empty,.suite-lab-fatigue-event-time,.suite-lab-fatigue-page-state,.suite-emission-sub', 'color:#516477!important;');
+    rule('.aw-icon-btn,.aw-btn,.aw-small-btn,.aw-cancel-btn,.aw-action-btn.secondary,.aw-input,.aw-modal-close,.suite-gacha-close,.suite-suggestion-close,.suite-suggestion-tab,.suite-lab-fatigue-btn,.suite-lab-fatigue-close,.suite-lab-fatigue-page-btn,.suite-lab-fatigue-page-input',soft+'color-scheme:light;');
+    rule('.aw-action-btn,.aw-confirm-btn,.suite-suggestion-refresh,.suite-suggestion-button,.suite-gacha-settings-btn,.suite-vote-toggle-btn,.suite-vote-toggle-counter,.cv-stones-floating-btn,.cv-stones-wallet__refresh,.cv-stones-wallet__icon',blue);
+    rule('.aw-small-btn.danger,.aw-confirm-btn.danger,.aw-compact-db-empty,#aw-active-tab-panel .aw-db-empty-btn,.missing-del-btn,.suite-author-badge.suite-not-found',red);
+    rule('.aw-compact-limit,.cv-best-reason,#suite-emission-timer.is-active',green);
+    rule('.aw-compact-time,#suite-emission-timer.is-soon,.suite-vote-new-label',amber);
+    rule('.suite-gacha-history-btn,#cv-guarantee-stones-inline',purple);
+    rule('.aw-error,.suite-gacha-history-card__value.is-off,.suite-lab-fatigue-reset-btn','color:#9c2540!important;');
+    rule('.suite-gacha-history-card__value.is-unknown,.suite-lab-fatigue-approx','color:#805000!important;');
+    rule('.aw-compact-name,.suite-gacha-history-section-title,.suite-gacha-history-day__date,.suite-suggestion-meta,.suite-suggestion-empty,#missing-panel .item span,.suite-lab-fatigue-head,.suite-emission-head,.cv-stones-panel__value','color:#125875!important;text-shadow:none!important;');
+    rule('.suite-suggestion-meta',soft);
+    rule('.suite-suggestion-author,.suite-author-badge',blue);
+    rule('.suite-suggestion-author a,.suite-author-badge a','color:inherit!important;border-bottom-color:currentColor!important;');
+    rule('.suite-author-badge.suite-pending',soft);
+    // Keep the "not found" distinction after the common author-badge rule.
+    rule('.suite-author-badge.suite-not-found',red);
+    rule('.suite-suggestion-tab.is-active','background:#176681!important;color:#fff!important;border-color:#176681!important;box-shadow:none!important;');
+    const slider='.suite-slider:not(#suite-settings-panel *,#suite-mobile-helper-layer *)';
+    rule(slider,'background:#dfe8ef!important;border-color:#92a6b8!important;box-shadow:inset 0 1px 3px #23334522!important;');
+    rules.push(`${light} ${slider}:before{background:#fff!important;border-color:#8299ab!important;box-shadow:0 1px 3px #23334533!important;}`);
+    rule(`.suite-toggle input:checked+${slider}`,'background:#b9e8cf!important;border-color:#278452!important;box-shadow:0 0 0 1px #27845233!important;');
+    rules.push(`${light} ${slider}:after{background:#bd3349!important;box-shadow:none!important;}${light} .suite-toggle input:checked+${slider}:after{background:#167747!important;box-shadow:none!important;}`);
+    rule('.aw-progress-bar,.aw-rank-bar,.suite-lab-fatigue-progress','background:#dce6ed!important;border-color:#b4c6d3!important;');
+    rule('.aw-stat-table :is(th,td)','border-color:#d9e2e9!important;');
+    rule('.suite-owner-restriction-legend-item',soft);
+    rule('#stone-brick-panel:not(.suite-brick-embedded),#remelt-panel:not(.suite-remelt-embedded)',surface);
+    rule('#stone-brick-panel:not(.suite-brick-embedded)>div:first-child',blue);
+    rule('#remelt-panel:not(.suite-remelt-embedded)>div:first-child',amber);
+    rule('.circle-btn.suite-floating-ui',blue);
+    rule('#cv-pack-tools','--bg:#fff;--tt:#233345;--tt-2:#516477;--bdc:#c7d5df;');
+    rule('#cv-pack-tools :is(.cv-pack-tool-icon,.cv-pack-tool-value)','color:#633598!important;');
+    rule('#cv-pack-tools .cv-pack-stones-value','color:#805000!important;');
+    rule('#cv-pack-tools :is(#cv-stats-btn,#cv-best-settings-btn)', 'background:#fae5ed!important;color:#853453!important;border-color:#c496a7!important;');
+    // These embedded panels normally inherit dark forge/remelt variables from
+    // the site. Override only their local palette, not the native card area.
+    rule('#stone-brick-panel.suite-brick-embedded','--cg-line:#bacfc5;--cg-accent:#276c4f;--cg-surface:#f6faf8;--cg-text:#263c32;--cg-muted:#51685d;--cg-soft:#e8f2ed;--cg-action:#d1e9dc;--cg-on-action:#234433;box-shadow:none!important;color-scheme:light;');
+    rule('#remelt-panel.suite-remelt-embedded','--rf-line:#d6c4b4;--rf-accent:#85572f;--rf-surface:#fcf8f4;--rf-text:#44362d;--rf-muted:#6c5c50;--rf-soft:#f2e9df;--rf-action:#81552f;box-shadow:none!important;color-scheme:light;');
+    rule('.labyrinth__quiz-btn--correct',green);
+    rule('.labyrinth__quiz-btn--fuzzy',amber);
+    rule('.labyrinth__club-war-club.suite-club-war-ally',green);
+    rule('.labyrinth__club-war-club.suite-club-war-neutral',amber);
+    rule('.labyrinth__club-war-club.suite-club-war-enemy',red);
+    rule('.labyrinth__club-war-club:is(.suite-club-war-ally,.suite-club-war-neutral,.suite-club-war-enemy):is(.is-active,.active,.labyrinth__club-war-club--active,[aria-selected="true"])','outline-color:#344d65!important;box-shadow:inset 0 0 0 2px #fff,0 0 0 2px #344d6544!important;');
+    rule('#suite-lab-fatigue-counter [data-lab-fatigue="approx"]','color:#805000!important;text-shadow:none!important;');
+    rule('.suite-lab-fatigue-icon,.suite-emission-icon',blue);
+    rule('#suite-emission-timer.is-active :is(.suite-emission-icon,.suite-emission-head)','color:#16603c!important;');
+    rule('#suite-emission-timer.is-soon :is(.suite-emission-icon,.suite-emission-head)','color:#805000!important;');
+    rule('#aw-active-tab-panel.aw-db-is-empty','border-color:#c5465b!important;');
+    rule('#cv-auto-open-panel.cv-auto-embedded','--bg:#fff;--bg-2:#f6f2f4;--tt:#352b32;--tt-2:#665660;--bdc:#d2c0c9;--accent:#953b5c;');
+    rule('#cv-auto-open-panel.cv-auto-embedded .cv-auto-count','color:#633598!important;');
+    rule('#cv-auto-open-panel.cv-auto-embedded .cv-auto-reset','color:#853453!important;');
+    rules.push(`${light} #cv-auto-open-panel.cv-auto-embedded .cv-auto-header>div:before{color:#853453!important;}`);
+    // Legacy floating controls use inline colors, including runtime state
+    // changes. Match exact property/value boundaries in our own UI only. This
+    // covers both HTML style attributes and CSSOM's rgb serialization without
+    // observing/re-writing the DOM, or recoloring native artwork/rank bars.
+    const roots='#cv-stats-panel,#suite-hotkeys-panel,#cv-auto-open-panel,#cv-confirm-overlay,#cv-pack-confirm-overlay,#aw-active-tab-panel,.aw-modal-box,#missing-panel,.cv-stones-panel,#stone-brick-panel:not(.suite-brick-embedded),#remelt-panel:not(.suite-remelt-embedded),#cv-guarantee-block';
+    const scope=`:is(${roots})`;
+    function inline(prop,hex,css){
+      const variants=[hex];
+      if(hex.startsWith('#')){
+        const full=hex.length===4?'#'+[...hex.slice(1)].map(c=>c+c).join(''):hex;
+        variants.push(full,`rgb(${[1,3,5].map(i=>parseInt(full.slice(i,i+2),16)).join(', ')})`);
+      }else{
+        const values=(hex.match(/[\d.]+/g)||[]).map(Number);
+        variants.push(`rgba(${values.join(', ')})`);
+      }
+      const selectors=[];
+      for(const value of new Set(variants))for(const space of ['', ' ']){
+        const token=`${prop}:${space}${value}`;
+        selectors.push(`[style^="${token};" i]`,`[style*=";${token};" i]`,`[style*="; ${token};" i]`,`[style="${token}" i]`,`[style$=";${token}" i]`,`[style$="; ${token}" i]`);
+      }
+      const target=`:is(${selectors.join(',')})`;
+      rules.push(`${light} :is(${scope},${scope} *)${target}{${css}}`);
+    }
+    for(const color of ['#fff','#f8fafc','#e2e8f0','#cbd5e1','#dbeafe','#e0f2fe','#e5e7eb'])inline('color',color,'color:#233345!important;');
+    for(const color of ['#94a3b8','#64748b','#475569','#334155','#adb5bd','#6b6b6b'])inline('color',color,'color:#516477!important;');
+    for(const color of ['rgba(255,255,255,.6)','rgba(255,255,255,.3)'])inline('color',color,'color:#516477!important;');
+    for(const color of ['#93c5fd','#7dd3fc','#38bdf8','#60a5fa','#bae6fd','#67e8f9','#4d9fff','#1565c0'])inline('color',color,'color:#125875!important;');
+    for(const color of ['#bbf7d0','#86efac','#4ade80','#4dcc6a','#16a34a','#1b7a1b'])inline('color',color,'color:#16603c!important;');
+    for(const color of ['#fca5a5','#fecaca','#fecdd3','#f87171','#ff4d4d','#cc0000'])inline('color',color,'color:#9c2540!important;');
+    for(const color of ['#fbbf24','#fde68a','#fcd34d','#fdba74','#f59e0b','#b07540'])inline('color',color,'color:#805000!important;');
+    for(const color of ['#c4b5fd','#c084fc','#a78bfa','#c77dff','#a855f7','#9b30ff','#818cf8'])inline('color',color,'color:#633598!important;');
+    for(const prop of ['background','background-color']){
+      for(const color of ['#0a0f1a','#0f172a','#0d1422','#1e293b','#111c2f','#020617'])inline(prop,color,soft);
+      for(const color of ['#082f49','#0c1445','#0ea5e9','#334155'])inline(prop,color,blue);
+      for(const color of ['#052e16','#14532d','#166534','#065f46','#15803d'])inline(prop,color,green);
+      for(const color of ['#7f1d1d','#4c0519','#450a0a','#991b1b','#7a2828'])inline(prop,color,red);
+      for(const color of ['#451a03','#78350f'])inline(prop,color,amber);
+    }
+    // Neutral inline borders only; status/rank borders retain their meaning.
+    rule(`${scope} [style*="solid rgb(30, 41, 59)"],${scope} [style*="solid #1e293b"],${scope} [style*="solid #0f172a"]`,'border-color:#ccd9e2!important;');
+    return rules.join('\n');
+  }
+  globalStyle.textContent += suiteBuildLightThemeCss();
   function suiteAttachGlobalStyle(style){
     // Network hooks may start before <head>; do not delay or restart the script.
     if(document.head){document.head.appendChild(style);return;}
@@ -5706,6 +5831,7 @@
       try{ clearTimeout(state.cardsAuthorObserveTimer); }catch(e){}
       (state.intervals || []).forEach(timer => { try{ clearInterval(timer); }catch(e){} });
       try{ state.cardsAuthorObserver?.disconnect(); }catch(e){}
+      try{ state.suggestionSeenObserver?.disconnect(); }catch(e){}
       (state.listeners || []).forEach(item => {
         try{ item.target.removeEventListener(item.type, item.handler, item.options); }catch(e){}
       });
@@ -5729,6 +5855,7 @@
     ];
     let activeApiBase = API_BASES[0];
     const CACHE_KEY = 'suite_suggestion_authors_cache_v1';
+    const SEEN_PREFIX = 'suite_suggestion_seen_v1:';
     const HOUR_MS = 60 * 60 * 1000;
     const MANUAL_REFRESH_COOLDOWN_MS = 30 * 1000;
     const CARDS_AUTHOR_POLL_MS = 5 * 1000;
@@ -5739,6 +5866,10 @@
       cardsAuthorObserver:null,
       cardsAuthorObserveTimer:null,
       cardsAuthorRefreshRunning:false,
+      suggestionSeenObserver:null,
+      suggestionVisibleCards:new Set(),
+      suggestionNewIds:new Set(),
+      suggestionRefreshRunning:false,
       intervals:[],
       listeners:[]
     };
@@ -5759,6 +5890,68 @@
       return value && typeof value === 'object' ? value : {};
     }
     function saveCache(cache){ gmStoreSet(CACHE_KEY, cache); }
+    function suggestionId(card){
+      const id=String(card?.card_id ?? card?.cardId ?? '').trim();
+      return /^[1-9]\d*$/.test(id) ? id : '';
+    }
+    function suggestionRibbonColors(rank){
+      const key=String(rank || '').trim().toUpperCase().replace(/\+$/, '_PLUS');
+      const bg=Object.hasOwn(RANK_COLORS,key) ? RANK_COLORS[key] : '#475569';
+      const channels=bg.slice(1).match(/../g).map(hex=>{
+        const value=parseInt(hex,16)/255;
+        return value<=.04045 ? value/12.92 : ((value+.055)/1.055)**2.4;
+      });
+      const luminance=channels[0]*.2126+channels[1]*.7152+channels[2]*.0722;
+      return {bg,fg:luminance>.179 ? '#000000' : '#ffffff'};
+    }
+    function suggestionSeenKey(id){
+      const nick=String(suiteGetCurrentUserName() || '').trim().normalize('NFC').toLowerCase();
+      return nick && id ? SEEN_PREFIX+encodeURIComponent(nick)+':'+id : '';
+    }
+    function isNewSuggestion(id){
+      if(!id)return false;
+      if(state.suggestionNewIds.has(id))return true;
+      const key=suggestionSeenKey(id);
+      if(key && gmStoreGet(key,false)===true)return false;
+      state.suggestionNewIds.add(id);
+      return true;
+    }
+    function markSuggestionSeen(tile){
+      const modal=document.getElementById('suite-suggestion-authors-modal');
+      if(window.__suiteSuggestionAuthorsState!==state || document.visibilityState!=='visible' || !modal?.classList.contains('is-open') || !modal.contains(tile))return;
+      const img=tile.querySelector('.suite-suggestion-img');
+      if(!img?.complete || !img.naturalWidth)return;
+      const key=suggestionSeenKey(tile.dataset.cardId);
+      // One immutable flag per account/card avoids lost array updates between
+      // tabs and both domains. The NEW badge stays for the current viewing pass.
+      if(key && gmStoreGet(key,false)!==true)gmStoreSet(key,true);
+    }
+    function observeSuggestionCards(){
+      state.suggestionSeenObserver?.disconnect();
+      state.suggestionVisibleCards.clear();
+      const modal=document.getElementById('suite-suggestion-authors-modal');
+      if(!modal?.classList.contains('is-open'))return;
+      const grid=modal.querySelector('.suite-suggestion-grid');
+      if(!state.suggestionSeenObserver){
+        state.suggestionSeenObserver=new IntersectionObserver(entries=>{
+          for(const entry of entries){
+            if(!entry.target.isConnected || !grid.contains(entry.target))continue;
+            if(entry.isIntersecting && entry.intersectionRatio>=.25){
+              state.suggestionVisibleCards.add(entry.target);
+              markSuggestionSeen(entry.target);
+            }else state.suggestionVisibleCards.delete(entry.target);
+          }
+        },{root:grid,threshold:.25});
+      }
+      grid.querySelectorAll('.suite-suggestion-card[data-card-id]').forEach(tile=>{
+        if(!tile.querySelector('.suite-suggestion-new'))return;
+        const img=tile.querySelector('.suite-suggestion-img');
+        img?.addEventListener('load',()=>{
+          if(state.suggestionVisibleCards.has(tile))markSuggestionSeen(tile);
+        },{once:true});
+        state.suggestionSeenObserver.observe(tile);
+      });
+    }
     function apiGetFrom(baseUrl,path){
       return new Promise((resolve, reject) => {
         GM_xmlhttpRequest({
@@ -5910,7 +6103,9 @@
         }
         .suite-suggestion-meta{padding:8px 15px;border-bottom:1px solid rgba(56,189,248,.14);background:rgba(7,16,30,.9);font-size:12px;color:#93c5fd}
         .suite-suggestion-grid{padding:15px;overflow:auto;display:grid;grid-template-columns:repeat(auto-fill,160px);justify-content:center;align-content:start;gap:15px 14px;overscroll-behavior:contain}
-        .suite-suggestion-card{min-width:0;width:160px}
+        .suite-suggestion-card{position:relative;min-width:0;width:160px}
+        .suite-suggestion-art{position:relative;overflow:hidden;border-radius:9px;}
+        .suite-suggestion-new{position:absolute;top:14px;right:-27px;width:100px;z-index:1;pointer-events:none;transform:rotate(45deg);padding:4px 0;text-align:center;background:var(--suite-new-bg,#475569);color:var(--suite-new-fg,#fff);font:900 10px/1.25 "Segoe UI",Arial,sans-serif;letter-spacing:.6px;box-shadow:0 2px 5px #0005;}
         .suite-suggestion-img{display:block;width:100%;border-radius:9px;border:1px solid rgba(56,189,248,.22);background:#071629;box-shadow:0 8px 22px rgba(0,0,0,.38)}
         .suite-suggestion-author,
         .suite-author-badge{
@@ -6077,7 +6272,14 @@
         <div class="suite-suggestion-meta"></div>
         <div class="suite-suggestion-grid"></div>
       `;
-      on(modal.querySelector('.suite-suggestion-close'), 'click', () => modal.classList.remove('is-open'));
+      on(modal.querySelector('.suite-suggestion-close'), 'click', () => {
+        modal.classList.remove('is-open');
+        state.suggestionSeenObserver?.disconnect();
+        state.suggestionVisibleCards.clear();
+      });
+      on(document,'visibilitychange',()=>{
+        if(document.visibilityState==='visible')state.suggestionVisibleCards.forEach(markSuggestionSeen);
+      });
       on(modal.querySelector('.suite-suggestion-refresh'), 'click', () => refreshSuggestions(true));
       modal.querySelectorAll('.suite-suggestion-tab').forEach(tab => {
         on(tab, 'click', () => {
@@ -6092,6 +6294,7 @@
     }
 
     function openModal(){
+      state.suggestionNewIds.clear();
       document.getElementById('suite-suggestion-authors-modal')?.classList.add('is-open');
       renderSuggestions();
       maybeRefreshSuggestions();
@@ -6105,6 +6308,7 @@
       if(meta) meta.textContent = text;
     }
     async function refreshSuggestions(manual){
+      if(state.suggestionRefreshRunning)return;
       const cache = loadCache();
       if(manual && cache.lastManualRefreshAt && now() - cache.lastManualRefreshAt < MANUAL_REFRESH_COOLDOWN_MS){
         const left = Math.ceil((MANUAL_REFRESH_COOLDOWN_MS - (now() - cache.lastManualRefreshAt)) / 1000);
@@ -6112,20 +6316,24 @@
         return;
       }
       setMeta('Обновляю...');
+      state.suggestionRefreshRunning=true;
       try{
         const json = await apiGet('/api/suggestions?limit=200');
-        const oldIds = new Set((cache.cards || []).map(card => String(card.card_id || card.cardId)));
-        const cards = (json.cards || []).sort((a, b) => Number(b.card_id) - Number(a.card_id));
-        const unread = cards.filter(card => !oldIds.has(String(card.card_id))).map(card => String(card.card_id));
-        cache.cards = cards;
-        cache.unreadIds = [...new Set([...(cache.unreadIds || []), ...unread])];
-        cache.lastFetchedAt = now();
-        cache.lastHourKey = currentHourKey();
-        if(manual) cache.lastManualRefreshAt = now();
-        saveCache(cache);
+        if(window.__suiteSuggestionAuthorsState!==state)return;
+        const cards = (json.cards || []).sort((a, b) => Number(suggestionId(b)) - Number(suggestionId(a)));
+        const latest=loadCache();
+        latest.cards = cards;
+        delete latest.unreadIds; // Old download-based list was never displayed/consumed.
+        latest.lastFetchedAt = now();
+        latest.lastHourKey = currentHourKey();
+        if(manual) latest.lastManualRefreshAt = now();
+        saveCache(latest);
+        state.suggestionNewIds.clear();
         renderSuggestions();
       }catch(error){
-        setMeta('Сервер недоступен, показан кэш: ' + error.message);
+        if(window.__suiteSuggestionAuthorsState===state)setMeta('Сервер недоступен, показан кэш: ' + error.message);
+      }finally{
+        state.suggestionRefreshRunning=false;
       }
     }
 
@@ -6138,19 +6346,26 @@
       modal.querySelectorAll('.suite-suggestion-tab').forEach(tab => tab.classList.toggle('is-active', tab.dataset.rank === rank));
       const cards = (cache.cards || [])
         .filter(card => !rank || String(card.rank || '').toLowerCase() === rank)
-        .sort((a, b) => Number(b.card_id) - Number(a.card_id));
+        .sort((a, b) => Number(suggestionId(b)) - Number(suggestionId(a)));
       const grid = modal.querySelector('.suite-suggestion-grid');
       grid.innerHTML = cards.length ? cards.map(card => {
         const author = card.author || '';
+        const id=suggestionId(card);
+        const isNew=isNewSuggestion(id);
+        const ribbon=suggestionRibbonColors(card.rank);
         return `
-          <div class="suite-suggestion-card" data-card-id="${escapeHtml(card.card_id)}">
-            <img class="suite-suggestion-img" decoding="async" src="${escapeHtml(abs(card.image || card.image_url))}" alt="${escapeHtml(card.name || '')}">
+          <div class="suite-suggestion-card" data-card-id="${escapeHtml(id)}">
+            <div class="suite-suggestion-art">
+              ${isNew ? `<span class="suite-suggestion-new" style="--suite-new-bg:${ribbon.bg};--suite-new-fg:${ribbon.fg}" title="Вы видите эту карточку впервые" aria-label="Новая карточка">NEW</span>` : ''}
+              <img class="suite-suggestion-img" decoding="async" src="${escapeHtml(abs(card.image || card.image_url))}" alt="${escapeHtml(card.name || '')}">
+            </div>
             <div class="suite-suggestion-author">Автор:&nbsp;<a href="${escapeHtml(abs('/user/' + encodeURIComponent(author) + '/'))}" target="_blank" rel="noopener noreferrer">${escapeHtml(author)}</a></div>
           </div>`;
       }).join('') : '<div class="suite-suggestion-empty">' + (rank ? 'Карт этого ранга пока нет' : 'Карт пока нет') + '</div>';
       const date = cache.lastFetchedAt ? new Date(cache.lastFetchedAt).toLocaleString() : 'нет данных';
       setMeta(`Карт: ${cards.length}. Обновлено: ${date}`);
       document.getElementById('suite-suggestion-authors-button')?.removeAttribute('data-new');
+      observeSuggestionCards();
     }
 
     function renderBadge(badge, { label, author, status }){
@@ -9955,7 +10170,7 @@
   function createHotkeyPanel(){
     if(!cfg.modHotkeys||!location.pathname.includes('/cards/pack'))return;
     if(hkPanel?.isConnected) return;
-    hkPanel=document.createElement('div'); hkPanel.style.cssText='position:fixed;right:14px;top:50%;transform:translateY(-50%);z-index:999;font-family:\'Segoe UI\',sans-serif';
+    hkPanel=document.createElement('div'); hkPanel.id='suite-hotkeys-panel'; hkPanel.style.cssText='position:fixed;right:14px;top:50%;transform:translateY(-50%);z-index:999;font-family:\'Segoe UI\',sans-serif';
     hkExpanded=document.createElement('div'); hkExpanded.style.cssText='width:230px;background:#0a0f1a;color:#e2e8f0;border:1px solid #1e293b;border-radius:14px;box-shadow:0 8px 32px rgba(0,0,0,.6);overflow:hidden';
     const hdr=document.createElement('div'); hdr.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:#0f172a;border-bottom:1px solid #1e293b';
     const title=document.createElement('div'); title.textContent='⌨ Горячие клавиши'; title.style.cssText='font-size:13px;font-weight:700';
@@ -13356,6 +13571,19 @@
   .astl-mark{display:flex;align-items:center;justify-content:center;gap:5px;min-height:16px;margin:4px 0 0;font:600 11px/16px system-ui;color:#e0e8e4;width:100%}
   .astl-dot{display:block;width:7px;height:7px;border-radius:50%;box-shadow:0 0 0 1px #ffffff26}
   .astl-dot.green{background:#4cdd96}.astl-dot.red{background:#ff6d82}.astl-dot.yellow{background:#ffd35d}
+  /* The site removes all three dark-theme markers for its light theme.
+     CSS reacts immediately; no observer, polling or requests are needed.
+     Scope paint/text to colored tiles: awakened owners retain native fills. */
+  body:not(.dt-is-active):not(.dle_theme_dark):not([data-theme="dark"]) .astl-tile.astl-green{background:linear-gradient(135deg,#d7efdf,#edf8f1)!important;--astl-base:#d7efdf}
+  body:not(.dt-is-active):not(.dle_theme_dark):not([data-theme="dark"]) .astl-tile.astl-yellow{background:linear-gradient(135deg,#fff0b8,#fff8df)!important;--astl-base:#fff0b8}
+  body:not(.dt-is-active):not(.dle_theme_dark):not([data-theme="dark"]) .astl-tile.astl-red{background:linear-gradient(135deg,#f8d9df,#fff0f2)!important;--astl-base:#f8d9df}
+  body:not(.dt-is-active):not(.dle_theme_dark):not([data-theme="dark"]) .astl-tile.astl-checking{background:linear-gradient(110deg,var(--astl-base,#d7efdf),#f7c786,var(--astl-base,#d7efdf))!important;background-size:220% 100%!important}
+  body:not(.dt-is-active):not(.dle_theme_dark):not([data-theme="dark"]) .astl-tile:is(.astl-green,.astl-yellow,.astl-red,.astl-checking),
+  body:not(.dt-is-active):not(.dle_theme_dark):not([data-theme="dark"]) .astl-tile:is(.astl-green,.astl-yellow,.astl-red,.astl-checking) :is(.card-show__owner-name,.astl-mark){color:#202b35!important}
+  body:not(.dt-is-active):not(.dle_theme_dark):not([data-theme="dark"]) .astl-tile:is(.astl-green,.astl-yellow,.astl-red,.astl-checking) .astl-dot.green{background:#15824f}
+  body:not(.dt-is-active):not(.dle_theme_dark):not([data-theme="dark"]) .astl-tile:is(.astl-green,.astl-yellow,.astl-red,.astl-checking) .astl-dot.yellow{background:#a66a00}
+  body:not(.dt-is-active):not(.dle_theme_dark):not([data-theme="dark"]) .astl-tile:is(.astl-green,.astl-yellow,.astl-red,.astl-checking) .astl-dot.red{background:#c53050}
+  body:not(.dt-is-active):not(.dle_theme_dark):not([data-theme="dark"]) .astl-tile:is(.astl-green,.astl-yellow,.astl-red,.astl-checking).card-show__owner--online{border-color:#078449!important;box-shadow:inset 0 0 0 1px #078449,0 0 0 1px #fff,0 0 0 2px #16985e,0 0 8px #16985e40!important}
   #astl-bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:10px 0 18px;padding:10px 12px;border:1px solid #ffffff20;border-radius:12px;background:#1b2025;color:#ced6df;font:12px/1.4 system-ui}
   #astl-bar button,#astl-panel button,#astl-panel select{border:1px solid #ffffff30;border-radius:8px;background:#272c35;color:#eee;padding:7px 10px;font:inherit;cursor:pointer}
   #astl-bar .astl-status{flex:1;min-width:140px}
