@@ -7,6 +7,7 @@ new vm.Script(source);
 function extract(name){
  const m=new RegExp('^([ \\t]*)(?:async )?function '+name+'\\(','m').exec(source);assert.ok(m,name);
  const lines=source.slice(m.index).split(/\r?\n/);
+ try{new vm.Script('('+lines[0]+')');return lines[0];}catch{}
  for(let n=2;n<=lines.length;n++)if(lines[n-1]===m[1]+'}'){
   const code=lines.slice(0,n).join('\n');try{new vm.Script('('+code+')');return code;}catch{}
  }throw Error(name);
@@ -34,11 +35,11 @@ let checks=0;const ok=(v,m)=>{assert.ok(v,m);checks++;};
 const tile=(title,html)=>`<section class="fixture"><h3>${title}</h3>${html}</section>`;
 const markup=[
  tile('Меню',`<div id="suite-settings-panel"><div class="suite-settings-header"><b style="color:#e2e8f0">Помощник</b><span style="background:#111c2f;color:#93c5fd;padding:4px">3.77</span></div><div class="suite-section-nav"><button class="suite-section-tab">Карты</button><button class="suite-section-tab is-active">UI</button></div><div class="suite-section-panel is-active"><p style="color:#cbd5e1">Лимиты обменов</p><label class="suite-toggle"><input type="checkbox" checked><span class="suite-slider"></span></label><p style="color:#94a3b8">Числа вместо точек</p><label class="suite-toggle"><input type="checkbox"><span class="suite-slider"></span></label></div></div>`),
- tile('Автолут',`<div id="aw-active-tab-panel"><div class="aw-title">Автолут <button class="aw-icon-btn">—</button></div><div id="aw-active-tab-toggle" style="background:#14532d">Автолут: ВКЛ</div><p class="aw-line">Сегодня: 25 / 35</p><span class="aw-compact-limit">25/35</span> <span class="aw-compact-time">15с</span><p class="aw-line">Эта вкладка выполняет автолут</p><button class="aw-btn">База аниме</button></div>`),
+ tile('Автолут',`<div id="aw-active-tab-panel"><div class="aw-title">Автолут <button class="aw-icon-btn">—</button></div><div id="aw-active-tab-toggle" data-active="true" style="background:#14532d">Автолут: ВКЛ</div><p class="aw-line">Сегодня: 25 / 35</p><span class="aw-compact-limit">25/35</span> <span class="aw-compact-time">15с</span><p class="aw-line">Эта вкладка выполняет автолут</p><button class="aw-btn">База аниме</button></div>`),
  tile('База аниме',`<div class="aw-modal-box"><div class="aw-modal-head"><span class="aw-modal-title">База аниме</span><button class="aw-modal-close">×</button></div><div class="aw-modal-body"><div class="aw-item"><div class="aw-item-title">Томо — девушка</div><div class="aw-item-sub">Просмотрено 5 / 12</div><button class="aw-small-btn danger">Удалить</button></div><label class="aw-input-label">Поиск</label><input class="aw-input" placeholder="Название"><p class="aw-error">Пример ошибки</p><button class="aw-action-btn">Добавить аниме</button></div></div>`),
  tile('Гача',`<div class="suite-gacha-dialog"><div class="suite-gacha-dialog__head"><b class="suite-gacha-dialog__title">Полученные награды</b><button class="suite-gacha-close">×</button></div><div class="suite-gacha-history-body"><div class="suite-gacha-history-card"><span class="suite-gacha-history-card__label">Камни духа</span><span class="suite-gacha-history-card__value">160</span></div><div class="suite-gacha-history-day"><span class="suite-gacha-history-day__date">чт, 22.10</span><span class="suite-gacha-history-day__value">90 камней духа<small class="suite-gacha-history-day__note">Бесконечная гача</small></span></div><span class="suite-gacha-history-card__value is-unknown">Нет информации</span></div></div>`),
  tile('Камни духа',`<div class="cv-stones-wallet"><h3 class="cv-stones-wallet__heading">Учёт камней</h3><p class="cv-stones-wallet__hint">Автоматически из истории</p><div class="cv-stones-panel"><div class="cv-stones-panel__header">Траты не на паки</div><span class="cv-stones-panel__value">1 200</span></div><button class="cv-stones-wallet__refresh">Проверить</button></div>`),
- tile('Лабиринт',`<div id="suite-lab-fatigue-counter"><div class="suite-lab-fatigue-head">Усталость</div><span class="suite-lab-fatigue-value"><span data-lab-fatigue="approx">≈</span> 60%</span><button class="suite-lab-fatigue-btn">≡</button><span class="suite-lab-fatigue-progress"><span style="width:60%"></span></span></div><div id="suite-emission-timer" class="is-active"><div class="suite-emission-head">Выброс</div><span class="suite-emission-value">02:09</span><small class="suite-emission-sub">До завершения выброса</small></div>`),
+ tile('Лабиринт',`<div id="suite-lab-fatigue-counter"><div class="suite-lab-fatigue-head">Усталость</div><span class="suite-lab-fatigue-value">60%</span><button class="suite-lab-fatigue-btn">≡</button><span class="suite-lab-fatigue-progress"><span style="width:60%"></span></span></div><div id="suite-emission-timer" class="is-active"><div class="suite-emission-head">Выброс</div><span class="suite-emission-value">02:09</span><small class="suite-emission-sub">До завершения выброса</small></div>`),
  tile('Кирпич',`<div id="stone-brick-panel" class="suite-brick-embedded"><div class="suite-brick-header"><span>Наполнение кирпича</span></div><div class="suite-brick-criterion">Ранг <input type="number" value="5"></div><button id="stone-brick-main-btn">Наполнить</button></div>`),
  tile('Переплавка',`<div id="remelt-panel" class="suite-remelt-embedded"><div class="suite-remelt-header"><span>Переплавка</span></div><div class="suite-remelt-criterion">Ранг A <input type="number" value="10"></div><button id="remelt-main-btn">Переплавить</button></div>`),
  tile('Предложка',`<div class="suite-suggestion-modal is-open"><div class="suite-suggestion-topbar"><b class="suite-suggestion-title">Авторы предложений</b></div><div class="suite-suggestion-meta">Последняя проверка: сейчас</div><div class="suite-suggestion-tabs"><button class="suite-suggestion-tab is-active">A</button><button class="suite-suggestion-tab">B</button></div><div class="suite-author-badge"><a href="#">Имя автора</a></div><div class="suite-author-badge suite-not-found">Автор не найден</div></div>`),
@@ -59,7 +60,44 @@ const markup=[
   await page.addStyleTag({content:'*,*:before,*:after{transition:none!important;animation:none!important}'});
   await page.addStyleTag({content:`.fixture :is(#suite-settings-panel,#aw-active-tab-panel,.suite-suggestion-modal,#suite-lab-fatigue-counter,#suite-emission-timer,#suite-menu-tooltip){position:relative!important;inset:auto!important;transform:none!important;width:auto!important;min-width:0!important;max-height:none!important;display:block!important;margin:0 0 10px!important;visibility:visible!important;opacity:1!important}.fixture .suite-section-panel{display:block!important}.fixture #__cpt-root{position:static!important}.fixture .cpt-toast{margin-bottom:8px;animation:none!important}.fixture .suite-gacha-dialog{width:auto}.fixture .cv-stones-wallet{margin:0;padding:16px}.fixture #cv-auto-open-panel{display:block}.fixture #cv-auto-open-panel .cv-auto-body{display:block}.fixture #suite-menu-tooltip{max-width:none!important}.fixture .suite-section-nav{display:flex!important}`});
   await page.evaluate(({bestCSS})=>{const host=document.querySelector('#cv-best-settings-host');host.attachShadow({mode:'open'}).innerHTML=`<style>${bestCSS}</style><dialog open><header><h2>Лучшая карта</h2></header><div class="body"><p class="notice"><b>Ваши правила выбора.</b> Настройки</p><p class="mode-text">Режим</p><input type="number" value="40"><div class="rule"><strong>Приоритет карт</strong><p>Описание правила</p></div></div><footer><button class="primary">Сохранить</button><button class="reset">Сброс</button></footer></dialog>`;host.style.display='none';},{bestCSS});
-  await page.evaluate(`(()=>{${extract('createStatsPanel')};let statsPanel=null;const makeDraggable=()=>{},renderStatsTab=()=>{};createStatsPanel();})()`);
+  await page.evaluate(`(()=>{
+   ${source.slice(source.indexOf('  const RANK_ORDER  ='),source.indexOf('  const WANT_BONUS='))}
+   const todayKey='2026-10-23',stats={allCards:Object.fromEntries(RANK_ORDER.map(r=>[r,{count:2,totalValue:20,byDate:{[todayKey]:1}}])),pickedCards:{}};
+   const lastRank={currentS:2,currentPlus:2,currentASS:2,S:2,PLUS:2,ASS:2};
+   let statsPanel=null,statsFilter='all',activeTab='all';const makeDraggable=()=>{};
+   ${extract('getCountForFilter')}
+   ${extract('buildStatsHTML')}
+   ${extract('renderStatsTab')}
+   ${extract('createStatsPanel')}
+   createStatsPanel();
+   const wrapper=document.createElement('section');wrapper.className='fixture';wrapper.innerHTML='<h3>Статистика паков</h3>';document.querySelector('.gallery').append(wrapper);
+   statsPanel.style.cssText+=';position:static;display:block;width:auto';wrapper.append(statsPanel);
+  })()`);
+  await page.evaluate(`(()=>{
+   let confirmDialog=null,confirmedCard=null,packConfirmDialog=null,packConfirmCallback=null;
+   const confirmGuardSelection=()=>{},cancelGuardSelection=()=>{};
+   ${extract('createConfirmDialog')}
+   ${extract('showConfirmDialog')}
+   ${extract('createPackConfirmDialog')}
+   ${extract('showPackConfirmDialog')}
+   showConfirmDialog(null,2,10);showPackConfirmDialog(100,()=>{});
+   for(const overlay of [confirmDialog,packConfirmDialog]){
+    const wrapper=document.createElement('section');wrapper.className='fixture';wrapper.innerHTML='<h3>Защитное окно</h3>';document.querySelector('.gallery').append(wrapper);
+    overlay.style.cssText='position:static;display:block;background:none';wrapper.append(overlay);
+   }
+  })()`);
+  await page.evaluate(`(()=>{
+   const cfg={modHotkeys:true,hkPanelLeft:null,hkPanelTop:null},location={pathname:'/cards/pack/'};
+   const saveCfg=()=>{},makeDraggable=()=>{},setHkPanelCollapsed=()=>{},codeToLabel=x=>x||'KeyA';
+   let captureState=null,hkPanel,hkExpanded,hkCollapsedBtn,hkSummary;
+   ${extract('makeHkField')}
+   ${extract('startKeyCapture')}
+   ${extract('refreshHkSummary')}
+   ${extract('createHotkeyPanel')}
+   createHotkeyPanel();
+   const wrapper=document.createElement('section');wrapper.className='fixture';wrapper.innerHTML='<h3>Горячие клавиши</h3>';document.querySelector('.gallery').append(wrapper);
+   hkPanel.style.cssText='position:static';hkExpanded.style.width='auto';wrapper.append(hkPanel);
+  })()`);
   await page.evaluate(`(async()=>{
    const STATS_MODAL_ID='theme-rank-stats',RANK_CONFIG=${source.match(/const RANK_CONFIG = (\[[\s\S]*?\]);/)[1]};
    const buildRankStats=async()=>({allCounts:Object.fromEntries(RANK_CONFIG.map(r=>[r.key,2])),todayCounts:Object.fromEntries(RANK_CONFIG.map(r=>[r.key,1])),totalAll:26,totalToday:13});
@@ -74,8 +112,8 @@ const markup=[
    document.querySelector('.gallery').append(wrapper);
    const protectedControls=document.createElement('div');protectedControls.hidden=true;protectedControls.innerHTML='<button id="suite-settings-btn" style="background:#0a0f1a;color:#e2e8f0">Настройки</button><div id="suite-mobile-helper-layer"><span class="suite-mobile-helper-title">Помощник</span><span class="suite-mobile-helper-version">3.77</span><label class="suite-toggle"><input type="checkbox" checked><span class="suite-slider"></span></label></div>';document.body.append(protectedControls);
   });
-  // Inline authored strings, CSSOM serialization, exact property boundaries.
-  await page.evaluate(()=>{const p=document.querySelector('#cv-stats-content');p.innerHTML='<span id="inline-text" style="color:#e2e8f0">Текст</span><span id="inline-trap" style="background-color:#94a3b8;color:#dc2626">Ранг</span>';const e=document.createElement('div');e.id='cssom';e.style.color='#93c5fd';e.style.background='#0f172a';e.textContent='CSSOM';p.append(e);});
+  // Unknown inline markup is no longer color-matched; actual controls are tested instead.
+  await page.evaluate(()=>{const e=document.createElement('span');e.id='inline-trap';e.style.cssText='background-color:#94a3b8;color:#dc2626';e.textContent='Native';document.body.append(e);});
   const snap=()=>page.evaluate(()=>[...document.querySelectorAll('.gallery *,.gallery,#cv-stats-panel,#cv-stats-panel *,#native')].map(e=>{const s=getComputedStyle(e);return [s.color,s.backgroundColor,s.backgroundImage,s.borderColor,s.boxShadow,s.display,s.width,s.height];}));
   const light=await snap();
   const color=selector=>page.locator(selector).first().evaluate(e=>getComputedStyle(e).color);
@@ -84,12 +122,19 @@ const markup=[
    ok((await bg(selector)).match(/rgb\((?:2[2-5]\d),/),'light surface '+selector);
   }
   ok(await color('#inline-trap')==='rgb(220, 38, 38)','background-color does not match foreground color');
-  ok(await color('#inline-text')==='rgb(35, 51, 69)','authored inline text');
-  ok(await bg('#cssom')==='rgb(240, 245, 248)','CSSOM inline background');
+  ok(await color('#cv-stats-content td:nth-child(2)')==='rgb(35, 51, 69)','actual pack statistic numbers remain readable');
+  ok(await bg('.cv-tab-btn[aria-pressed="true"]')==='rgb(224, 241, 249)','selected stats tab has semantic styling');
+  await page.locator('.cv-tab-btn[data-tab="picked"]').click();
+  ok(await page.locator('.cv-tab-btn[data-tab="picked"]').getAttribute('aria-pressed')==='true','stats state updates on tab change');
+  await page.locator('.cv-tab-btn[data-tab="all"]').click();
+  ok(await color('#cv-confirm-msg b:first-of-type')==='rgb(156, 37, 64)','worse card stays red');
+  ok(await color('#cv-confirm-msg b:nth-of-type(2)')==='rgb(22, 96, 60)','better card stays green');
+  ok(await color('#cv-pack-confirm-msg b:first-of-type')==='rgb(128, 80, 0)','expensive pack keeps warning color');
+  ok(await color('.suite-hotkeys-summary b')==='rgb(35, 51, 69)','hotkey summary remains readable');
   ok(await bg('#aw-active-tab-toggle')==='rgb(224, 243, 232)','running state stays green');
-  await page.locator('#aw-active-tab-toggle').evaluate(e=>{e.style.background='#7f1d1d';});
+  await page.locator('#aw-active-tab-toggle').evaluate(e=>{e.style.background='#7f1d1d';e.dataset.active='false';});
   ok(await bg('#aw-active-tab-toggle')==='rgb(255, 229, 233)','stopped state changes to red without a rerender');
-  await page.locator('#aw-active-tab-toggle').evaluate(e=>{e.style.background='#14532d';});
+  await page.locator('#aw-active-tab-toggle').evaluate(e=>{e.style.background='#14532d';e.dataset.active='true';});
   ok(await color('.suite-suggestion-tab.is-active')==='rgb(255, 255, 255)','active author tab remains distinct');
   ok(await color('.suite-gacha-history-card__value.is-unknown')==='rgb(128, 80, 0)','unknown reward keeps amber warning color');
   const protectedUnchanged=await page.evaluate(css=>{
@@ -104,7 +149,8 @@ const markup=[
    const rgb=s=>(s.match(/[\d.]+/g)||[]).map(Number),lum=c=>c.slice(0,3).map(n=>n/255).map(n=>n<=.04045?n/12.92:((n+.055)/1.055)**2.4).reduce((s,n,i)=>s+n*[.2126,.7152,.0722][i],0);
    const failures=[];
    const selectors=['.aw-line','.aw-title','.aw-item-title','.aw-item-sub','.aw-input','.aw-error','.aw-action-btn','.aw-small-btn.danger','.aw-compact-limit','.aw-compact-time','.suite-gacha-history-card__label','.suite-gacha-history-card__value','.suite-gacha-history-day__note','.suite-gacha-history-day__date','.cv-stones-wallet__hint','.cv-stones-panel__value','.suite-lab-fatigue-value','.suite-emission-sub','.suite-author-badge','.suite-suggestion-meta','.cv-auto-count','.cv-auto-status','.suite-brick-criterion','.suite-remelt-criterion','#stone-brick-main-btn','#remelt-main-btn'];
-   selectors.push('.aw-rank-badge','.aw-stat-num','.aw-stat-pct','#aw-clear-stats-btn','.suite-owner-restriction-legend-item','.labyrinth__club-war-club','.cv-pack-tool-value','.cv-pack-tool-note','#cv-stats-btn');
+   selectors.push('.aw-rank-badge','.aw-stat-num','.aw-stat-pct','#aw-clear-stats-btn','.suite-owner-restriction-legend-item','.labyrinth__club-war-club','.cv-pack-tool-value','.cv-pack-tool-note','#cv-stats-btn','.cv-stats-rank','#cv-stats-content td:nth-child(2)','#cv-stats-reset','.cv-tab-btn','.cv-filter-btn');
+   selectors.push('#cv-confirm-msg','#cv-confirm-msg b','#cv-confirm-ok','#cv-confirm-cancel','#cv-pack-confirm-msg','#cv-pack-confirm-msg b','#cv-pack-confirm-title','#cv-pack-confirm-overlay button','#suite-hotkeys-panel input','#suite-hotkeys-panel label','.suite-hotkeys-help','.suite-hotkeys-summary','.suite-hotkeys-summary b');
    for(const e of document.querySelectorAll(selectors.join(','))){
     let chain=[],p=e;while(p){chain.unshift(p);p=p.parentElement;}let background=[255,255,255];
     for(const parent of chain){const c=rgb(getComputedStyle(parent).backgroundColor),a=c.length===4?c[3]:1;if(c.length>=3)background=background.map((v,i)=>v*(1-a)+c[i]*a);}

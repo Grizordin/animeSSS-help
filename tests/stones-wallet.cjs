@@ -131,12 +131,15 @@ let passed=0;const check=(value,message)=>{if(!value)throw Error(message);passed
   }
   check(await page.locator('.cv-stones-panel input,.cv-stones-panel button:not(.cv-stones-history-btn),.cv-stones-wallet__controls').count()===0,'manual input, add and reset removed');
   const beforeHistory=await page.evaluate(()=>({requests:requests.length,store:JSON.stringify(store)}));
+  // Simulate site resets which remove the browser's default dialog centering.
+  await page.addStyleTag({content:'dialog{margin:0;inset:auto;position:absolute;transform:none}'});
   await page.click('.cv-stones-history-btn');
   await page.waitForSelector('.cv-stones-history__row');
   check(await page.locator('.cv-stones-history__row').count()===1,'history includes only non-pack expenses');
   check(await page.locator('.cv-stones-history__amount').textContent()==='−3\u00a0000','history amount');
   check(await page.locator('.cv-stones-history__description').textContent()==='Подношение','history description');
   check(await page.locator('.cv-stones-history').evaluate(d=>d.open&&d.matches(':modal')),'accessible native modal');
+  check(await page.locator('.cv-stones-history').evaluate(d=>{const r=d.getBoundingClientRect();return Math.abs(r.left+r.width/2-innerWidth/2)<1&&Math.abs(r.top+r.height/2-innerHeight/2)<1;}),'short history centered despite site dialog reset');
   check(await page.locator('.cv-stones-history button').count()===1,'only close button, no pagination');
   await page.keyboard.press('Escape');
   check(await page.locator('.cv-stones-history').count()===0,'Escape closes history');
@@ -164,14 +167,16 @@ let passed=0;const check=(value,message)=>{if(!value)throw Error(message);passed
   }
   check(await page.locator('.cv-stones-history__description').last().textContent()==='Без описания','missing description fallback');
   await page.addStyleTag({content:await page.evaluate('(()=>{'+extract('suiteBuildLightThemeCss')+';return suiteBuildLightThemeCss();})()')});
-  for(const dark of [false,true])for(const width of [1366,390,320]){
-   await page.setViewportSize({width,height:800});
+  for(const dark of [false,true])for(const [width,height] of [[1366,800],[390,800],[320,800],[740,360]]){
+   await page.setViewportSize({width,height});
    await page.evaluate(dark=>document.body.classList.toggle('dt-is-active',dark),dark);
    const g=await page.locator('.cv-stones-history').evaluate(d=>{
     const r=d.getBoundingClientRect(),list=d.querySelector('.cv-stones-history__list');
-    return {fits:r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight&&list.scrollWidth<=list.clientWidth,bg:getComputedStyle(d).backgroundColor};
+    return {fits:r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight&&list.scrollWidth<=list.clientWidth,bg:getComputedStyle(d).backgroundColor,
+     centered:Math.abs(r.left+r.width/2-innerWidth/2)<1&&Math.abs(r.top+r.height/2-innerHeight/2)<1};
    });
    check(g.fits,'history fits '+width+' dark='+dark);
+   check(g.centered,'history centered '+width+'x'+height+' dark='+dark);
    check(g.bg===(dark?'rgb(27, 35, 37)':'rgb(255, 255, 255)'),'history theme '+width+' dark='+dark);
   }
   if(process.env.STONES_SCREENSHOTS){
