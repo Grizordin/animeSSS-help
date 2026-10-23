@@ -315,6 +315,7 @@ fs.mkdirSync(path.join(__dirname,'..','tmp'),{recursive:true});
   // Tampermonkey synchronous API mock is mirrored between browser tabs through binding writes.
   await page.evaluate(({source,html,now})=>{
    const originalNow=Date.now;Date.now=()=>now;window.realNow=originalNow;
+   document.body.classList.add('dle_theme_dark'); // Existing visual assertions cover the dark palette.
    const t=document.createElement('template');t.innerHTML=html;const list=t.content.querySelector('.card-show__owner-wrapper');
    for(const e of list.querySelectorAll('*'))for(const a of [...e.attributes])if(/^on/i.test(a.name)||['src','srcset','style'].includes(a.name))e.removeAttribute(a.name);
    document.body.innerHTML='<div class="ap-profile-actions"><a class="ap-profile-action" href="/user/BETEP_B_TYMAHE/">Мой профиль</a></div>';
