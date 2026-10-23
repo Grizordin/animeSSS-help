@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.78
+// @version      3.79
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -1957,7 +1957,6 @@
     #suite-lab-fatigue-counter .suite-lab-fatigue-value {
       display:block;font-size:18px;font-weight:900;line-height:1.15;color:#f8fafc;text-shadow:0 0 14px rgba(14,165,233,.2);
     }
-    #suite-lab-fatigue-counter [data-lab-fatigue="approx"]{color:#fbbf24;margin-right:4px;}
     #suite-lab-fatigue-counter .suite-lab-fatigue-progress{
       display:block;width:100%;height:5px;margin-top:7px;overflow:hidden;border-radius:999px;
       background:rgba(30,58,82,.9);box-shadow:inset 0 0 0 1px rgba(125,211,252,.13);
@@ -1967,7 +1966,6 @@
       box-shadow:0 0 10px rgba(56,189,248,.55);transition:width .25s ease;
     }
     #suite-lab-fatigue-counter.is-ready .suite-lab-fatigue-progress > span{background:linear-gradient(90deg,#f59e0b,#ef4444);box-shadow:0 0 12px rgba(248,113,113,.65);}
-    #suite-lab-fatigue-counter.is-approximate .suite-lab-fatigue-progress{opacity:.72;}
     #suite-lab-fatigue-counter .suite-lab-fatigue-btn {
       position:absolute;right:8px;top:8px;width:28px;height:28px;border-radius:8px;
       border:1px solid rgba(125,211,252,.26);background:rgba(15,23,42,.68);
@@ -2698,7 +2696,7 @@
     rule('.aw-compact-time,#suite-emission-timer.is-soon,.suite-vote-new-label',amber);
     rule('.suite-gacha-history-btn,#cv-guarantee-stones-inline',purple);
     rule('.aw-error,.suite-gacha-history-card__value.is-off,.suite-lab-fatigue-reset-btn','color:#9c2540!important;');
-    rule('.suite-gacha-history-card__value.is-unknown,.suite-lab-fatigue-approx','color:#805000!important;');
+    rule('.suite-gacha-history-card__value.is-unknown','color:#805000!important;');
     rule('.aw-compact-name,.suite-gacha-history-section-title,.suite-gacha-history-day__date,.suite-suggestion-meta,.suite-suggestion-empty,#missing-panel .item span,.suite-lab-fatigue-head,.suite-emission-head,.cv-stones-panel__value','color:#125875!important;text-shadow:none!important;');
     rule('.suite-suggestion-meta',soft);
     rule('.cv-stones-history',surface+'color-scheme:light;');
@@ -2739,7 +2737,6 @@
     rule('.labyrinth__club-war-club.suite-club-war-neutral',amber);
     rule('.labyrinth__club-war-club.suite-club-war-enemy',red);
     rule('.labyrinth__club-war-club:is(.suite-club-war-ally,.suite-club-war-neutral,.suite-club-war-enemy):is(.is-active,.active,.labyrinth__club-war-club--active,[aria-selected="true"])','outline-color:#344d65!important;box-shadow:inset 0 0 0 2px #fff,0 0 0 2px #344d6544!important;');
-    rule('#suite-lab-fatigue-counter [data-lab-fatigue="approx"]','color:#805000!important;text-shadow:none!important;');
     rule('.suite-lab-fatigue-icon,.suite-emission-icon',blue);
     rule('#suite-emission-timer.is-active :is(.suite-emission-icon,.suite-emission-head)','color:#16603c!important;');
     rule('#suite-emission-timer.is-soon :is(.suite-emission-icon,.suite-emission-head)','color:#805000!important;');
@@ -2748,46 +2745,39 @@
     rule('#cv-auto-open-panel.cv-auto-embedded .cv-auto-count','color:#633598!important;');
     rule('#cv-auto-open-panel.cv-auto-embedded .cv-auto-reset','color:#853453!important;');
     rules.push(`${light} #cv-auto-open-panel.cv-auto-embedded .cv-auto-header>div:before{color:#853453!important;}`);
-    // Legacy floating controls use inline colors, including runtime state
-    // changes. Match exact property/value boundaries in our own UI only. This
-    // covers both HTML style attributes and CSSOM's rgb serialization without
-    // observing/re-writing the DOM, or recoloring native artwork/rank bars.
-    const roots='#cv-stats-panel,#suite-hotkeys-panel,#cv-auto-open-panel,#cv-confirm-overlay,#cv-pack-confirm-overlay,#aw-active-tab-panel,.aw-modal-box,#missing-panel,.cv-stones-panel,#stone-brick-panel:not(.suite-brick-embedded),#remelt-panel:not(.suite-remelt-embedded),#cv-guarantee-block';
-    const scope=`:is(${roots})`;
-    function inline(prop,hex,css){
-      const variants=[hex];
-      if(hex.startsWith('#')){
-        const full=hex.length===4?'#'+[...hex.slice(1)].map(c=>c+c).join(''):hex;
-        variants.push(full,`rgb(${[1,3,5].map(i=>parseInt(full.slice(i,i+2),16)).join(', ')})`);
-      }else{
-        const values=(hex.match(/[\d.]+/g)||[]).map(Number);
-        variants.push(`rgba(${values.join(', ')})`);
+    // Explicit UI selectors only. Matching thousands of [style*=...] alternatives
+    // made unrelated site animations expensive even in the dark theme.
+    // Dynamic controls expose semantic state instead of CSS color-string tests.
+    rule('#cv-stats-panel>div:first-child,#suite-hotkeys-panel>div>div:first-child',blue);
+    rule('#cv-stats-panel>div:nth-child(2),#suite-hotkeys-panel input,.suite-hotkeys-summary,.cv-auto-status,.cv-auto-target input',soft);
+    rule('#cv-stats-close,#suite-hotkeys-panel label,.suite-hotkeys-help,.suite-hotkeys-summary,#cv-confirm-msg,#cv-pack-confirm-msg,.cv-auto-target,#cv-stats-content>div,#cv-stats-content b,#cv-stats-content td,#cv-stats-content th,#cv-stats-content td:last-child', 'color:#516477!important;');
+    rule('.suite-hotkeys-summary b,.aw-stat-num,.cv-auto-run>span,#cv-stats-content td:nth-child(2)','color:#233345!important;');
+    rule('#cv-confirm-msg b,#cv-pack-confirm-msg b,.cv-auto-count','color:#125875!important;');
+    rule('#cv-confirm-msg b:first-of-type','color:#9c2540!important;');
+    rule('#cv-confirm-msg b:nth-of-type(2),#cv-pack-confirm-msg b:nth-of-type(2)','color:#16603c!important;');
+    rule('#cv-confirm-msg b:nth-of-type(3),#cv-pack-confirm-msg b:first-of-type','color:#805000!important;');
+    rule('#suite-hotkeys-panel button,#cv-confirm-cancel,#cv-pack-confirm-overlay button:last-child,.cv-tab-btn,.cv-filter-btn',soft);
+    rule('#suite-hotkeys-panel input:focus','border-color:#176681!important;');
+    rule('#cv-stats-reset,#cv-confirm-ok,#cv-pack-confirm-overlay button:first-child,#missing-panel-actions button,#aw-clear-stats-btn',red);
+    rule('#cv-confirm-overlay>div>div:nth-child(2)','color:#9c2540!important;');
+    rule('#cv-pack-confirm-title','color:#805000!important;');
+    rule('.cv-tab-btn[aria-pressed="true"],.cv-filter-btn[aria-pressed="true"]',blue);
+    rule('#aw-active-tab-toggle',red);
+    rule('#aw-active-tab-toggle[data-active="true"]',green);
+    rule('#cv-stats-content thead tr,#cv-stats-panel>div','border-color:#ccd9e2!important;');
+    rule('.cv-stats-track','background:#dce6ed!important;');
+    rule('#cv-guarantee-block:not(#cv-pack-tools>*)',soft);
+    rule('#cv-guarantee-block>div:first-child,#cv-guarantee-block>div:first-child>span','color:#633598!important;');
+    rule('#cv-guarantee-block>div:nth-child(2),#cv-guarantee-block>div:nth-child(2)>span','color:#805000!important;');
+    // Preserve rank meaning in both statistic tables without inspecting inline styles.
+    const rankInk={ass:'#4a0080',s:'#633598',a:'#9c2540',b:'#125875',c:'#16603c',d:'#516477',e:'#805000'};
+    for(const [rank,ink] of Object.entries(rankInk)){
+      const keys=rank==='ass'?['ass']:[rank,rank+'+'];
+      for(const key of keys){
+        rule(`.aw-rank-badge[data-rank="${key}"]`, `background:#f0f5f8!important;color:${ink}!important;border-color:${ink}55!important;`);
+        rule(`.cv-stats-rank[data-rank="${key}"]`, `color:${ink}!important;`);
       }
-      const selectors=[];
-      for(const value of new Set(variants))for(const space of ['', ' ']){
-        const token=`${prop}:${space}${value}`;
-        selectors.push(`[style^="${token};" i]`,`[style*=";${token};" i]`,`[style*="; ${token};" i]`,`[style="${token}" i]`,`[style$=";${token}" i]`,`[style$="; ${token}" i]`);
-      }
-      const target=`:is(${selectors.join(',')})`;
-      rules.push(`${light} :is(${scope},${scope} *)${target}{${css}}`);
     }
-    for(const color of ['#fff','#f8fafc','#e2e8f0','#cbd5e1','#dbeafe','#e0f2fe','#e5e7eb'])inline('color',color,'color:#233345!important;');
-    for(const color of ['#94a3b8','#64748b','#475569','#334155','#adb5bd','#6b6b6b'])inline('color',color,'color:#516477!important;');
-    for(const color of ['rgba(255,255,255,.6)','rgba(255,255,255,.3)'])inline('color',color,'color:#516477!important;');
-    for(const color of ['#93c5fd','#7dd3fc','#38bdf8','#60a5fa','#bae6fd','#67e8f9','#4d9fff','#1565c0'])inline('color',color,'color:#125875!important;');
-    for(const color of ['#bbf7d0','#86efac','#4ade80','#4dcc6a','#16a34a','#1b7a1b'])inline('color',color,'color:#16603c!important;');
-    for(const color of ['#fca5a5','#fecaca','#fecdd3','#f87171','#ff4d4d','#cc0000'])inline('color',color,'color:#9c2540!important;');
-    for(const color of ['#fbbf24','#fde68a','#fcd34d','#fdba74','#f59e0b','#b07540'])inline('color',color,'color:#805000!important;');
-    for(const color of ['#c4b5fd','#c084fc','#a78bfa','#c77dff','#a855f7','#9b30ff','#818cf8'])inline('color',color,'color:#633598!important;');
-    for(const prop of ['background','background-color']){
-      for(const color of ['#0a0f1a','#0f172a','#0d1422','#1e293b','#111c2f','#020617'])inline(prop,color,soft);
-      for(const color of ['#082f49','#0c1445','#0ea5e9','#334155'])inline(prop,color,blue);
-      for(const color of ['#052e16','#14532d','#166534','#065f46','#15803d'])inline(prop,color,green);
-      for(const color of ['#7f1d1d','#4c0519','#450a0a','#991b1b','#7a2828'])inline(prop,color,red);
-      for(const color of ['#451a03','#78350f'])inline(prop,color,amber);
-    }
-    // Neutral inline borders only; status/rank borders retain their meaning.
-    rule(`${scope} [style*="solid rgb(30, 41, 59)"],${scope} [style*="solid #1e293b"],${scope} [style*="solid #0f172a"]`,'border-color:#ccd9e2!important;');
     return rules.join('\n');
   }
   globalStyle.textContent += suiteBuildLightThemeCss();
@@ -3976,11 +3966,11 @@
       const color=RANK_COLORS[r]||'#ccc';
       const dimmed=cnt===0?';opacity:.35':'';
       return `<tr style="transition:opacity .15s${dimmed}">
-        <td style="padding:5px 8px"><span style="color:${color};font-weight:700;font-size:14px">${RANK_LABELS[r]}</span></td>
+        <td style="padding:5px 8px"><span class="cv-stats-rank" data-rank="${r.toLowerCase().replace('_plus','+')}" style="color:${color};font-weight:700;font-size:14px">${RANK_LABELS[r]}</span></td>
         <td style="padding:5px 8px;text-align:center;color:${cnt>0?'#e2e8f0':'#475569'}">${cnt}</td>
         <td style="padding:5px 8px;text-align:center">
-          <span style="color:${cnt>0?color:'#334155'};font-weight:600">${pct}%</span>
-          <div style="width:80px;height:4px;background:#1e293b;border-radius:2px;margin:3px auto 0">
+          <span class="cv-stats-rank" data-rank="${r.toLowerCase().replace('_plus','+')}" style="color:${cnt>0?color:'#334155'};font-weight:600">${pct}%</span>
+          <div class="cv-stats-track" style="width:80px;height:4px;background:#1e293b;border-radius:2px;margin:3px auto 0">
             <div style="width:${Math.min(parseFloat(pct),100)}%;height:100%;background:${cnt>0?color:'#1e293b'};border-radius:2px"></div>
           </div>
         </td>
@@ -4019,8 +4009,8 @@
     if(!statsPanel)return;
     const bucket=activeTab==='all'?'allCards':'pickedCards';
     statsPanel.querySelector('#cv-stats-content').innerHTML=buildStatsHTML(bucket);
-    statsPanel.querySelectorAll('.cv-tab-btn').forEach(b=>{ const on=b.dataset.tab===activeTab; b.style.background=on?'#0ea5e9':'transparent'; b.style.color=on?'#fff':'#64748b'; });
-    statsPanel.querySelectorAll('.cv-filter-btn').forEach(b=>{ const on=b.dataset.filter===statsFilter; b.style.background=on?'#334155':'transparent'; b.style.color=on?'#e2e8f0':'#475569'; });
+    statsPanel.querySelectorAll('.cv-tab-btn').forEach(b=>{ const on=b.dataset.tab===activeTab; b.setAttribute('aria-pressed',String(on)); b.style.background=on?'#0ea5e9':'transparent'; b.style.color=on?'#fff':'#64748b'; });
+    statsPanel.querySelectorAll('.cv-filter-btn').forEach(b=>{ const on=b.dataset.filter===statsFilter; b.setAttribute('aria-pressed',String(on)); b.style.background=on?'#334155':'transparent'; b.style.color=on?'#e2e8f0':'#475569'; });
   }
 
   function createStatsPanel(){
@@ -7517,7 +7507,7 @@
       .cv-stones-history-btn,.cv-stones-history button{box-sizing:border-box;border:1px solid #3c6059;border-radius:9px;background:#263f39;color:#d8f5ed;padding:8px 12px;font:600 12px/1.3 'Segoe UI',Arial,sans-serif;cursor:pointer;}
       .cv-stones-history-btn{align-self:center;margin:10px 12px 0;}
       .cv-stones-wallet .cv-stones-history-btn{margin:12px 0 0;}
-      .cv-stones-history{box-sizing:border-box;width:min(760px,calc(100vw - 24px));max-width:none;max-height:calc(100dvh - 24px);padding:0;border:1px solid #344647;border-radius:16px;background:#1b2325;color:#e5eeee;font:14px/1.5 'Segoe UI',Arial,sans-serif;box-shadow:0 20px 65px #0009;overflow:hidden;}
+      .cv-stones-history{position:fixed;inset:50% auto auto 50%;margin:0;transform:translate(-50%,-50%);box-sizing:border-box;width:min(760px,calc(100vw - 24px));max-width:none;max-height:calc(100dvh - 24px);padding:0;border:1px solid #344647;border-radius:16px;background:#1b2325;color:#e5eeee;font:14px/1.5 'Segoe UI',Arial,sans-serif;box-shadow:0 20px 65px #0009;overflow:hidden;}
       .cv-stones-history[open]{display:flex;flex-direction:column;}
       .cv-stones-history::backdrop{background:#0009;}
       .cv-stones-history__head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 18px;background:#253b37;flex-shrink:0;}
@@ -10256,10 +10246,10 @@
     const colBtn=document.createElement('button'); colBtn.textContent='—'; colBtn.type='button'; colBtn.style.cssText='width:26px;height:26px;border:none;border-radius:7px;background:#1e293b;color:#94a3b8;cursor:pointer;font-size:14px;line-height:1';
     colBtn.addEventListener('click',()=>setHkPanelCollapsed(true)); hdr.append(title,colBtn);
     const body=document.createElement('div'); body.style.cssText='padding:12px;max-height:calc(100dvh - 70px);overflow-y:auto;overscroll-behavior:contain';
-    const info=document.createElement('div'); info.textContent='Кликни поле и нажми клавишу'; info.style.cssText='font-size:11px;color:#334155;margin-bottom:10px';
+    const info=document.createElement('div'); info.className='suite-hotkeys-help'; info.textContent='Кликни поле и нажми клавишу'; info.style.cssText='font-size:11px;color:#334155;margin-bottom:10px';
     const buyF=makeHkField('Купить пак','buyKey'), leftF=makeHkField('Левая карта','leftKey'), midF=makeHkField('Средняя карта','middleKey'), rightF=makeHkField('Правая карта','rightKey');
     const guardOkF=makeHkField('Защитное окно: да','guardConfirmKey'), guardCancelF=makeHkField('Защитное окно: отмена','guardCancelKey');
-    hkSummary=document.createElement('div'); hkSummary.style.cssText='margin-top:10px;padding:9px;border-radius:8px;background:#0f172a;font-size:11px;line-height:1.8;color:#64748b'; refreshHkSummary();
+    hkSummary=document.createElement('div'); hkSummary.className='suite-hotkeys-summary'; hkSummary.style.cssText='margin-top:10px;padding:9px;border-radius:8px;background:#0f172a;font-size:11px;line-height:1.8;color:#64748b'; refreshHkSummary();
     const resetBtn=document.createElement('button'); resetBtn.type='button'; resetBtn.textContent='По умолчанию'; resetBtn.style.cssText='width:100%;margin-top:10px;border:none;border-radius:8px;background:#1e293b;color:#94a3b8;padding:8px;cursor:pointer;font-size:12px';
     resetBtn.addEventListener('click',()=>{ ['buyKey','leftKey','middleKey','rightKey','guardConfirmKey','guardCancelKey'].forEach(k=>{ cfg[k]=DEFAULT_SETTINGS[k]; }); saveCfg(); [buyF,leftF,midF,rightF,guardOkF,guardCancelF].forEach(f=>f.input.value=codeToLabel(cfg[f.input.dataset.settingKey])); refreshHkSummary(); setHkPanelCollapsed(false); });
     body.append(info,buyF.row,leftF.row,midF.row,rightF.row,guardOkF.row,guardCancelF.row,hkSummary,resetBtn); hkExpanded.append(hdr,body);
@@ -15757,7 +15747,7 @@ function watchTradeLimitsSettings(){
                 return `
                     <tr>
                         <td>
-                            <span class="aw-rank-badge" style="background:${rc.bg};color:${rc.color};border-color:${rc.color}22">
+                            <span class="aw-rank-badge" data-rank="${rc.key}" style="background:${rc.bg};color:${rc.color};border-color:${rc.color}22">
                                 ${rc.label}
                             </span>
                         </td>
@@ -18035,6 +18025,7 @@ function watchTradeLimitsSettings(){
 
             setPanelText(btn, active ? 'Автолут: ВКЛ' : 'Автолут: ВЫКЛ');
             btn.style.background = active ? '#14532d' : '#7f1d1d';
+            if(btn.dataset.active !== String(active)) btn.dataset.active = String(active);
 
             if (!scriptEnabledWatch) {
                 setPanelText(info, 'Модуль выключен');
@@ -20810,7 +20801,7 @@ function watchTradeLimitsSettings(){
             <span class="suite-lab-fatigue-icon">💤</span>
             <span>Усталость</span>
           </div>
-          <span class="suite-lab-fatigue-value"><span data-lab-fatigue="approx" hidden>≈</span><span data-lab-fatigue="percent">—</span></span>
+          <span class="suite-lab-fatigue-value"><span data-lab-fatigue="percent">—</span></span>
           <span class="suite-lab-fatigue-progress" aria-hidden="true"><span data-lab-fatigue="fill"></span></span>
           <button class="suite-lab-fatigue-btn" type="button" title="Подробная статистика">≡</button>
         `;
@@ -20826,24 +20817,20 @@ function watchTradeLimitsSettings(){
     function renderBox(){
       if(!runtime.box) return;
       const percentEl = runtime.box.querySelector('[data-lab-fatigue="percent"]');
-      const approxEl = runtime.box.querySelector('[data-lab-fatigue="approx"]');
       const fillEl = runtime.box.querySelector('[data-lab-fatigue="fill"]');
       const value = suiteLabyrinthFatigueNumber(runtime.state.value);
       const limit = suiteLabyrinthFatigueLimit(runtime.state.limit) || 10;
-      const approximate = !runtime.cacheExact || !runtime.state.limitConfirmed;
+      // Threshold calibration remains internal; the compact UI shows percent only.
+      const confirmed = runtime.cacheExact && runtime.state.limitConfirmed;
       const percent = Number.isFinite(value) ? Math.max(0, Math.min(100, Math.round(value / limit * 1000) / 10)) : 0;
       if(percentEl) percentEl.textContent = Number.isFinite(value) ? `${percent}%` : '—';
-      if(approxEl) approxEl.hidden = !Number.isFinite(value) || !approximate;
       if(fillEl) fillEl.style.width = `${percent}%`;
-      runtime.box.classList.toggle('is-ready', percent >= 100 && !approximate);
-      runtime.box.classList.toggle('is-approximate', Number.isFinite(value) && approximate);
+      runtime.box.classList.toggle('is-ready', percent >= 100 && confirmed);
       const hints = [];
-      hints.push(`Порог усталости: ${limit}${runtime.state.limitConfirmed ? '' : ' (уточняется)'}.`);
-      if(Number.isFinite(value)) hints.push(`Счётчик: ${value}.`);
       if(!Number.isFinite(value)) hints.push('Счётчик появится после первого хода.');
       if(Number.isFinite(value) && !runtime.cacheExact) hints.push('Сохранённое значение получено в другой комнате и может быть неточным.');
       if(runtime.state.skipped) hints.push('Последний ход не добавил усталость.');
-      if(percent >= 100 && !approximate) hints.push('Следующий засчитанный ход вызовет усталость.');
+      if(percent >= 100 && confirmed) hints.push('Следующий засчитанный ход вызовет усталость.');
       runtime.box.title = hints.join('\n');
       suitePositionLabyrinthFatigueCounter();
     }
