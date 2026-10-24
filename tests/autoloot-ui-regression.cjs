@@ -90,7 +90,7 @@ function extract(name) {
         const receipts = new Promise(resolve => { releaseReceipts = resolve; });
         const getAllReceipts = () => { receiptReads++; return receipts; };
         let scriptEnabledWatch = true, checkNewCardTimeoutId = 1, nextRunAt = Date.now() + 30000;
-        const isLoopRunning = false;
+        const isLoopRunning = false, rateLimitUntil = 0;
         const RESUME_DELAY_MS = 1000, EMPTY_DB_RECHECK_MS = 60000;
         const claimTabLock = () => true, mainCardCheckLogic = () => {};
         const saveDiagnosticLog = () => { schedules++; }, stopMainCardCheckLogic = () => {};

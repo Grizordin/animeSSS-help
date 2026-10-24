@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.79
+// @version      3.80
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -2718,10 +2718,13 @@
     rules.push(`${light} ${slider}:after{background:#bd3349!important;box-shadow:none!important;}${light} .suite-toggle input:checked+${slider}:after{background:#167747!important;box-shadow:none!important;}`);
     rule('.aw-progress-bar,.aw-rank-bar,.suite-lab-fatigue-progress','background:#dce6ed!important;border-color:#b4c6d3!important;');
     rule('.aw-stat-table :is(th,td)','border-color:#d9e2e9!important;');
+    rule('.aw-rank-label,.aw-rank-empty','color:#516477!important;');
     rule('.suite-owner-restriction-legend-item',soft);
     rule('#stone-brick-panel:not(.suite-brick-embedded),#remelt-panel:not(.suite-remelt-embedded)',surface);
     rule('#stone-brick-panel:not(.suite-brick-embedded)>div:first-child',blue);
     rule('#remelt-panel:not(.suite-remelt-embedded)>div:first-child',amber);
+    rule('#stone-brick-panel:not(.suite-brick-embedded)>div:first-child button,#remelt-panel:not(.suite-remelt-embedded)>div:first-child button','color:#233345!important;');
+    rule('#stone-brick-panel:not(.suite-brick-embedded) input:not([type="checkbox"]),#remelt-panel:not(.suite-remelt-embedded) input:not([type="checkbox"])','background:#f0f5f8!important;color:#233345!important;border-color:#a4b8c8!important;');
     rule('.circle-btn.suite-floating-ui',blue);
     rule('#cv-pack-tools','--bg:#fff;--tt:#233345;--tt-2:#516477;--bdc:#c7d5df;');
     rule('#cv-pack-tools :is(.cv-pack-tool-icon,.cv-pack-tool-value)','color:#633598!important;');
@@ -4753,6 +4756,23 @@
     'rose':'cpt-rose','ocean':'cpt-ocean','volcano':'cpt-volcano',
   };
 
+  // Card loot has its own palette, independent of the general notification themes.
+  const CPT_CARD_RANK_PALETTE = {
+    ass: ['#6b21a8', '#e9d5ff'],
+    's-plus': ['#9b30ff', '#d8b4fe'], s: ['#c77dff', '#e9d5ff'],
+    'a-plus': ['#cc0000', '#fca5a5'], a: ['#ff4d4d', '#fda4a4'],
+    'b-plus': ['#1565c0', '#93c5fd'], b: ['#4d9fff', '#bfdbfe'],
+    'c-plus': ['#1b7a1b', '#86efac'], c: ['#4dcc6a', '#bbf7d0'],
+    'd-plus': ['#6b6b6b', '#d1d5db'], d: ['#adb5bd', '#e5e7eb'],
+    'e-plus': ['#7d4e1f', '#d9b38c'], e: ['#b07540', '#e7c29e'],
+    unknown: ['#64748b', '#e2e8f0']
+  };
+
+  function cptCardRankTheme(rank){
+    const key=String(rank||'').trim().toLowerCase().replace(/(?:\+|_plus)$/, '-plus');
+    return 'cpt-card-rank cpt-card-rank-' + (Object.hasOwn(CPT_CARD_RANK_PALETTE,key) ? key : 'unknown');
+  }
+
   const CPT_MAP = [
     {r:/^Вы успешно приобрели\s+["«].+["»]\.?$/i,                icon:'bag',    title:'Покупка',     theme:'neon-green'},
     {s:'Вы купили товар',                                        icon:'bag',    title:'Покупка',     theme:'neon-green'},
@@ -4762,7 +4782,7 @@
     {s:'Обмен произведён',                                       icon:'trade',  title:'Обмен',       theme:'neon-green'},
     {s:'Обмен отменён',                                          icon:'trade',  title:'Отмена',      theme:'rose'      },
     {s:'Данный обмен не действительный',                         icon:'warn',   title:'Обмен',       theme:'rose'      },
-    {s:'Вы можете обмениваться с одним и тем же пользователем не более 3 раз в сутки', icon:'clock', title:'Обмен', theme:'rose'},
+    {r:/Вы можете обмениваться с одним и тем же пользователем не более \d+ раз в сутки\.?/i, icon:'clock', title:'Обмен', theme:'rose'},
     {s:'ID карточки скопировано',                                icon:'copy',   title:'Скопировано', theme:'indigo'    },
     {s:'Ссылка на текущую страницу скопирована',                 icon:'link',   title:'Скопировано', theme:'indigo'    },
     {s:'Ссылки на все домены',                                   icon:'link',   title:'Скопировано', theme:'indigo'    },
@@ -5114,6 +5134,8 @@
     {r:/Ты отремонтировал персональную шахту за \d[\d\s]*\s+[AА]СС\.?\s*Добыча ресурсов возобновлена\.?/i, icon:'coin', title:'Шахта', theme:'neon-green'},
     {s:'Ты помог со сбором шахты',                                 icon:'coin',   title:'Шахта',       theme:'neon-green'},
     // ── Кодекс и испытания ────────────────────────────────
+    {s:'Активное испытание не найдено',                           icon:'warn',   title:'Испытание',   theme:'neon-amber'},
+    {r:/У вас уже есть активное испытание в главе \d+\.\s*Сначала завершите его\.?/i, icon:'warn', title:'Испытание', theme:'neon-amber'},
     {s:'Сначала заверши испытание Дао',                            icon:'warn',   title:'Дао',         theme:'neon-amber'},
     {s:'Сначала открой одни из врат испытания Дао',                 icon:'warn',   title:'Дао',         theme:'neon-amber'},
     {r:/Сменить испытание можно только с \d{2}:\d{2} до \d{2}:\d{2} по МСК\.?/i, icon:'clock', title:'Испытание', theme:'neon-amber'},
@@ -5319,6 +5341,10 @@
       .cpt-head{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700;line-height:1.2;position:relative;z-index:2;}
       .cpt-sub{margin-top:3px;font-size:11px;line-height:1.35;opacity:.82;position:relative;z-index:2;padding-left:19px;}
       .cpt-bar{position:absolute;left:0;bottom:0;width:100%;height:2px;background:rgba(255,255,255,.28);transform-origin:left;z-index:2;}
+      .cpt-card-rank{background:#080b12;border:1px solid var(--cpt-card-border);color:var(--cpt-card-text);box-shadow:0 0 10px var(--cpt-card-glow),0 10px 28px rgba(0,0,0,.3);}
+      .cpt-card-rank .cpt-sub{color:#e2e8f0;opacity:1;}
+      .cpt-card-rank .cpt-bar{background:var(--cpt-card-border);}
+      ${Object.entries(CPT_CARD_RANK_PALETTE).map(([rank,[border,text]])=>'.cpt-card-rank-'+rank+'{--cpt-card-border:'+border+';--cpt-card-text:'+text+';--cpt-card-glow:'+border+'66;}').join('\n')}
       .cpt-neon-green{background:#05070d;border:1px solid #22c55e;color:#4ade80;box-shadow:0 0 10px rgba(34,197,94,.6),0 0 26px rgba(34,197,94,.22),0 10px 28px rgba(0,0,0,.3);}
       .cpt-neon-blue{background:#05070d;border:1px solid #3b82f6;color:#60a5fa;box-shadow:0 0 10px rgba(59,130,246,.6),0 0 26px rgba(59,130,246,.22),0 10px 28px rgba(0,0,0,.3);}
       .cpt-neon-pink{background:#05070d;border:1px solid #d946ef;color:#f0abfc;box-shadow:0 0 10px rgba(217,70,239,.6),0 0 26px rgba(217,70,239,.22),0 10px 28px rgba(0,0,0,.3);}
@@ -5862,6 +5888,7 @@
       cardsAuthorObserver:null,
       cardsAuthorObserveTimer:null,
       cardsAuthorRefreshRunning:false,
+      cardsAuthorLastStarted:0,
       suggestionSeenObserver:null,
       suggestionVisibleCards:new Set(),
       suggestionNewIds:new Set(),
@@ -6040,6 +6067,7 @@
           task_key:row.task_key,
           author:row.author || '',
           status:row.status || '',
+          checkedAt:now(),
           updated_at:row.updated_at || now()
         };
       }
@@ -6365,6 +6393,9 @@
     }
 
     function renderBadge(badge, { label, author, status }){
+      const signature=JSON.stringify([label,author || '',status || '']);
+      if(badge.dataset.suiteAuthorSignature===signature)return;
+      badge.dataset.suiteAuthorSignature=signature;
       badge.classList.toggle('suite-pending', !author && status !== 'not_found');
       badge.classList.toggle('suite-not-found', status === 'not_found');
       if(author){
@@ -6413,16 +6444,20 @@
 
     async function refreshCardsAuthors(){
       if(!isCardsPage()) return false;
-      const keys = collectCardsPageKeys();
-      if(!keys.length) return true;
+      const keys = collectCardsPageKeys().filter(key=>{
+        const cached=getCachedAuthorResult(key);
+        return !cached || (!cached.author && cached.status!=='not_found') || now()-Number(cached.checkedAt || 0)>=HOUR_MS;
+      });
       getCreatedCards().forEach(card => ensureCreatedBadge(card));
       document.querySelectorAll('.card-replace-vote').forEach(item => {
         const compare = item.querySelector('.card-replace-vote__compare,.card-replace-vote__cards');
         const cached = getCachedAuthorResult(replacementKey(item));
         ensureBadgeAfter(item, compare, { label:'Замена', author:cached?.author, status:cached?.status, className:'suite-replace-badge' });
       });
+      if(!keys.length)return false;
       try{
         const json = await apiGet('/api/results?keys=' + encodeURIComponent(keys.join(',')));
+        if(window.__suiteSuggestionAuthorsState!==state)return false;
         saveAuthorResults(json.results || []);
         const byKey = new Map((json.results || []).map(row => [row.task_key, row]));
         let hasPending = false;
@@ -6438,20 +6473,25 @@
           const compare = item.querySelector('.card-replace-vote__compare,.card-replace-vote__cards');
           ensureBadgeAfter(item, compare, { label:'Замена', author:result?.author, status:result?.status, className:'suite-replace-badge' });
         });
-        return hasPending;
+        return hasPending || collectCardsPageKeys().some(key=>!getCachedAuthorResult(key));
       }catch(e){
         return true;
       }
     }
 
     function startCardsAuthorsPolling(){
-      if(!isCardsPage() || state.cardsAuthorPollTimer || state.cardsAuthorRefreshRunning) return;
+      if(window.__suiteSuggestionAuthorsState!==state || document.hidden || !isCardsPage() || state.cardsAuthorPollTimer || state.cardsAuthorRefreshRunning) return;
       const run = async () => {
+        state.cardsAuthorPollTimer=null;
+        if(window.__suiteSuggestionAuthorsState!==state || document.hidden || !isCardsPage())return;
+        const wait=state.cardsAuthorLastStarted+CARDS_AUTHOR_POLL_MS-now();
+        if(wait>0){state.cardsAuthorPollTimer=setTimeout(run,wait);return;}
         state.cardsAuthorRefreshRunning = true;
+        state.cardsAuthorLastStarted=now();
         try{
           const shouldContinue = await refreshCardsAuthors();
           state.cardsAuthorPollTimer = null;
-          if(shouldContinue && isCardsPage()){
+          if(shouldContinue && window.__suiteSuggestionAuthorsState===state && !document.hidden && isCardsPage()){
             state.cardsAuthorPollTimer = setTimeout(run, CARDS_AUTHOR_POLL_MS);
           }
         }finally{
@@ -6479,6 +6519,10 @@
     maybeRefreshSuggestions();
     startCardsAuthorsPolling();
     startCardsAuthorsObserver();
+    on(document,'visibilitychange',()=>{
+      if(document.hidden){clearTimeout(state.cardsAuthorPollTimer);state.cardsAuthorPollTimer=null;}
+      else scheduleCardsAuthorsRefresh(0);
+    });
     state.intervals.push(setInterval(maybeRefreshSuggestions, HOUR_MS));
   }
 
@@ -14324,8 +14368,9 @@ function watchTradeLimitsSettings(){
     const PANEL_KEY             = 'missingCardIdsPanel';
     const REQUEST_DELAY_SCAN    = 1000;
     const QUEUE_DELAY_SUCCESS   = 2500;
-    const QUEUE_DELAY_BASE      = 200;
+    const QUEUE_DELAY_BASE      = 1000;
     const QUEUE_DELAY_MAX       = 10000;
+    const QUEUE_MAX_ATTEMPTS    = 3;
     const BATCH_SIZE            = 49;
     const HASH_KEY              = `noNeedUserHash:${currentDomain}:${userName.toLowerCase()}`;
     const PANEL_POS_KEY         = `noNeedPanelPos:${currentDomain}:${userName.toLowerCase()}`;
@@ -14336,6 +14381,7 @@ function watchTradeLimitsSettings(){
     let refreshButton, scanButton, stopScanButton;
     let isScanning = false, cancelScan = false;
     let noNeedQueue = [], noNeedQueueRunning = false, autoNoNeedRunning = false, noNeedRetryCount = 0;
+    let noNeedQueuePaused = false, noNeedBlockedUntil = 0, noNeedPauseReason = '';
     let scanBuffer = [], scanSent = 0, scanFound = 0, scanTotalPages = 0, scanCurPage = 0;
     let panelCollapsed = false;
     let cachedUserHash = nnGetHash() || gmStoreGet(HASH_KEY, '');
@@ -14500,9 +14546,56 @@ function watchTradeLimitsSettings(){
       if(subEl)subEl.textContent=meta.clean;
       if(bar)cptAnimBar(bar);
     }
-    function hideInd(id) { document.getElementById(id)?.remove(); }
+    function hideInd(id) {
+      if(id==='no-need-queue-indicator' && noNeedQueuePaused)return;
+      document.getElementById(id)?.remove();
+    }
     function showScanInd(m)  { showInd('scan-progress-indicator', m, '112px'); }
     function showQueueInd(m) { showInd('no-need-queue-indicator', m, '20px'); }
+
+    function noNeedHttpError(response) {
+      const error=new Error(`HTTP ${response.status}`);
+      error.status=response.status;
+      const retry=response.headers?.get('Retry-After');
+      const seconds=retry && /^\d+$/.test(retry.trim()) ? Number(retry)*1000 : 0;
+      const until=retry && !seconds ? Date.parse(retry) : 0;
+      error.retryAfterMs=Math.max(0,seconds,Number.isFinite(until)?until-Date.now():0);
+      if(error.retryAfterMs)noNeedBlockedUntil=Math.max(noNeedBlockedUntil,Date.now()+error.retryAfterMs);
+      if([401,403,429].includes(response.status))
+        noNeedBlockedUntil=Math.max(noNeedBlockedUntil,Date.now()+Math.max(300000,error.retryAfterMs));
+      return error;
+    }
+    function pauseNoNeedQueue(error) {
+      noNeedQueuePaused=true;
+      noNeedPauseReason=error.message;
+      cancelScan=true;
+      showQueueInd(`⏸ Очередь приостановлена: ${error.message}. Проверьте результат перед повтором.`);
+      const indicator=document.getElementById('no-need-queue-indicator');
+      if(!indicator)return;
+      indicator.querySelector('.nn-queue-controls')?.remove();
+      const controls=document.createElement('div');controls.className='nn-queue-controls';
+      controls.style.cssText='display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;pointer-events:auto';
+      const resume=document.createElement('button');resume.textContent=noNeedQueue.length?'Продолжить':'Снять паузу';
+      resume.onclick=()=>{
+        if(isScanning || noNeedQueueRunning){resume.textContent='Дождитесь остановки сканирования';return;}
+        if(Date.now()<noNeedBlockedUntil){resume.textContent=`Повтор через ${Math.ceil((noNeedBlockedUntil-Date.now())/1000)} с`;return;}
+        noNeedQueuePaused=false;controls.remove();
+        if(noNeedQueue.length)runQueue();
+        else showQueueInd('Пауза снята. Можно запустить сканирование заново.');
+      };
+      const cancel=document.createElement('button');cancel.textContent='Отменить очередь';
+      cancel.onclick=()=>{
+        if(isScanning || noNeedQueueRunning){cancel.textContent='Дождитесь остановки сканирования';return;}
+        if(!confirm('Отменить оставшиеся задания очереди? Уже выполненные действия не отменятся.'))return;
+        noNeedQueue=[];scanBuffer=[];noNeedQueuePaused=false;autoNoNeedRunning=false;
+        controls.remove();showQueueInd('⏹ Оставшиеся задания отменены');
+      };
+      for(const button of [resume,cancel]){
+        button.type='button';
+        button.style.cssText='flex:1 1 90px;min-width:0;padding:5px;font-size:12px;line-height:1.3;white-space:normal;color:inherit;background:transparent;border:1px solid currentColor;border-radius:6px;cursor:pointer';
+      }
+      controls.append(resume,cancel);indicator.appendChild(controls);
+    }
 
     // ── HTTP ─────────────────────────────────────────────────
     function parseHtmlDoc(html) { return new DOMParser().parseFromString(html,'text/html'); }
@@ -14522,7 +14615,7 @@ function watchTradeLimitsSettings(){
     }
     async function fetchHtml(url) {
       const r=await fetch(url,{method:'GET',credentials:'same-origin'});
-      if(!r.ok) throw new Error(`HTTP ${r.status} при загрузке ${url}`);
+      if(!r.ok) throw noNeedHttpError(r);
       const html=await r.text();
       rememberHashFromHtml(html);
       return html;
@@ -14540,7 +14633,8 @@ function watchTradeLimitsSettings(){
       return nums.length?Math.max(...nums):1;
     }
     async function getTotalPages(url) {
-      try{ const r=await fetch(url,{credentials:'same-origin'}); const t=await r.text(); return getMaxPages(new DOMParser().parseFromString(t,'text/html')); }catch(e){ return 1; }
+      const html=await fetchHtml(url);
+      return getMaxPages(new DOMParser().parseFromString(html,'text/html'));
     }
     function extractOwnerIds(html) {
       return [...parseHtmlDoc(html).querySelectorAll('.anime-cards__item[data-owner-id]')]
@@ -14575,7 +14669,7 @@ function watchTradeLimitsSettings(){
       const successHints=['успеш','отправлен','добавлен','добавлено','карты добавлены','в ненужное','в ненужные','добавлены в ненуж'];
       if(errorHints.some(h=>norm.includes(h))) return {ok:false,message:raw||'Ошибка ответа',count:null};
       if(successHints.some(h=>norm.includes(h))) return {ok:true,message:raw||'Успешно',count:null};
-      return {ok:false,message:raw||'Не удалось определить результат запроса',count:null};
+      return {ok:false,message:raw||'Не удалось определить результат запроса',count:null,uncertain:true};
     }
     async function sendIds(ids, hashHint='') {
       if(!ids||!ids.length) throw new Error('Нет ids');
@@ -14584,19 +14678,23 @@ function watchTradeLimitsSettings(){
       if(!hash) throw new Error('Не найден user_hash');
 
       const postOnce = async (userHash) => {
-      const body=new URLSearchParams();
-      body.append('controller','ajax');
-      body.append('mod','cards_ajax');
-      body.append('action','add_no_need');
-      ids.forEach(id=>body.append('ids[]',id));
+        const body=new URLSearchParams();
+        body.append('controller','ajax');
+        body.append('mod','cards_ajax');
+        body.append('action','add_no_need');
+        ids.forEach(id=>body.append('ids[]',id));
         body.append('user_hash',userHash);
-      const r=await fetch('/index.php?controller=ajax&mod=cards_ajax',{
-        method:'POST',credentials:'same-origin',
-        headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8','X-Requested-With':'XMLHttpRequest'},
-        body:body.toString()
-      });
-      const text=await r.text(), parsed=parseResp(text);
-      if(!r.ok) throw new Error(`HTTP ${r.status}: ${parsed.message||text}`);
+        let r,text;
+        try {
+          r=await fetch('/index.php?controller=ajax&mod=cards_ajax',{
+            method:'POST',credentials:'same-origin',
+            headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8','X-Requested-With':'XMLHttpRequest'},
+            body:body.toString()
+          });
+          text=await r.text();
+        } catch(error){error.uncertain=true;throw error;}
+        const parsed=parseResp(text);
+        if(!r.ok) throw noNeedHttpError(r);
         return parsed;
       };
 
@@ -14608,7 +14706,7 @@ function watchTradeLimitsSettings(){
         hash=await refreshUserHash();
         if(hash) parsed=await postOnce(hash);
       }
-      if(!parsed.ok) throw new Error(parsed.message||'Сервер не подтвердил успешную отправку');
+      if(!parsed.ok) throw Object.assign(new Error(parsed.message||'Сервер не подтвердил успешную отправку'),{uncertain:!!parsed.uncertain});
       return parsed;
     }
 
@@ -14639,15 +14737,19 @@ function watchTradeLimitsSettings(){
     }
 
     async function runQueue() {
-      if(noNeedQueueRunning) return;
+      if(noNeedQueueRunning || noNeedQueuePaused) return;
+      if(Date.now()<noNeedBlockedUntil){pauseNoNeedQueue(new Error('Запросы временно приостановлены после ограничения сервера'));return;}
       noNeedQueueRunning=true; noNeedRetryCount=0;
-      while(noNeedQueue.length) {
+      while(noNeedQueue.length && !noNeedQueuePaused) {
+        if(Date.now()<noNeedBlockedUntil){pauseNoNeedQueue(new Error('Запросы временно приостановлены после ограничения сервера'));break;}
         const task=noNeedQueue[0];
         try {
           if(task.type==='page') {
             markBtns('page',task.value,b=>{b.disabled=true;b.textContent='⏳';b.style.opacity='.7';b.title='Выполняется';});
             showQueueInd(`🗑 Страница ${task.value}: сбор owner-id...`);
             const html=await fetchHtml(`${scanBaseURL}${task.value}&locked=0`);
+            if(Date.now()<noNeedBlockedUntil)pauseNoNeedQueue(new Error('Запросы временно приостановлены после ограничения сервера'));
+            if(noNeedQueuePaused)break;
             const ids=extractOwnerIds(html);
             if(!ids.length) throw new Error(`На странице ${task.value} не найдены data-owner-id`);
             showQueueInd(`🗑 Страница ${task.value}: отправка ${ids.length} карт...`);
@@ -14662,6 +14764,8 @@ function watchTradeLimitsSettings(){
             markBtns('card',task.value,b=>{b.disabled=true;b.textContent='⏳';b.style.opacity='.7';b.title='Выполняется';});
             showQueueInd(`🗑 ID ${task.value}: поиск owner-id...`);
             const html=await fetchHtml(`https://${currentDomain}/user/cards/?name=${encodedUserName}&card_id=${encodeURIComponent(task.value)}`);
+            if(Date.now()<noNeedBlockedUntil)pauseNoNeedQueue(new Error('Запросы временно приостановлены после ограничения сервера'));
+            if(noNeedQueuePaused)break;
             const ids=extractOwnerIds(html);
             if(!ids.length) throw new Error(`Для card_id=${task.value} не найден data-owner-id`);
             showQueueInd(`🗑 ID ${task.value}: отправка ${ids.length} карт...`);
@@ -14684,6 +14788,10 @@ function watchTradeLimitsSettings(){
           } else throw new Error(`Неизвестный тип: ${task.type}`);
         } catch(err) {
           noNeedRetryCount++;
+          if(err.uncertain || err.retryAfterMs>0 || noNeedRetryCount>=QUEUE_MAX_ATTEMPTS || (err.status>=400 && err.status<500)){
+            pauseNoNeedQueue(err);
+            break;
+          }
           if(task.type==='page'||task.type==='card')
             markBtns(task.type,task.value,b=>{b.disabled=true;b.textContent='🔁';b.style.background='#ff9800';b.style.color='black';b.style.opacity='1';b.title=`Повтор: ${err.message}`;});
           if(task.type==='batch') showQueueInd(`🔁 Повтор batch (${task.ids.length}) | ${err.message}`);
@@ -14693,6 +14801,7 @@ function watchTradeLimitsSettings(){
       }
       noNeedQueueRunning=false; autoNoNeedRunning=false; noNeedRetryCount=0;
       renderPanel();
+      if(noNeedQueuePaused){pauseNoNeedQueue(new Error(noNeedPauseReason));return;}
       if(!isScanning&&!scanBuffer.length&&!getPendingCount()) {
         showScanInd(`✅ Готово! Найдено: ${scanFound} | отправлено: ${scanSent}`);
         showQueueInd('✅ Очередь отправки завершена');
@@ -14721,6 +14830,7 @@ function watchTradeLimitsSettings(){
 
     async function scanAllPages() {
       if(isScanning){ requestStop(); return; }
+      if(noNeedQueuePaused || Date.now()<noNeedBlockedUntil){showScanInd('⏸ Сначала возобновите или отмените приостановленную очередь');return;}
       isScanning=true; cancelScan=false; updateStopBtn();
       scanBuffer=[]; scanSent=0; scanFound=0; scanTotalPages=0; scanCurPage=0;
       showQueueInd('⏳ Очередь ожидает новые batch...');
@@ -14731,48 +14841,60 @@ function watchTradeLimitsSettings(){
           scanCurPage=p; updateScanInd();
           try {
             const r=await fetch(`${scanBaseURL}${p}&locked=0`,{credentials:'same-origin'});
-            if(!r.ok) throw new Error(`HTTP ${r.status}`);
+            if(!r.ok) throw noNeedHttpError(r);
             const html=await r.text(), doc=new DOMParser().parseFromString(html,'text/html');
             rememberHashFromHtml(html);
             const ids=collectNoNeed(doc);
             if(ids.length){ scanBuffer.push(...ids); scanFound+=ids.length; flushBuffer(false); }
-            updateScanInd(); await nnDelay(REQUEST_DELAY_SCAN);
-          } catch(err){ console.error(`Ошибка стр.${p}:`,err); }
+            updateScanInd();
+          } catch(err){
+            console.error(`Ошибка стр.${p}:`,err);
+            // Stop instead of silently skipping cards and accelerating on errors.
+            cancelScan=true;pauseNoNeedQueue(err);
+          } finally {await nnDelay(REQUEST_DELAY_SCAN);}
         }
         flushBuffer(true); isScanning=false; updateStopBtn();
+        if(noNeedQueuePaused){showScanInd('⏸ Сканирование остановлено из-за ошибки; собранная очередь сохранена');return;}
         if(cancelScan) {
           if(getPendingCount()||noNeedQueueRunning) { updateScanInd(true,true); showQueueInd('⏳ Сканирование остановлено, буфер продолжает отправку...'); }
           else { showScanInd(`❌ Остановлено. Найдено: ${scanFound} | отправлено: ${scanSent}`); showQueueInd('✅ Буфер отправлен'); setTimeout(()=>hideInd('scan-progress-indicator'),3000); setTimeout(()=>hideInd('no-need-queue-indicator'),3000); }
         } else if(getPendingCount()||noNeedQueueRunning) { updateScanInd(true,false); }
         else { showScanInd(`✅ Готово! Найдено: ${scanFound} | отправлено: ${scanSent}`); showQueueInd('✅ Очередь завершена'); setTimeout(()=>hideInd('scan-progress-indicator'),3000); setTimeout(()=>hideInd('no-need-queue-indicator'),3000); }
-      } catch(err){ isScanning=false; updateStopBtn(); console.error('scanAllPages:',err); showScanInd(`❌ Ошибка: ${err.message}`); setTimeout(()=>hideInd('scan-progress-indicator'),3000); }
+      } catch(err){ isScanning=false; updateStopBtn(); console.error('scanAllPages:',err); pauseNoNeedQueue(err); showScanInd(`❌ Ошибка: ${err.message}`); }
     }
 
     async function scanLocked() {
       if(isScanning){ cancelScan=true; showScanInd('❌ Сканирование отменено!'); return; }
+      if(noNeedQueuePaused || Date.now()<noNeedBlockedUntil){showScanInd('⏸ Запросы приостановлены после ошибки сервера');return;}
       isScanning=true; cancelScan=false; updateStopBtn();
       const counts={1:{},2:{}};
-      for(const lt of [1,2]) {
-        const max=await getTotalPages(`${scanBaseURL}1&locked=${lt}`);
-        for(let p=1;p<=max;p++) {
+      let scanError=null;
+      try {
+        for(const lt of [1,2]) {
+          const max=await getTotalPages(`${scanBaseURL}1&locked=${lt}`);
+          for(let p=1;p<=max;p++) {
+            if(cancelScan) break;
+            showScanInd(`♻️ Заблок. (locked=${lt}) стр. ${p}/${max}`);
+            try {
+              const r=await fetch(`${scanBaseURL}${p}&locked=${lt}`,{credentials:'same-origin'});
+              if(!r.ok)throw noNeedHttpError(r);
+              const html=await r.text();
+              rememberHashFromHtml(html);
+              const doc=new DOMParser().parseFromString(html,'text/html');
+              doc.querySelectorAll('.anime-cards__item').forEach(c=>{ const id=c.getAttribute('data-id'); if(id) counts[lt][id]=(counts[lt][id]||0)+1; });
+            } finally {await nnDelay(REQUEST_DELAY_SCAN);}
+          }
           if(cancelScan) break;
-          showScanInd(`♻️ Заблок. (locked=${lt}) стр. ${p}/${max}`);
-          try {
-            const r=await fetch(`${scanBaseURL}${p}&locked=${lt}`,{credentials:'same-origin'});
-            const html=await r.text();
-            rememberHashFromHtml(html);
-            const doc=new DOMParser().parseFromString(html,'text/html');
-            doc.querySelectorAll('.anime-cards__item').forEach(c=>{ const id=c.getAttribute('data-id'); if(id) counts[lt][id]=(counts[lt][id]||0)+1; });
-            await nnDelay(REQUEST_DELAY_SCAN);
-          } catch(e){}
         }
-        if(cancelScan) break;
+      } catch(error){scanError=error;cancelScan=true;}
+      // Do not commit a partial duplicate scan as a completed result.
+      if(!cancelScan){
+        Object.entries(counts[1]).forEach(([id,n])=>{ if(n>=2) missingIds.add(id); });
+        Object.entries(counts[2]).forEach(([id,n])=>{ if(n>=2) missingIds.add(id); });
+        Object.keys(counts[1]).forEach(id=>{ if(counts[2][id]) missingIds.add(id); });
+        saveMissing(); renderPanel();
       }
-      Object.entries(counts[1]).forEach(([id,n])=>{ if(n>=2) missingIds.add(id); });
-      Object.entries(counts[2]).forEach(([id,n])=>{ if(n>=2) missingIds.add(id); });
-      Object.keys(counts[1]).forEach(id=>{ if(counts[2][id]) missingIds.add(id); });
-      saveMissing(); renderPanel();
-      showScanInd(cancelScan?'❌ Сканирование отменено!':'✅ Дубли завершены');
+      showScanInd(scanError?`❌ Сканирование остановлено: ${scanError.message}`:cancelScan?'❌ Сканирование отменено!':'✅ Дубли завершены');
       isScanning=false; updateStopBtn();
       setTimeout(()=>hideInd('scan-progress-indicator'),3000);
     }
@@ -15092,6 +15214,7 @@ function watchTradeLimitsSettings(){
         const EMPTY_DB_REMINDER_MS = 30 * 60 * 1000;
         const START_DELAY_MS = 1200;
         const RESUME_DELAY_MS = 300;
+        const RATE_LIMIT_PAUSE_MS = 60000;
         const RECEIPTS_PER_EP_COMPLETE = 5;
 
         // =========================================================
@@ -15106,6 +15229,8 @@ function watchTradeLimitsSettings(){
         let storageHandler = null;
         let storageListenerId = null;
         let nextRunAt = 0;
+        let rateLimitUntil = 0;
+        let rateLimitStorageListenerId = null;
         let profileFetchInProgress = false;
         let offeringRefreshTimer = null, offeringRefreshPending = false;
         let offeringLastSeenAt = 0, offeringRefreshDisposed = false;
@@ -15120,6 +15245,7 @@ function watchTradeLimitsSettings(){
         let panelStyleElement = null;
 
         const currentUser = getCurrentUser();
+        const RATE_LIMIT_STATE_KEY = `aw_active_tab_rate_limit_v1_${currentUser || 'guest'}`;
         const AW_GM_DB_PREFIX = `aw_active_tab_store_v1_${currentUser || 'guest'}_`;
         const AW_GM_STORES = ['anime_history', 'card_receipts', 'skipped_episodes'];
         const EMPTY_DB_STATE_KEY = `aw_active_tab_empty_db_state_v1_${currentUser || 'guest'}`;
@@ -15190,7 +15316,7 @@ function watchTradeLimitsSettings(){
         }
 
         const AW_MAP = [
-            { r:/Получена карта:\s*.+\[/i,           icon:'card',  title:'Карта',       cls:'cpt-neon-green' },
+            { r:/Получена карта:\s*.+\[/i,           icon:'card',  title:'Карта',       cls:'cpt-card-rank cpt-card-rank-unknown' },
             { s:'Статистика карт полностью очищена',   icon:'clear', title:'Очищено',     cls:'cpt-indigo'     },
             { s:'Новый день подтверждён профилем',     icon:'check', title:'Новый день',  cls:'cpt-emerald'    },
             { s:'Всё выфармлено. Жду нового дня',      icon:'clock', title:'Ожидание',    cls:'cpt-neon-amber' },
@@ -15202,7 +15328,9 @@ function watchTradeLimitsSettings(){
         ];
 
         function awResolve(text) {
-            const t = String(text || '');
+            const t = String(text || '').replace(/^\[Auto-Watch\]\s*/i, '');
+            const reward = t.match(/^Получена карта:\s*.+\[([^\[\]]+)\]\s*$/i);
+            if (reward) return { icon:'card', title:'Карта', cls:cptCardRankTheme(reward[1]) };
             for (const row of AW_MAP) {
                 if (row.r && row.r.test(t)) return row;
                 if (row.s && t.includes(row.s)) return row;
@@ -15413,11 +15541,76 @@ function watchTradeLimitsSettings(){
                 data: diagnosticSanitize(data)
             };
 
-            suiteTelemetryLog('autowatch', event, record, /error|failed|limit/i.test(event) ? 'error' : 'debug');
+            const level = event === 'rate_limit_paused' ? 'warn'
+                : /^rate_limit_(resumed|recovered)$/.test(event) ? 'info'
+                : /error|failed|limit/i.test(event) ? 'error' : 'debug';
+            suiteTelemetryLog('autowatch', event, record, level);
+        }
+
+        function autoLootRateLimitError() {
+            const error = new Error('Автолут ожидает окончания паузы после HTTP 429');
+            error.code = 'AW_RATE_LIMIT';
+            error.retryAt = rateLimitUntil;
+            return error;
+        }
+
+        async function readAutoLootRateLimit() {
+            const state = await GM_getValue(RATE_LIMIT_STATE_KEY, null);
+            rateLimitUntil = Number(state?.until) || 0;
+            return state;
+        }
+
+        async function checkAutoLootRateLimit(url = '') {
+            const state = await readAutoLootRateLimit();
+            if (rateLimitUntil > Date.now()) throw autoLootRateLimitError();
+            if (url && state && !state.resumedAt) {
+                const resumedAt = Date.now();
+                await GM_setValue(RATE_LIMIT_STATE_KEY, { ...state, resumedAt });
+                saveDiagnosticLog('rate_limit_resumed', {
+                    blockedAt: state.blockedAt, until: state.until, resumedAt,
+                    waitedMs: resumedAt - state.blockedAt, url
+                });
+            }
+        }
+
+        async function pauseAutoLootForRateLimit(response, url) {
+            const now = Date.now();
+            const retryAfter = response.headers.get('Retry-After');
+            let serverDelay = 0;
+            if (retryAfter && /^\d+$/.test(retryAfter.trim())) serverDelay = Number(retryAfter) * 1000;
+            else if (retryAfter) serverDelay = Date.parse(retryAfter) - now;
+            if (!Number.isFinite(serverDelay)) serverDelay = 0;
+            const previous = await readAutoLootRateLimit();
+            rateLimitUntil = Math.max(now + RATE_LIMIT_PAUSE_MS, now + serverDelay, rateLimitUntil);
+            const state = { blockedAt: now, until: rateLimitUntil, url, resumedAt: 0 };
+            await GM_setValue(RATE_LIMIT_STATE_KEY, state);
+            saveDiagnosticLog('rate_limit_paused', {
+                ...state, status: 429, retryAfter, delayMs: rateLimitUntil - now,
+                previousBlockedAt: previous?.blockedAt || null,
+                policy: 'fixed_60s_or_retry_after'
+            });
+            if (scriptEnabledWatch && isTabVisible() && isThisTabLeader()) scheduleNext(rateLimitUntil - Date.now());
+            return autoLootRateLimitError();
+        }
+
+        async function confirmAutoLootRateLimitRecovery(data) {
+            if (!data || typeof data !== 'object' || Array.isArray(data)) return;
+            const state = await readAutoLootRateLimit();
+            // A parallel quest request may have started a newer pause: do not clear it.
+            if (!state?.resumedAt || rateLimitUntil > Date.now()) return;
+            await GM_deleteValue(RATE_LIMIT_STATE_KEY);
+            rateLimitUntil = 0;
+            saveDiagnosticLog('rate_limit_recovered', {
+                blockedAt: state.blockedAt, resumedAt: state.resumedAt,
+                recoveredAt: Date.now(), elapsedMs: Date.now() - state.blockedAt,
+                cardsReceived: !!data?.cards,
+                serverReason: String(data?.reason || data?.error || '').slice(0,300)
+            });
         }
 
         async function fetchData(url, options = {}, type = 'json', requireOk = true) {
             if (suiteGetAuthPause('autowatch')) throw new Error('authentication_required: автолут на паузе');
+            await checkAutoLootRateLimit(url);
             const requestId = `aw_${Date.now()}_${++diagnosticRequestSequence}`;
             const startedAt = Date.now();
             const request = {
@@ -15453,6 +15646,7 @@ function watchTradeLimitsSettings(){
                     });
                 }
 
+                if (response.status === 429) throw await pauseAutoLootForRateLimit(response, url);
                 if (response.status === 401 || (requireOk && !response.ok)) throw new Error(`HTTP ${response.status} for ${url}`);
                 let data = null;
                 try { data = JSON.parse(responseText); } catch(e) {}
@@ -15788,11 +15982,11 @@ function watchTradeLimitsSettings(){
                         </div>
                     </div>
 
-                    <div style="margin-bottom:6px;font-size:12px;color:rgba(255,255,255,.6)">Распределение за всё время</div>
-                    <div class="aw-rank-bar" style="margin-bottom:14px">${barAll || '<span style="color:rgba(255,255,255,.3);font-size:12px">нет данных</span>'}</div>
+                    <div class="aw-rank-label" style="margin-bottom:6px;font-size:12px;color:rgba(255,255,255,.6)">Распределение за всё время</div>
+                    <div class="aw-rank-bar${barAll ? '' : ' is-empty'}" style="margin-bottom:14px">${barAll || '<span class="aw-rank-empty" style="color:rgba(255,255,255,.3);font-size:12px">нет данных</span>'}</div>
 
-                    <div style="margin-bottom:6px;font-size:12px;color:rgba(255,255,255,.6)">Распределение сегодня</div>
-                    <div class="aw-rank-bar" style="margin-bottom:18px">${barToday || '<span style="color:rgba(255,255,255,.3);font-size:12px">нет данных</span>'}</div>
+                    <div class="aw-rank-label" style="margin-bottom:6px;font-size:12px;color:rgba(255,255,255,.6)">Распределение сегодня</div>
+                    <div class="aw-rank-bar${barToday ? '' : ' is-empty'}" style="margin-bottom:18px">${barToday || '<span class="aw-rank-empty" style="color:rgba(255,255,255,.3);font-size:12px">нет данных</span>'}</div>
 
                     <table class="aw-stat-table">
                         <thead>
@@ -17024,7 +17218,7 @@ function watchTradeLimitsSettings(){
                 return;
             }
             if (checkNewCardTimeoutId) clearTimeout(checkNewCardTimeoutId);
-            const clampedDelay = Math.max(0, delayMs);
+            const clampedDelay = Math.max(0, delayMs, rateLimitUntil - Date.now());
             nextRunAt = Date.now() + clampedDelay;
             checkNewCardTimeoutId = setTimeout(mainCardCheckLogic, clampedDelay);
             saveDiagnosticLog('next_attempt_scheduled', {
@@ -17039,10 +17233,10 @@ function watchTradeLimitsSettings(){
         // Восстанавливает nextRunAt из сохранённого времени последнего запроса,
         // чтобы после перезагрузки страницы таймер продолжил отсчёт, а не сбросился
         async function restoreTimerFromStorage() {
+            await readAutoLootRateLimit();
             const lastRequest = await GM_getValue(LAST_SUCCESSFUL_REQUEST_KEY, 0);
-            if (!lastRequest) return false;
             const elapsed = Date.now() - lastRequest;
-            const remaining = CHECK_NEW_CARD_INTERVAL - elapsed;
+            const remaining = Math.max(lastRequest ? CHECK_NEW_CARD_INTERVAL - elapsed : 0, rateLimitUntil - Date.now());
             if (remaining > 0) {
                 log(`Восстановление таймера: осталось ${Math.ceil(remaining / 1000)} сек.`);
                 scheduleNext(remaining + 1000);
@@ -17082,6 +17276,8 @@ function watchTradeLimitsSettings(){
                     stopMainCardCheckLogic();
                     return;
                 }
+
+                await checkAutoLootRateLimit();
 
                 if (animeDbEmpty && await refreshAnimeDbEmptyState()) {
                     scheduleNext(EMPTY_DB_RECHECK_MS);
@@ -17221,6 +17417,7 @@ function watchTradeLimitsSettings(){
                     headers,
                     body: rawBody
                 }, 'json');
+                await confirmAutoLootRateLimitRecovery(data);
 
                 if (data.cards) {
                     if (!serverDayConfirmed) {
@@ -17354,6 +17551,10 @@ function watchTradeLimitsSettings(){
                 if (suiteIsAuthenticationError(e?.message)) {
                     if (!suiteGetAuthPause('autowatch')) suitePauseForAuthentication('autowatch', e.message);
                     stopMainCardCheckLogic();
+                    return;
+                }
+                if (e?.code === 'AW_RATE_LIMIT') {
+                    if (isTabVisible() && isThisTabLeader()) scheduleNext(Math.max(0, e.retryAt - Date.now()));
                     return;
                 }
                 error('Ошибка цикла:', e);
@@ -17973,7 +18174,9 @@ function watchTradeLimitsSettings(){
             if (nextRunAt > Date.now()) {
                 const left = nextRunAt - Date.now();
                 compact = formatMs(left);
-                if (left > 60 * 60 * 1000) {
+                if (rateLimitUntil > Date.now()) {
+                    full = `Пауза после 429: ${formatMs(left)}`;
+                } else if (left > 60 * 60 * 1000) {
                     const h = Math.floor(left / 3600000);
                     const m = Math.floor((left % 3600000) / 60000);
                     full = `До 00:00 МСК: ${h}ч ${m}м`;
@@ -18037,6 +18240,9 @@ function watchTradeLimitsSettings(){
                 setPanelText(info, 'Эта вкладка выполняет автолут');
             }
             if (animeDbEmpty) setPanelText(info, 'База аниме пуста — автолут ждёт заполнения');
+            if (scriptEnabledWatch && visible && leader && rateLimitUntil > Date.now()) {
+                setPanelText(info, 'Пауза автолута: сайт ограничил запросы (429)');
+            }
             if (authPaused) setPanelText(info, 'Автолут остановлен: требуется повторный вход на сайт');
             setPanelText(holder, `Вкладка: ${leader ? 'ведущая' : 'ожидание'}`);
             const countdown = getPanelCountdown();
@@ -18647,6 +18853,7 @@ function watchTradeLimitsSettings(){
                     border: 1px solid #1e293b;
                     gap: 1px;
                 }
+                .aw-rank-bar.is-empty { height:auto; min-height:20px; align-items:center; padding:2px 6px; }
                 .aw-rank-badge {
                     display: inline-block;
                     font-size: 12px;
@@ -18948,6 +19155,15 @@ function watchTradeLimitsSettings(){
         function installStorageListener() {
             if (storageHandler || storageListenerId) return;
 
+            if (typeof GM_addValueChangeListener === 'function') {
+                rateLimitStorageListenerId = GM_addValueChangeListener(RATE_LIMIT_STATE_KEY, (_key, _old, value) => {
+                    rateLimitUntil = Number(value?.until) || 0;
+                    if (rateLimitUntil > Date.now() && scriptEnabledWatch && isTabVisible() && isThisTabLeader()) {
+                        scheduleNext(Math.max(rateLimitUntil, nextRunAt) - Date.now());
+                    }
+                });
+            }
+
             const onTabLockChange = (event) => {
                 renderPanelLiveState();
                 const lock = event?.newValue ? (()=>{try{return JSON.parse(event.newValue);}catch(e){return null;}})() : readTabLock();
@@ -18985,6 +19201,10 @@ function watchTradeLimitsSettings(){
         }
 
         function removeStorageListener() {
+            if (rateLimitStorageListenerId !== null && typeof GM_removeValueChangeListener === 'function') {
+                GM_removeValueChangeListener(rateLimitStorageListenerId);
+                rateLimitStorageListenerId = null;
+            }
             if (storageListenerId && typeof GM_removeValueChangeListener === 'function') {
                 GM_removeValueChangeListener(storageListenerId);
                 storageListenerId = null;
@@ -19020,6 +19240,7 @@ function watchTradeLimitsSettings(){
             await syncFinishedArchiveWithDb();
             await refreshAnimeDbEmptyState();
 
+            await readAutoLootRateLimit();
             await createPanel();
             installFetchInterceptor();
             installSiteNotificationInterceptor();
@@ -19036,6 +19257,8 @@ function watchTradeLimitsSettings(){
             claimTabLock(document.hasFocus?.() === true);
             await updateCardCounter(false);
             saveDiagnosticLog('module_initialized', {
+                rateLimitPolicy: 'fixed_60s_or_retry_after',
+                rateLimitUntil,
                 scriptEnabledWatch,
                 pauseOnLimitEnabled,
                 tabLock: readTabLock(),
@@ -19646,6 +19869,8 @@ function watchTradeLimitsSettings(){
 
   let clubWarRelations = null;
   let clubWarLoadedAt = 0;
+  let clubWarLoadPromise = null;
+  let clubWarRetryAt = 0;
   let clubWarObserver = null;
   let clubWarTimer = null;
   let clubWarClickBound = false;
@@ -19697,11 +19922,14 @@ function watchTradeLimitsSettings(){
     if (clubWarRelations && Date.now() - clubWarLoadedAt < CLUB_WAR_CACHE_MS) {
       return Promise.resolve(clubWarRelations);
     }
+    if(clubWarLoadPromise)return clubWarLoadPromise;
+    if(Date.now()<clubWarRetryAt)return Promise.resolve(clubWarRelations);
 
     const url = CLUB_WAR_RELATIONS_URL + '?t=' + Date.now();
     const applyData = data => {
       clubWarRelations = buildClubWarRelations(data);
       clubWarLoadedAt = Date.now();
+      clubWarRetryAt = 0;
       publishClubWarDebug({
         loaded: true,
         lastError: '',
@@ -19714,18 +19942,23 @@ function watchTradeLimitsSettings(){
       return clubWarRelations;
     };
 
-    return fetch(url, { cache:'no-store' })
+    const controller=new AbortController();
+    const timeout=setTimeout(()=>controller.abort(),12000);
+    clubWarLoadPromise = fetch(url, { cache:'no-store', signal:controller.signal })
       .then(response => {
         if(!response.ok) throw new Error('HTTP ' + response.status);
         return response.json();
       })
       .then(applyData)
+      .finally(()=>clearTimeout(timeout))
       .catch(fetchError => new Promise(resolve => {
         GM_xmlhttpRequest({
           method: 'GET',
           url,
+          timeout:12000,
           onload: response => {
             try {
+              if(response.status<200 || response.status>=300)throw new Error('HTTP '+response.status);
               resolve(applyData(JSON.parse(response.responseText || '{}')));
             } catch(parseError) {
               console.warn('[Suite club war] Failed to parse club list:', parseError);
@@ -19733,13 +19966,24 @@ function watchTradeLimitsSettings(){
               resolve(null);
             }
           },
+          ontimeout: () => resolve(null),
           onerror: requestError => {
             console.warn('[Suite club war] Failed to load club list:', fetchError, requestError);
             publishClubWarDebug({ loaded: false, lastError: 'load: ' + fetchError.message });
             resolve(null);
           }
         });
-      }));
+      }))
+      .catch(error=>{
+        publishClubWarDebug({loaded:false,lastError:error.message});
+        return null;
+      })
+      .then(result=>{
+        if(!result)clubWarRetryAt=Date.now()+60000;
+        return result || clubWarRelations;
+      })
+      .finally(()=>{clubWarLoadPromise=null;});
+    return clubWarLoadPromise;
   }
 
   function getClubWarRelationType(card, relations) {
@@ -19959,19 +20203,19 @@ function watchTradeLimitsSettings(){
     injectClubWarStyles();
     bindClubWarClickGuard();
     const relations = await loadClubWarRelations();
-    if(!relations) return;
+    if(!cfg.modLabyrinthClubWar || !window.__suiteClubWarRelationsInstalled || !CLUB_WAR_ROUTE_RE.test(location.pathname)) return;
+    // Refresh on cache expiry (or a failed load's cooldown), not on our own DOM writes.
+    scheduleClubWarApply(Math.max(1000,(clubWarRetryAt>Date.now()?clubWarRetryAt:clubWarLoadedAt+CLUB_WAR_CACHE_MS)-Date.now()));
+    if(!relations)return;
 
     const cards = [];
-    clubCards.forEach(card=>{
-      card.classList.remove(
-        'suite-club-war-ally',
-        'suite-club-war-neutral',
-        'suite-club-war-enemy'
-      );
-
+    getClubWarCards().forEach(card=>{
       const type = getClubWarRelationType(card, relations);
-      if(type) card.classList.add('suite-club-war-' + type);
-      card.dataset.suiteClubWarRelation = type || '';
+      for(const relation of ['ally','neutral','enemy']){
+        const cls='suite-club-war-'+relation, wanted=type===relation;
+        if(card.classList.contains(cls)!==wanted)card.classList.toggle(cls,wanted);
+      }
+      if(card.dataset.suiteClubWarRelation!==(type || ''))card.dataset.suiteClubWarRelation = type || '';
       card.querySelector('.suite-club-war-badge')?.remove();
       cards.push({
         id: getClubWarCardId(card),
@@ -20008,12 +20252,27 @@ function watchTradeLimitsSettings(){
     publishClubWarDebug({ installed: true });
     scheduleClubWarApply(0);
 
-    clubWarObserver = new MutationObserver(()=>scheduleClubWarApply());
+    clubWarObserver = new MutationObserver(records=>{
+      const selector='.labyrinth__club-war-club';
+      const hasCard=node=>node.nodeType===1 && (node.matches(selector) || node.querySelector(selector));
+      const nativeClasses=value=>String(value || '').split(/\s+/).filter(c=>c && !/^suite-club-war-(ally|neutral|enemy)$/.test(c)).sort().join(' ');
+      if(records.some(record=>{
+        if(record.type==='characterData')return !!record.target.parentElement?.closest(selector);
+        if(record.type==='childList'){
+          const nodes=[...record.addedNodes,...record.removedNodes];
+          return nodes.some(hasCard) || (record.target.closest(selector) && nodes.some(node=>node.nodeType!==1 || !node.matches('.suite-club-war-badge')));
+        }
+        if(record.type!=='attributes' || !record.target.matches(selector))return false;
+        if(record.attributeName==='class')return nativeClasses(record.oldValue)!==nativeClasses(record.target.className);
+        return true;
+      }))scheduleClubWarApply();
+    });
     clubWarObserver.observe(document.body,{
       childList:true,
       subtree:true,
       characterData:true,
       attributes:true,
+      attributeOldValue:true,
       attributeFilter:['class','style','data-club-id']
     });
   }
