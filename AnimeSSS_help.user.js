@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.80
+// @version      3.81
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -4758,14 +4758,14 @@
 
   // Card loot has its own palette, independent of the general notification themes.
   const CPT_CARD_RANK_PALETTE = {
-    ass: ['#6b21a8', '#e9d5ff'],
-    's-plus': ['#9b30ff', '#d8b4fe'], s: ['#c77dff', '#e9d5ff'],
-    'a-plus': ['#cc0000', '#fca5a5'], a: ['#ff4d4d', '#fda4a4'],
-    'b-plus': ['#1565c0', '#93c5fd'], b: ['#4d9fff', '#bfdbfe'],
-    'c-plus': ['#1b7a1b', '#86efac'], c: ['#4dcc6a', '#bbf7d0'],
-    'd-plus': ['#6b6b6b', '#d1d5db'], d: ['#adb5bd', '#e5e7eb'],
-    'e-plus': ['#7d4e1f', '#d9b38c'], e: ['#b07540', '#e7c29e'],
-    unknown: ['#64748b', '#e2e8f0']
+    ass: ['#6b21a8', '#e9d5ff', '#3b105d'],
+    's-plus': ['#9b30ff', '#d8b4fe', '#4b1970'], s: ['#c77dff', '#e9d5ff', '#523467'],
+    'a-plus': ['#cc0000', '#fca5a5', '#5e1420'], a: ['#ff4d4d', '#fda4a4', '#602a32'],
+    'b-plus': ['#1565c0', '#93c5fd', '#163660'], b: ['#4d9fff', '#bfdbfe', '#234963'],
+    'c-plus': ['#1b7a1b', '#86efac', '#173d23'], c: ['#4dcc6a', '#bbf7d0', '#285038'],
+    'd-plus': ['#6b6b6b', '#d1d5db', '#30343d'], d: ['#adb5bd', '#e5e7eb', '#424a54'],
+    'e-plus': ['#7d4e1f', '#d9b38c', '#442c19'], e: ['#b07540', '#e7c29e', '#583f2b'],
+    unknown: ['#64748b', '#e2e8f0', '#263344']
   };
 
   function cptCardRankTheme(rank){
@@ -5341,10 +5341,10 @@
       .cpt-head{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700;line-height:1.2;position:relative;z-index:2;}
       .cpt-sub{margin-top:3px;font-size:11px;line-height:1.35;opacity:.82;position:relative;z-index:2;padding-left:19px;}
       .cpt-bar{position:absolute;left:0;bottom:0;width:100%;height:2px;background:rgba(255,255,255,.28);transform-origin:left;z-index:2;}
-      .cpt-card-rank{background:#080b12;border:1px solid var(--cpt-card-border);color:var(--cpt-card-text);box-shadow:0 0 10px var(--cpt-card-glow),0 10px 28px rgba(0,0,0,.3);}
+      .cpt-card-rank{background:var(--cpt-card-background);border:1px solid var(--cpt-card-border);color:var(--cpt-card-text);box-shadow:0 0 10px var(--cpt-card-glow),0 10px 28px rgba(0,0,0,.3);}
       .cpt-card-rank .cpt-sub{color:#e2e8f0;opacity:1;}
       .cpt-card-rank .cpt-bar{background:var(--cpt-card-border);}
-      ${Object.entries(CPT_CARD_RANK_PALETTE).map(([rank,[border,text]])=>'.cpt-card-rank-'+rank+'{--cpt-card-border:'+border+';--cpt-card-text:'+text+';--cpt-card-glow:'+border+'66;}').join('\n')}
+      ${Object.entries(CPT_CARD_RANK_PALETTE).map(([rank,[border,text,background]])=>'.cpt-card-rank-'+rank+'{--cpt-card-border:'+border+';--cpt-card-text:'+text+';--cpt-card-background:'+background+';--cpt-card-glow:'+border+'66;}').join('\n')}
       .cpt-neon-green{background:#05070d;border:1px solid #22c55e;color:#4ade80;box-shadow:0 0 10px rgba(34,197,94,.6),0 0 26px rgba(34,197,94,.22),0 10px 28px rgba(0,0,0,.3);}
       .cpt-neon-blue{background:#05070d;border:1px solid #3b82f6;color:#60a5fa;box-shadow:0 0 10px rgba(59,130,246,.6),0 0 26px rgba(59,130,246,.22),0 10px 28px rgba(0,0,0,.3);}
       .cpt-neon-pink{background:#05070d;border:1px solid #d946ef;color:#f0abfc;box-shadow:0 0 10px rgba(217,70,239,.6),0 0 26px rgba(217,70,239,.22),0 10px 28px rgba(0,0,0,.3);}
