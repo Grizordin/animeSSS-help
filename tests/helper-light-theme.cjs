@@ -13,6 +13,9 @@ function extract(name){
  }throw Error(name);
 }
 const ctx={};vm.runInNewContext(extract('suiteBuildLightThemeCss')+';this.css=suiteBuildLightThemeCss();',ctx);
+const pushStyleContext={document:{createElement:()=>({}),head:{appendChild:s=>{pushStyleContext.css=s.textContent;}}}};
+const cardRankPalette=source.match(/  const CPT_CARD_RANK_PALETTE = \{[\s\S]*?^  \};/m)[0];
+vm.runInNewContext('let cptStyleInjected=false;\n'+cardRankPalette+'\n'+extract('cptInjectStyles')+'\ncptInjectStyles();',pushStyleContext);
 const globalCSS=source.match(/globalStyle\.textContent = `([\s\S]*?)`;/)[1];
 function styleAfter(marker){
  const offset=source.indexOf(marker);assert.ok(offset>=0,marker);
@@ -27,7 +30,7 @@ const moduleCSS=[
  styleAfter("style.id='cv-auto-embedded-style'"),
  styleAfter("style.id='suite-owner-restrictions-style'"),
  styleAfter("style.id = 'suite-club-war-style'"),
- extract('cptInjectStyles').match(/\.textContent\s*=\s*`([\s\S]*?)`;/)[1],
+ pushStyleContext.css,
  source.match(/panelStyleElement = GM_addStyle\(`([\s\S]*?)`\);/)[1]
 ].join('\n');
 const bestCSS=extract('openBestCardSettings').match(/<style>([\s\S]*?)<\/style>/)[1];
@@ -100,7 +103,7 @@ const markup=[
   })()`);
   await page.evaluate(`(async()=>{
    const STATS_MODAL_ID='theme-rank-stats',RANK_CONFIG=${source.match(/const RANK_CONFIG = (\[[\s\S]*?\]);/)[1]};
-   const buildRankStats=async()=>({allCounts:Object.fromEntries(RANK_CONFIG.map(r=>[r.key,2])),todayCounts:Object.fromEntries(RANK_CONFIG.map(r=>[r.key,1])),totalAll:26,totalToday:13});
+   const buildRankStats=async()=>({allCounts:Object.fromEntries(RANK_CONFIG.map(r=>[r.key,2])),todayCounts:{},totalAll:26,totalToday:0});
    ${extract('createSimpleModal')}
    ${extract('openStatsModal')}
    await openStatsModal();
@@ -145,11 +148,14 @@ const markup=[
   ok(await bg('.suite-owner-restriction-blocked')==='rgb(8, 9, 11)'&&await color('.suite-owner-restriction-blocked')==='rgb(255, 255, 255)','blacklist icon retains black fill and white symbol');
   ok(await page.locator('.suite-club-war-ally.is-active').evaluate(e=>getComputedStyle(e).outlineColor)==='rgb(52, 77, 101)','active club outline visible on white');
   // WCAG text contrast against the nearest real rendered surface (alpha composited).
+  ok(await page.locator('.aw-rank-label').count()===2,'both rank distribution labels covered');
+  ok(await page.locator('.aw-rank-empty').count()===1,'empty distribution label covered');
+  ok(await page.locator('.aw-rank-empty').evaluate(e=>e.parentElement.clientHeight>=e.scrollHeight),'empty label is not clipped by rank bar');
   const contrastFailures=await page.evaluate(()=>{
    const rgb=s=>(s.match(/[\d.]+/g)||[]).map(Number),lum=c=>c.slice(0,3).map(n=>n/255).map(n=>n<=.04045?n/12.92:((n+.055)/1.055)**2.4).reduce((s,n,i)=>s+n*[.2126,.7152,.0722][i],0);
    const failures=[];
    const selectors=['.aw-line','.aw-title','.aw-item-title','.aw-item-sub','.aw-input','.aw-error','.aw-action-btn','.aw-small-btn.danger','.aw-compact-limit','.aw-compact-time','.suite-gacha-history-card__label','.suite-gacha-history-card__value','.suite-gacha-history-day__note','.suite-gacha-history-day__date','.cv-stones-wallet__hint','.cv-stones-panel__value','.suite-lab-fatigue-value','.suite-emission-sub','.suite-author-badge','.suite-suggestion-meta','.cv-auto-count','.cv-auto-status','.suite-brick-criterion','.suite-remelt-criterion','#stone-brick-main-btn','#remelt-main-btn'];
-   selectors.push('.aw-rank-badge','.aw-stat-num','.aw-stat-pct','#aw-clear-stats-btn','.suite-owner-restriction-legend-item','.labyrinth__club-war-club','.cv-pack-tool-value','.cv-pack-tool-note','#cv-stats-btn','.cv-stats-rank','#cv-stats-content td:nth-child(2)','#cv-stats-reset','.cv-tab-btn','.cv-filter-btn');
+   selectors.push('.aw-rank-label','.aw-rank-empty','.aw-rank-badge','.aw-stat-num','.aw-stat-pct','#aw-clear-stats-btn','.suite-owner-restriction-legend-item','.labyrinth__club-war-club','.cv-pack-tool-value','.cv-pack-tool-note','#cv-stats-btn','.cv-stats-rank','#cv-stats-content td:nth-child(2)','#cv-stats-reset','.cv-tab-btn','.cv-filter-btn');
    selectors.push('#cv-confirm-msg','#cv-confirm-msg b','#cv-confirm-ok','#cv-confirm-cancel','#cv-pack-confirm-msg','#cv-pack-confirm-msg b','#cv-pack-confirm-title','#cv-pack-confirm-overlay button','#suite-hotkeys-panel input','#suite-hotkeys-panel label','.suite-hotkeys-help','.suite-hotkeys-summary','.suite-hotkeys-summary b');
    for(const e of document.querySelectorAll(selectors.join(','))){
     let chain=[],p=e;while(p){chain.unshift(p);p=p.parentElement;}let background=[255,255,255];
@@ -180,6 +186,16 @@ const markup=[
   await page.evaluate(()=>{document.querySelector('#cv-best-settings-host').style.display='block';});
   await page.screenshot({path:path.join(root,'tmp','best-settings-preserved-theme.png')});
   ok(requests===0,'no network for theme switching');
+  const fallback=await browser.newPage();await fallback.route('**/*',r=>r.abort());
+  await fallback.setContent('<body style="background:white">'+['stone-brick-panel','remelt-panel'].map(id=>`<div id="${id}" style="background:#111;color:white"><div><button style="background:transparent;color:#fff">−</button></div><input type="number" value="10" style="background:rgba(0,0,0,.35);color:white"></div>`).join(''));
+  await fallback.addStyleTag({content:ctx.css});
+  for(const id of ['stone-brick-panel','remelt-panel']){
+   ok(await fallback.locator('#'+id+' button').evaluate(e=>getComputedStyle(e).color)==='rgb(35, 51, 69)','fallback collapse contrast: '+id);
+   ok(await fallback.locator('#'+id+' input').evaluate(e=>getComputedStyle(e).color==='rgb(35, 51, 69)'&&getComputedStyle(e).backgroundColor==='rgb(240, 245, 248)'),'fallback input contrast: '+id);
+  }
+  await fallback.evaluate(()=>document.body.classList.add('dt-is-active'));
+  ok(await fallback.locator('#stone-brick-panel input').evaluate(e=>getComputedStyle(e).color)==='rgb(255, 255, 255)','fallback dark appearance preserved');
+  await fallback.close();
   console.log(`HELPER_LIGHT_THEME_OK ${checks} checks; stylesheet ${ctx.css.length} bytes`);
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

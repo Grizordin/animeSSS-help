@@ -71,7 +71,8 @@ const normalizeRewardType = v => v;
 const extractRewardQuantity = () => 120;
 const resolveReceivedReward = (response, fallback) => ({rewardType:response.reward_type || fallback,quantity:120});
 const notify = () => {};
-let diagnosticRequestSequence = 0;
+let diagnosticRequestSequence = 0, rateLimitUntil = 0;
+const checkAutoLootRateLimit = async () => {}; // Dedicated rate-limit suite covers this guard.
 const diagnosticSanitizeHeaders = v => v;
 const diagnosticSanitizeBody = v => v;
 const diagnosticSanitize = v => String(v);
