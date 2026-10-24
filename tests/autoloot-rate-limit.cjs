@@ -12,7 +12,7 @@ function extract(name){
 }
 const funcs=['autoLootRateLimitError','readAutoLootRateLimit','checkAutoLootRateLimit','pauseAutoLootForRateLimit',
  'confirmAutoLootRateLimitRecovery','fetchData','scheduleNext','restoreTimerFromStorage','mainCardCheckLogic',
- 'saveDiagnosticLog','installStorageListener','removeStorageListener','getPanelCountdown'].map(extract).join('\n');
+ 'saveDiagnosticLog','installStorageListener','removeStorageListener','getPanelCountdown','handleCardError'].map(extract).join('\n');
 let checks=0;function check(v,m){assert.ok(v,m);checks++;}
 function runtime(storage=new Map()){
  const c=vm.createContext({Response,Headers,URL,Date,storage,structuredClone});
@@ -30,7 +30,8 @@ function runtime(storage=new Map()){
  const currentUser='Test',cfg={modAutoLootCards:true},unsafeWindow={dle_login_hash:'test-only'};
  const window={__suiteAutoLootCardsInstalled:true,addEventListener(){},removeEventListener(){}},document={hasFocus:()=>true,visibilityState:'visible'};
  const location={href:'https://animesss.tv/labyrinth/'};
- const logs=[],requests=[],replies=[],timers=new Map(),listeners=new Map();let tid=0,lid=0,processed=0;
+ const logs=[],requests=[],replies=[],notices=[],skippedEpisodes=[],timers=new Map(),listeners=new Map();let tid=0,lid=0,processed=0;
+ const cptShow=(...args)=>notices.push(args);
  const GM_getValue=async(k,d)=>structuredClone(storage.has(k)?storage.get(k):d);
  const GM_setValue=async(k,v)=>{const old=storage.get(k);storage.set(k,structuredClone(v));for(const l of listeners.values())if(l.key===k)l.fn(k,old,v);};
  const GM_deleteValue=async k=>storage.delete(k);
@@ -47,8 +48,8 @@ function runtime(storage=new Map()){
  const state={index:0,ep_offset:2,failed_attempts:1,cards_collected:3};
  const buildOrderedPool=async()=>[{anime_id:1,min_ep:1,s:1,t_id:1,t_title:'T'}],updateSmartTarget=async()=>state,getEpOrder=async()=>[1,2,3];
  const isCurrentServerDayConfirmed=async()=>false,confirmCurrentServerDay=async()=>{},ensureDailyKodikWarmup=async()=>{};
- const processCardReward=async()=>{processed++;},handleCardError=()=>{},saveRequestLog=async()=>{};
- const saveSkippedEpisode=async()=>{throw Error('429 must not skip episode');};
+ const processCardReward=async()=>{processed++;},saveRequestLog=async()=>{};
+ const saveSkippedEpisode=async data=>skippedEpisodes.push(data);
  const fetch=async(url,opts)=>{requests.push({url,at:now});const reply=replies.shift();if(!reply)throw Error('unexpected network');if(reply instanceof Error)throw reply;return reply;};
  `+funcs,c);
  return {c,run:s=>vm.runInContext(s,c),storage};
@@ -62,6 +63,7 @@ async function main(){
   check(r.run('requests.length')===stage+1,'chain stopped at stage '+stage);
   check(r.run('rateLimitUntil-now')===60000,'fixed one minute at stage '+stage);
   check(r.run('state.failed_attempts===1 && state.ep_offset===2 && state.cards_collected===3'),'429 preserves progress');
+  check(r.run('skippedEpisodes.length')===0,'429 never skips an episode');
   check(r.run('nextRunAt-now')===60000,'timer schedules cooldown, not 15s');
   check(r.run('getPanelCountdown().full').includes('429'),'existing countdown explains HTTP pause');
   check(r.run("logs.filter(e=>e.event==='rate_limit_paused').length")===1,'one pause record per actual 429');
@@ -111,6 +113,18 @@ async function main(){
  const failed=runtime();failed.run("replies.push(new Response('limited',{status:429}))");await failed.run('mainCardCheckLogic()');
  failed.run("now+=60000;replies.push(new Error('offline'))");await failed.run('mainCardCheckLogic()');
  check(failed.run("!logs.some(e=>e.event==='rate_limit_recovered')"),'network failure after pause is not recovery');
+ const empty=runtime();empty.run('state.failed_attempts=0');
+ empty.run("replies.push(new Response('{}'),new Response('{}'),new Response(JSON.stringify({reason:'no'})))");await empty.run('mainCardCheckLogic()');
+ check(empty.run("notices[0][2]==='Карта не выпала' && notices[0][3]==='Повторим через 15 секунд.'"),'first empty response has short retry notice');
+ check(empty.run('state.failed_attempts===1 && skippedEpisodes.length===0 && nextRunAt-now===15000'),'ordinary retry logic unchanged');
+ empty.run("now+=15000;replies.push(new Response('{}'),new Response('{}'),new Response(JSON.stringify({reason:'no'})))");await empty.run('mainCardCheckLogic()');
+ check(empty.run("notices[1][2]==='Переходим к следующей серии' && notices[1][3]==='Карта не выпала за 2 попытки.'"),'threshold uses attempt count before reset');
+ check(empty.run('state.failed_attempts===0 && skippedEpisodes.length===1'),'threshold still skips and resets');
+ check(empty.run("notices.every(n=>n[4]==='cpt-neon-blue')"),'empty result stays informational blue');
+ const custom=runtime();custom.storage.set('maxFailures',5);custom.run('state.failed_attempts=4');
+ custom.run("replies.push(new Response('{}'),new Response('{}'),new Response(JSON.stringify({reason:'no'})))");await custom.run('mainCardCheckLogic()');
+ check(custom.run("notices[0][3]==='Карта не выпала за 5 попыток.'"),'custom attempt threshold appears in notice');
+ custom.run("handleCardError('no','site')");check(custom.run("notices[1][2]==='Карта не выпала' && notices[1][3]===''"),'site response does not promise an automatic retry');
  console.log(JSON.stringify({result:'AUTOLOOT_RATE_LIMIT_OK',checks}));
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});

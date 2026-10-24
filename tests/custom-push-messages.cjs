@@ -9,6 +9,7 @@ assert.ok(start > 0 && end > start);
 const context = vm.createContext({});
 vm.runInContext(source.slice(start, end) + '\nthis.catalogue = CPT_MAP; this.icons = CPT_ICO; this.themes = CPT_CLS;', context);
 const messages = [
+  ['Не удалось проверить испытание.', 'Испытание', 'neon-amber'],
   ['Активное испытание не найдено.', 'Испытание', 'neon-amber'],
   ['У вас уже есть активное испытание в главе 2. Сначала завершите его.', 'Испытание', 'neon-amber'],
   ['Вы можете обмениваться с одним и тем же пользователем не более 8 раз в сутки', 'Обмен', 'rose'],

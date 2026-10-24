@@ -5134,6 +5134,7 @@
     {r:/Ты отремонтировал персональную шахту за \d[\d\s]*\s+[AА]СС\.?\s*Добыча ресурсов возобновлена\.?/i, icon:'coin', title:'Шахта', theme:'neon-green'},
     {s:'Ты помог со сбором шахты',                                 icon:'coin',   title:'Шахта',       theme:'neon-green'},
     // ── Кодекс и испытания ────────────────────────────────
+    {s:'Не удалось проверить испытание',                         icon:'warn',   title:'Испытание',   theme:'neon-amber'},
     {s:'Активное испытание не найдено',                           icon:'warn',   title:'Испытание',   theme:'neon-amber'},
     {r:/У вас уже есть активное испытание в главе \d+\.\s*Сначала завершите его\.?/i, icon:'warn', title:'Испытание', theme:'neon-amber'},
     {s:'Сначала заверши испытание Дао',                            icon:'warn',   title:'Дао',         theme:'neon-amber'},
@@ -17073,8 +17074,19 @@ function watchTradeLimitsSettings(){
         // =========================================================
         // REWARD / ERRORS
         // =========================================================
-        function handleCardError(reason, source) {
+        function handleCardError(reason, source, details = {}) {
             if (!reason) return;
+            if (String(reason).trim().toLowerCase() === 'no') {
+                const skipped = details.episodeSkipped === true;
+                const attempts = Number(details.failedAttemptNumber) || 1;
+                const ending = attempts % 100 >= 11 && attempts % 100 <= 14 ? 'попыток'
+                    : attempts % 10 === 1 ? 'попытку' : attempts % 10 >= 2 && attempts % 10 <= 4 ? 'попытки' : 'попыток';
+                const title = skipped ? 'Переходим к следующей серии' : 'Карта не выпала';
+                const message = skipped ? `Карта не выпала за ${attempts} ${ending}.`
+                    : source === 'auto' ? `Повторим через ${Math.ceil(NO_CARD_RETRY_DELAY_MS / 1000)} секунд.` : '';
+                cptShow('aw:no-card', 'info', title, message, 'cpt-neon-blue');
+                return;
+            }
 
             const isLimit = /получил(?:а)?\s+свои\s+\d+\s+карт/i.test(reason);
             let msg = reason;
@@ -17481,12 +17493,12 @@ function watchTradeLimitsSettings(){
                             cardName: '—',
                             cardRank: '—',
                             serverMsg: 'no',
-                            scriptNote: `попытка ${state.failed_attempts}/${maxFailed}`
+                            scriptNote: `попытка ${failedAttemptNumber}/${maxFailed}`
                         });
 
                         await GM_setValue(SMART_PROGRESSION_KEY, state);
                         await updateSmartTarget();
-                        handleCardError(data.reason, 'auto');
+                        handleCardError(data.reason, 'auto', { episodeSkipped, failedAttemptNumber });
                         scheduleNext(NO_CARD_RETRY_DELAY_MS);
                         return;
 
