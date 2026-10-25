@@ -68,10 +68,12 @@ check(storage.get('cache').text==='30 / 35'&&storage.get('sync').text==='30 / 35
 check(scheduled===1&&storage.get('enabled')===true,'enabled leader resumes');
 check(pushes[0][1].includes('После подношения')&&!pushes[0][1].includes('Новый день'),'accurate resume notification');
 check(logs.some(e=>e.event==='offering_profile_checked'&&e.data.limit===35),'checked limit logged');
+check(logs.some(e=>e.event==='offering_resume_decision'&&e.data.reason==='scheduled'),'resume decision logged');
 queueOfferingProfileCheck(message);check(timers.size===0,'late duplicate within debounce ignored');
 
 reset();html='<p>Получено карточек за просмотр аниме 30 из 30</p>';queueOfferingProfileCheck(message);await runPending();
 check(storage.get('paused')===true&&scheduled===0,'unchanged exhausted limit stays paused');
+check(logs.some(e=>e.event==='offering_resume_decision'&&e.data.reason==='still_at_limit'),'unchanged limit reason logged');
 reset();html='<p>Получено карточек за просмотр аниме 30 из 42</p>';queueOfferingProfileCheck(message);await runPending();
 check(storage.get('limit')===42,'no fixed plus-five assumption');
 reset();html='<p>Войдите на сайт</p>';queueOfferingProfileCheck(message);await runPending();
@@ -84,6 +86,7 @@ check(fetches===1&&storage.get('enabled')===false&&scheduled===0,'manual stop is
 reset();storage.set('enabled',false);queueOfferingProfileCheck(message);await runPending();
 check(scheduled===0,'latest stored manual stop wins over stale runtime');
 reset();visible=false;queueOfferingProfileCheck(message);await runPending();check(scheduled===0,'hidden tab does not collect');
+check(logs.some(e=>e.event==='offering_resume_decision'&&e.data.reason==='resume_deferred'),'hidden tab reason logged');
 reset();leader=false;queueOfferingProfileCheck(message);await runPending();check(scheduled===0,'nonleader does not collect');
 reset();restored=true;queueOfferingProfileCheck(message);await runPending();check(scheduled===0,'normal request cooldown retained');
 reset();isLoopRunning=true;queueOfferingProfileCheck(message);await runPending();check(scheduled===0,'no competing loop started');
@@ -134,6 +137,24 @@ document.body.append(toast.cloneNode(true));await flush();check(timers.size===0,
 window.DLEPush={info:originalInfo};installSiteNotificationInterceptor();window.DLEPush.info(message);await runPending();
 check(fetches===1,'object notifier variant still supported');cleanupSiteNotificationInterceptor();
 check(window.DLEPush.info===originalInfo,'cleanup restores object notifier');
+reset();queueOfferingProfileCheck('Подношение принято!');
+check(timers.size===1,'short successful offering triggers profile verification');await runPending();
+reset();queueOfferingProfileCheck('<b>Подношение принято.</b> Лимит карточек увеличен.');
+check(timers.size===1,'success with changed wording triggers verification');await runPending();
+reset();queueOfferingProfileCheck('Подношение не принято.');
+check(timers.size===0,'negative offering remains ignored');
+document.body.replaceChildren();reset();
+const early=toast.cloneNode(true);document.body.append(early);
+installSiteNotificationInterceptor();await flush();
+check(timers.size===1,'already visible native notification detected on install');await runPending();
+check(fetches===1&&scheduled===1,'early notification refreshes and resumes');
+cleanupSiteNotificationInterceptor();document.body.replaceChildren();reset();
+const earlyCustom=document.createElement('div');earlyCustom.className='cpt-toast';
+earlyCustom.innerHTML='<div class="cpt-title">Подношение</div><div class="cpt-sub">Подношение принято!</div>';
+document.body.append(earlyCustom);installSiteNotificationInterceptor();await flush();
+check(timers.size===1,'already visible custom notification detected on install');await runPending();
+check(fetches===1&&scheduled===1,'early custom notification refreshes and resumes');
+cleanupSiteNotificationInterceptor();
 window.offeringTest={result:'AUTOLOOT_OFFERING_OK',passed};
 `;
 (async()=>{

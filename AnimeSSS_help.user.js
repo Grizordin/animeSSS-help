@@ -17677,7 +17677,9 @@ function watchTradeLimitsSettings(){
         function queueOfferingProfileCheck(message) {
             if (offeringRefreshDisposed || !cfg.modAutoLootCards || !currentUser) return;
             const text = new DOMParser().parseFromString(String(message || ''), 'text/html').body.textContent.replace(/\s+/g, ' ').trim();
-            if (!/^Подношение принято!/i.test(text) || !/лимит получения карточек за просмотр/i.test(text)) return;
+            // A successful offering is only a signal to fetch the actual limit from the profile.
+            // Do not depend on the optional reward description or its current wording.
+            if (!/^Подношение\s+принято(?:[!.\s]|$)/i.test(text)) return;
             const now = Date.now();
             // The same notification can arrive through both DLEPush and its DOM node.
             if (offeringRefreshPending || (offeringLastSeenAt && now - offeringLastSeenAt < 5000)) return;
@@ -17689,8 +17691,10 @@ function watchTradeLimitsSettings(){
 
         async function refreshProfileAfterOffering() {
             offeringRefreshTimer = null;
+            const decision = (reason, details = {}) => saveDiagnosticLog('offering_resume_decision', { reason, ...details });
             if (offeringRefreshDisposed || !cfg.modAutoLootCards || suiteGetAuthPause('autowatch')) {
                 offeringRefreshPending = false;
+                decision('unavailable', { disposed:offeringRefreshDisposed, moduleEnabled:!!cfg.modAutoLootCards, authPaused:!!suiteGetAuthPause('autowatch') });
                 return;
             }
             // A check started before the offering may still contain the old limit.
@@ -17700,13 +17704,22 @@ function watchTradeLimitsSettings(){
             }
             try {
                 const quest = await updateCardCounter(true, 'offering');
-                if (offeringRefreshDisposed || !cfg.modAutoLootCards || !quest || quest.current >= quest.limit) return;
+                if (offeringRefreshDisposed || !cfg.modAutoLootCards) { decision('disposed_or_disabled'); return; }
+                if (!quest) { decision('profile_unconfirmed'); return; }
+                if (quest.current >= quest.limit) { decision('still_at_limit', quest); return; }
                 const enabled = await GM_getValue(STORAGE_KEY_WATCH, true);
-                if (offeringRefreshDisposed || !cfg.modAutoLootCards || !enabled || !scriptEnabledWatch || !isTabVisible()) return;
+                if (offeringRefreshDisposed || !cfg.modAutoLootCards || !enabled || !scriptEnabledWatch || !isTabVisible()) {
+                    decision('resume_deferred', { enabled, runtimeEnabled:scriptEnabledWatch, visible:isTabVisible() });
+                    return;
+                }
                 tryAcquireTabLock();
                 if (isThisTabLeader() && !isLoopRunning) {
-                    // Respect the normal interval between card requests when resuming.
-                    if (!await restoreTimerFromStorage()) scheduleNext(RESUME_DELAY_MS);
+                    // Respect the normal interval between card requests and any HTTP 429 pause.
+                    const cooldownRestored = await restoreTimerFromStorage();
+                    if (!cooldownRestored) scheduleNext(RESUME_DELAY_MS);
+                    decision('scheduled', { ...quest, cooldownRestored });
+                } else {
+                    decision(isLoopRunning ? 'cycle_already_running' : 'another_tab_leads', quest);
                 }
             } catch (e) {
                 saveDiagnosticLog('offering_profile_check_failed', { error:String(e?.message || e) });
@@ -17798,6 +17811,8 @@ function watchTradeLimitsSettings(){
                 });
                 observer.observe(observerTarget, { childList: true, subtree: true, characterData: true });
                 window.__awVisibleTabDleObserver = observer;
+                // The site or custom notification renderer may have shown the result before installation.
+                observerTarget.querySelectorAll('.DLEPush-notification, .cpt-toast').forEach(handleNotificationNode);
             }
         }
 
@@ -19237,6 +19252,8 @@ function watchTradeLimitsSettings(){
                 return;
             }
 
+            // Observe notifications before database and panel initialization can delay this module.
+            installSiteNotificationInterceptor();
             scriptEnabledWatch = await GM_getValue(STORAGE_KEY_WATCH, true);
             pauseOnLimitEnabled = await GM_getValue(PAUSE_ON_LIMIT_ENABLED_KEY, true);
 
@@ -19269,6 +19286,7 @@ function watchTradeLimitsSettings(){
             claimTabLock(document.hasFocus?.() === true);
             await updateCardCounter(false);
             saveDiagnosticLog('module_initialized', {
+                offeringDetectionPolicy: 'success_prefix_and_existing_notifications',
                 rateLimitPolicy: 'fixed_60s_or_retry_after',
                 rateLimitUntil,
                 scriptEnabledWatch,
