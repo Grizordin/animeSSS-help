@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.82
+// @version      3.83
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -112,6 +112,7 @@
     modLabyrinthQuiz: false,  // викторина лабиринта
     modLabyrinthEmission: false, // таймер выброса в лабиринте
     modLabyrinthFatigue: false, // статистика ходов после усталости, отката и мимика
+    modLabyrinthShop: false, // ролл магазина обмена
     modLabyrinthClubWar:  false, // подсветка клубов в битве клубов
 
     // Хоткеи
@@ -1299,7 +1300,7 @@
     const pending = [fn];
     const originalKeys = ['__suiteLabyrinthFatigueOriginal', '__fatigueDebugOriginal',
       '__suiteChatStoneOriginal', '__suiteXhrOriginal', '__awVisibleTabOriginal',
-      '__suiteCustomPushOriginal', '__suiteGlobalDiagnosticsOriginal', '__animeSSSTradeDebugOriginal', '__suiteTradeLimitsOriginal'];
+      '__suiteCustomPushOriginal', '__suiteGlobalDiagnosticsOriginal', '__animeSSSTradeDebugOriginal', '__suiteTradeLimitsOriginal', '__suiteShopOriginal'];
     while(pending.length && seen.size < 32){
       const current = pending.pop();
       if(typeof current !== 'function' || seen.has(current)) continue;
@@ -1399,13 +1400,14 @@
       const brickHealthy = expectInstalled({ setting:'modBrickFill', flag:'__suiteBrickFillInstalled', code:'brick_fill', applies:/\/celestial_stone\/?$/.test(route) && !isPremiumLockedSetting('modBrickFill') });
       const remeltHealthy = expectInstalled({ setting:'modRemelt', flag:'__suiteRemeltInstalled', code:'remelt', applies:/\/cards_remelt\/?$/.test(route) && !isPremiumLockedSetting('modRemelt') });
       const autoWatchHealthy = expectInstalled({ setting:'modAutoLootCards', flag:'__suiteAutoLootCardsInstalled', module:'autowatch', code:'autowatch' });
+      expectInstalled({ setting:'modLabyrinthShop', flag:'__suiteShopRollInstalled', code:'shop_roll', applies:/^\/accshop\/?$/.test(route) });
       const quizHealthy = expectInstalled({ setting:'modLabyrinthQuiz', flag:'__suiteLabyrinthQuizInstalled', module:'quiz', code:'labyrinth_quiz', applies:isLabyrinth });
       const fatigueHealthy = expectInstalled({ setting:'modLabyrinthFatigue', flag:'__suiteLabyrinthFatigueInstalled', module:'fatigue', code:'labyrinth_fatigue', applies:isLabyrinth });
       const emissionHealthy = expectInstalled({ setting:'modLabyrinthEmission', flag:'__suiteLabyrinthEmissionInstalled', code:'labyrinth_emission', applies:isLabyrinth });
       const clubWarHealthy = expectInstalled({ setting:'modLabyrinthClubWar', flag:'__suiteClubWarRelationsInstalled', code:'club_war', applies:CLUB_WAR_ROUTE_RE.test(route) });
 
       if(!document.getElementById('suite-settings-btn')) report('suite', 'settings_button_missing');
-      if((cfg.modLabyrinthQuiz || cfg.modLabyrinthEmission || cfg.modLabyrinthFatigue || cfg.modLabyrinthClubWar)
+      if((cfg.modLabyrinthQuiz || cfg.modLabyrinthEmission || cfg.modLabyrinthFatigue || cfg.modLabyrinthClubWar || cfg.modLabyrinthShop)
         && !labyrinthRouteWatcherInstalled) report('suite', 'labyrinth_route_watcher_missing');
       if(cfg.modNeon && (!neonObserver || !neonMutationObserver)) report('suite', 'neon_observers_missing');
       if(cfg.modNeon){
@@ -2131,6 +2133,22 @@
       from { --cv-neon-angle:0deg; }
       to { --cv-neon-angle:360deg; }
     }
+
+    #suite-shop-roll{margin:12px 0;padding:12px;border:1px solid var(--bdc,#59606c);border-radius:12px;background:var(--bg-2,#1e2330);color:var(--tt,#e2e8f0);font:inherit}
+    #suite-shop-roll .suite-shop-roll-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+    #suite-shop-roll .suite-shop-roll-bar strong{margin-right:auto;font-size:14px}
+    #suite-shop-roll button{height:auto;padding:7px 11px;border:1px solid var(--bdc,#59606c);border-radius:8px;background:var(--bg,#151923);color:var(--tt,#e2e8f0);font:inherit;font-size:12px;cursor:pointer}
+    #suite-shop-roll button:disabled{opacity:.5;cursor:default}
+    #suite-shop-roll [data-shop-start]{background:#387b5c;color:#fff;border-color:#387b5c}
+    #suite-shop-roll [data-shop-options]{margin-top:12px;padding-top:10px;border-top:1px solid var(--bdc,#59606c)}
+    #suite-shop-roll [hidden]{display:none!important}
+    #suite-shop-roll label{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0;font-size:13px}
+    #suite-shop-roll input[type=number]{width:95px;min-width:0;height:30px;padding:3px 6px;border:1px solid var(--bdc,#59606c);border-radius:6px;background:var(--bg,#151923);color:var(--tt,#e2e8f0);font:inherit}
+    #suite-shop-roll input[type=checkbox]{width:16px;height:16px;accent-color:#7759a8}
+    #suite-shop-roll p{margin:0 0 8px;font-size:13px}
+    #suite-shop-roll small,#suite-shop-roll [data-shop-status]{display:block;font-size:12px;line-height:1.5;color:var(--tt-2,#9ba8b9)}
+    #suite-shop-roll [data-shop-status]{margin-top:8px}
+    .accshop .accshop__card.cv-neon-outline::before{inset:-4px;height:auto;padding:4px;opacity:1;transform:none;background:conic-gradient(from var(--cv-neon-angle),var(--cv-neon-main),#fff,var(--cv-neon-main),var(--cv-neon-main));border-radius:15px;pointer-events:none}
     /* Фон меню */
     .lgn__inner.tm-fullbg-ready {
       position: relative !important;
@@ -4402,6 +4420,14 @@
   }
 
   function getNeonCardType(card){
+    if(card.matches('.accshop__card')){
+      if(card.matches('.accshop__card--special'))return '';
+      if(suiteShopWishlistEvidence(card).length)return 'green';
+      const metric=[...card.querySelectorAll('.accshop__card-metrics [title],.accshop__card-metrics [aria-label]')]
+        .find(el=>/^(?:Дубли|Дубликат)/i.test(el.getAttribute('aria-label')||el.getAttribute('title')||''));
+      const amount=(metric?.getAttribute('aria-label')||metric?.getAttribute('title')||'').match(/:\s*([\d \u00a0\u202f]+)/)?.[1];
+      return suiteShopNumber(amount)>0?'orange':'';
+    }
     if(card.querySelector('i.fal.fa-trophy-alt'))return 'violet';
     if(card.querySelector('i.fal.fa-lock'))return 'red';
     if(card.querySelector('i.fal.fa-exchange, i.fal.fa-arrow-right-arrow-left'))return 'blue';
@@ -4458,17 +4484,20 @@
       + '.__pe-panel,.__ps-panel,.__pc-panel,#__cpt-root,#__aw-cpt-root,#__sb-root'
     );
 
-    const scan=()=>{
-      document.querySelectorAll('.to-inventory-panel').forEach(panel=>syncTradeWantNeon(panel));
-      document.querySelectorAll('.anime-cards__item,.trade__main-item,.trade__inventory-item').forEach(card=>{
-        if(neonObservedSet.has(card)||isExcluded(card)) return;
-        neonObserver.observe(card);
-        neonObservedSet.add(card);
-      });
+    const cardSelector='.anime-cards__item,.trade__main-item,.trade__inventory-item,.accshop__card';
+    const register=card=>{
+      if(neonObservedSet.has(card)||isExcluded(card))return;
+      neonObserver.observe(card);neonObservedSet.add(card);
+    };
+    const scan=(scope=document)=>{
+      if(scope.matches?.('.to-inventory-panel'))syncTradeWantNeon(scope);
+      scope.querySelectorAll?.('.to-inventory-panel').forEach(panel=>syncTradeWantNeon(panel));
+      if(scope.matches?.(cardSelector))register(scope);
+      scope.querySelectorAll?.(cardSelector).forEach(register);
     };
 
     neonMutationObserver=new MutationObserver(mutations=>{
-      scan();
+      mutations.forEach(m=>{if(m.type==='childList')m.addedNodes.forEach(node=>{if(node.nodeType===1)scan(node);});});
       const tradePanels=new Set();
       const updatedLists=new Set();
       mutations.forEach(mutation=>{
@@ -4488,7 +4517,7 @@
           }
         }
         if(mutation.type !== 'attributes' || mutation.attributeName !== 'class') return;
-        const card = mutation.target.closest?.('.anime-cards__item,.trade__main-item,.trade__inventory-item');
+        const card = mutation.target.closest?.(cardSelector);
         if(card && !isExcluded(card)) applyNeonToCard(card);
       });
       tradePanels.forEach(panel=>{
@@ -11220,6 +11249,7 @@
     noNeedButtonsAlways: 'Показывает кнопки всегда, а не только при наведении, если выключить функцию кнопки будут появляться только при наведения на ряд карт.',
     modBrickFill: 'Подбирает карты для превращения в энергию кирпича.',
     modRemelt: 'Помогает выбирать карты для переплавки.',
+    modLabyrinthShop: 'Обновляет витрину магазина до нужного опыта, кирпича или карты из желаемого.',
     modLabyrinthQuiz: 'Подсвечивает ответы в викторине лабиринта.',
     modLabyrinthEmission: 'Добавляет окончания выброса и таймер до начала нового выброса.',
     modLabyrinthFatigue: 'показывает статистику ходов после усталости, отката, мимика для лучшего контроля',
@@ -11532,6 +11562,11 @@
     if(key==='modWantCards'){
       if(cfg.modWantCards) initWantCards();
       else if(typeof window.__suiteWantCardsCleanup==='function') window.__suiteWantCardsCleanup();
+      return;
+    }
+    if(key==='modLabyrinthShop'){
+      if(cfg.modLabyrinthShop) initLabyrinthShopRoll();
+      else cleanupLabyrinthShopRoll();
       return;
     }
     if(key==='modLabyrinthQuiz'){
@@ -12029,6 +12064,7 @@
     cardsSection.appendChild(remeltRow);
 
     const labyrinthSection = makeSection('labyrinth','🌀 Лабиринт');
+    labyrinthSection.appendChild(makeToggle('modLabyrinthShop', '🛍️ Ролл магазина'));
     const quizRow = makeToggle('modLabyrinthQuiz', '👑 Викторина');
     quizRow.querySelector('input').addEventListener('change', () => {
       if(cfg.modLabyrinthQuiz) initLabyrinthQuiz();
@@ -12893,14 +12929,354 @@
     window.__suiteGuaranteeObserver = mo;
   }
 
+  // BEGIN LABYRINTH SHOP ROLL
+  function suiteShopNumber(value) {
+    const text=String(value??'').replace(/[\s\u00a0\u202f]/g,'');
+    if(!/^\d+$/.test(text))return null;
+    const number=Number(text);
+    return Number.isSafeInteger(number)?number:null;
+  }
+
+  function suiteShopWishlistEvidence(card) {
+    const evidence=[];
+    if(card.classList.contains('is-wishlist-card'))evidence.push('is-wishlist-card');
+    if(card.matches('.anime-cards__owned-by-user-want') || card.querySelector('.anime-cards__owned-by-user-want'))evidence.push('owned-by-user-want');
+    if([...card.querySelectorAll('.accshop__wish-label')].some(el=>/жела|желани/i.test(el.textContent)))evidence.push('wish-label');
+    return evidence;
+  }
+
+  function suiteShopOffers(root) {
+    return [...root.querySelectorAll('.accshop__card')].slice(0,40).map(card=>{
+      const name=String(card.querySelector('.accshop__card-name')?.textContent||'').trim().slice(0,100);
+      const kind=card.matches('.accshop__card--exp')?'exp':card.matches('.accshop__card--brick')?'brick'
+        :card.matches('.accshop__card--special')?'unknown':'card';
+      const reward=String(card.querySelector('.accshop__card-rank')?.textContent||'');
+      const amount=suiteShopNumber(reward.match(/\+\s*([\d][\d \u00a0\u202f]*)/)?.[1]);
+      const wanted=suiteShopWishlistEvidence(card);
+      const signals=[...card.querySelectorAll('[class*="wish"],[class*="want"],[class*="desired"],i[class]')].slice(0,5)
+        .map(el=>`${String(el.className).slice(0,90)}:${String(el.textContent||'').trim().slice(0,60)}`);
+      return {kind,name,amount,wanted,signals,
+        id:String(card.querySelector('[data-card-id]')?.getAttribute('data-card-id')||''),
+        slot:String(card.querySelector('[data-slot]')?.getAttribute('data-slot')||''),
+        price:suiteShopNumber(card.querySelector('.accshop__card-price')?.textContent.replace(/AСС|АСС/gi,'')),
+        classes:[...card.classList].filter(c=>!/^cv-|^neon-/.test(c)).join(' ').slice(0,180)};
+    });
+  }
+
+  function suiteShopFingerprint(offers) {
+    // Native presentation adds ranks and wishlist classes after inserting cards_html.
+    return JSON.stringify(offers.map(({id,slot,kind,amount,price})=>[id,slot,kind,amount,price]));
+  }
+
+  function suiteInstallShopCapture(handler) {
+    const page=getPageWindow();
+    let capture=page.__suiteShopCaptureV1;
+    if(capture){capture.listeners.add(handler);return capture;}
+    capture={listeners:new Set([handler]),sequence:0};
+    page.__suiteShopCaptureV1=capture;
+    const emit=(phase,data)=>capture.listeners.forEach(listener=>{try{listener(phase,data);}catch(e){}});
+    const begin=(method,address,body)=>{
+      if(![...capture.listeners].some(listener=>listener.wantsRequest()))return null;
+      try{
+        const url=new URL(typeof address==='string'?address:address?.url||String(address),location.href);
+        if(url.origin!==location.origin || url.pathname!=='/index.php'
+          || url.searchParams.get('controller')!=='ajax' || url.searchParams.get('mod')!=='animesss_game_shop'
+          || String(method).toUpperCase()!=='POST')return null;
+        let action;
+        if(typeof body==='string'){
+          try{action=JSON.parse(body).action;}catch(e){action=new URLSearchParams(body).get('action');}
+        }else if(body?.get)action=body.get('action');
+        if(action!=='reroll')return null;
+        const request={id:++capture.sequence,started:performance.now()};
+        emit('request',request);return request;
+      }catch(e){return null;}
+    };
+    const finish=(request,status,value)=>{
+      if(!request)return;
+      let body=null;
+      try{body=typeof value==='string'?JSON.parse(value):value;}catch(e){}
+      emit('response',{id:request.id,status,body,elapsedMs:Math.round(performance.now()-request.started)});
+    };
+    const originalFetch=page.fetch;
+    if(typeof originalFetch==='function'){
+      const hooked=function(resource,init){
+        const request=begin(init?.method||resource?.method||'GET',resource,init?.body);
+        let promise;
+        try{promise=originalFetch.apply(this,arguments);}catch(error){finish(request,0,null);throw error;}
+        if(request)promise.then(response=>{
+          try{response.clone().text().then(text=>finish(request,response.status,text),()=>finish(request,response.status,null));}
+          catch(e){finish(request,response.status,null);}
+        },()=>finish(request,0,null)).catch(()=>{});
+        return promise;
+      };
+      hooked.__suiteShopOriginal=originalFetch;
+      try{page.fetch=hooked;}catch(e){}
+    }
+    const proto=page.XMLHttpRequest?.prototype;
+    if(proto){
+      const originalOpen=proto.open,originalSend=proto.send,info=new WeakMap();
+      const open=function(method,url){
+        const result=originalOpen.apply(this,arguments);info.set(this,{method,url});return result;
+      };
+      const send=function(body){
+        const meta=info.get(this),request=meta?begin(meta.method,meta.url,body):null;
+        if(request)this.addEventListener('loadend',()=>{
+          try{finish(request,this.status,this.responseType==='json'?this.response
+            :!this.responseType||this.responseType==='text'?this.responseText:null);}
+          catch(e){finish(request,0,null);}
+        },{once:true});
+        try{return originalSend.apply(this,arguments);}catch(error){finish(request,0,null);throw error;}
+      };
+      open.__suiteShopOriginal=originalOpen;send.__suiteShopOriginal=originalSend;
+      try{proto.open=open;proto.send=send;}catch(e){}
+    }
+    return capture;
+  }
+
+  let suiteShopRoll=null;
+  function initLabyrinthShopRoll() {
+    if(!cfg.modLabyrinthShop || !/^\/accshop\/?$/.test(location.pathname) || suiteShopRoll)return;
+    const root=document.querySelector('.accshop'),grid=root?.querySelector('#accshopCardsWrap');
+    if(!root || !grid || !root.querySelector('#accshopRerollBtn'))return;
+    const SETTINGS='suite_shop_roll_settings_v1',PREFIX='suite_shop_roll_claim_v1:',UNCERTAIN='suite_shop_roll_uncertain_until_v1';
+    const claimKey=PREFIX+crypto.randomUUID(),TTL=15000;
+    const defaults={exp:true,expMin:400,brick:false,brickMin:2500,wishlist:true};
+    let options={...defaults,...gmStoreGet(SETTINGS,{})};
+    for(const key of ['exp','brick','wishlist'])options[key]=options[key]===true;
+    for(const key of ['expMin','brickMin'])options[key]=suiteShopNumber(options[key])>0?suiteShopNumber(options[key]):defaults[key];
+    let active=false,destroyed=false,dispatching=false,pending=null,delayTimer=0,wakeDelay=null,mutationTimer=0;
+    let heartbeat=0,claim=null,blocked=false,stopReason='',rolls=0,spent=0,lastClick=0,runPromise=null;
+    let lastOffers=[],seenShapes=new Set(),lastProgress=0;
+    const panel=document.createElement('section');panel.id='suite-shop-roll';
+    panel.innerHTML='<div class="suite-shop-roll-bar"><strong>Ролл магазина</strong><button type="button" data-shop-settings aria-expanded="false">⚙ Настройки</button><button type="button" data-shop-start>Старт</button><button type="button" data-shop-stop disabled>Стоп</button></div>'
+      +'<div data-shop-options hidden><p>Остановиться при любом выбранном условии:</p>'
+      +'<label><input type="checkbox" data-shop-option="exp"> Опыт от <input type="number" min="1" step="1" data-shop-option="expMin" aria-label="Опыт от"></label>'
+      +'<label><input type="checkbox" data-shop-option="brick"> Небесный кирпич от <input type="number" min="1" step="1" data-shop-option="brickMin" aria-label="Кирпич от"></label>'
+      +'<label><input type="checkbox" data-shop-option="wishlist"> Карта из желаемого</label>'
+      +'<small>Обновляет до совпадения или нехватки АСС. Товары покупаете вручную.</small></div>'
+      +'<div data-shop-status role="status">Готов к запуску</div>';
+    const actions=root.querySelector('.accshop__actions');
+    if(actions)actions.after(panel);else grid.before(panel);
+    const startButton=panel.querySelector('[data-shop-start]'),stopButton=panel.querySelector('[data-shop-stop]');
+    const settingsButton=panel.querySelector('[data-shop-settings]'),settingsBox=panel.querySelector('[data-shop-options]');
+    const status=panel.querySelector('[data-shop-status]');
+    const log=(event,data={},level='info')=>suiteTelemetryLog('suite','shop_roll_'+event,data,level);
+    const visible=()=>!document.hidden;
+    const validContext=()=>!destroyed && cfg.modLabyrinthShop && /^\/accshop\/?$/.test(location.pathname)
+      && root.isConnected && root.querySelector('#accshopCardsWrap')?.isConnected;
+    const nativeButton=()=>root.querySelector('#accshopRerollBtn');
+    const busy=()=>!!root.getAttribute('data-accshop-busy') || nativeButton()?.disabled
+      || nativeButton()?.getAttribute('aria-disabled')==='true';
+    const balance=()=>suiteShopNumber(root.querySelector('#accshopBalance')?.textContent);
+    const price=()=>suiteShopNumber(root.querySelector('#accshopRerollPrice')?.textContent);
+    function render(message){
+      const text=`${message} · Обновлений: ${rolls} · Потрачено: ${spent} АСС`;
+      if(status.textContent!==text)status.textContent=text;
+      const setDisabled=(input,value)=>{if(input.disabled!==value)input.disabled=value;};
+      setDisabled(startButton,active||!!runPromise||blocked);setDisabled(stopButton,!active);
+      panel.querySelectorAll('[data-shop-option]').forEach(input=>setDisabled(input,active||!!runPromise));
+    }
+    function sample(offers,force=false){
+      const shape=JSON.stringify(offers.map(o=>[o.kind,o.classes,o.wanted,o.signals]));
+      if(!force && (seenShapes.has(shape)||seenShapes.size>=8))return;
+      seenShapes.add(shape);
+      log('offers',{rolls,wishlistPolicy:'site_markers_assumed_v1',offers:offers.map(({id,slot,kind,amount,wanted,classes,signals})=>({id,slot,kind,amount,wanted,classes,signals}))});
+    }
+    function match(offers){
+      return offers.find(o=>options.exp&&o.kind==='exp'&&o.amount>=options.expMin
+        || options.brick&&o.kind==='brick'&&o.amount>=options.brickMin
+        || options.wishlist&&o.kind==='card'&&o.wanted.length>0);
+    }
+    function stop(reason){
+      if(!active)return;
+      active=false;stopReason=reason;
+      if(wakeDelay){clearTimeout(delayTimer);wakeDelay();wakeDelay=null;}
+      render(pending?'Остановка: ждём результат обновления':reason);
+      // A sent action keeps its claim until its response or timeout is handled.
+      startButton.disabled=true;
+    }
+    const claims=()=>GM_listValues().filter(key=>key.startsWith(PREFIX)).map(key=>({key,...GM_getValue(key,{})})).filter(c=>c.until>Date.now());
+    const owns=()=>claim && GM_getValue(claimKey,null)?.token===claim.token && claim.until>Date.now();
+    const wait=ms=>new Promise(resolve=>{wakeDelay=resolve;delayTimer=setTimeout(()=>{wakeDelay=null;resolve();},ms);});
+    async function acquire(){
+      claim={token:crypto.randomUUID(),choosing:true,ticket:0,until:Date.now()+TTL};GM_setValue(claimKey,claim);
+      claim={...claim,choosing:false,ticket:1+Math.max(0,...claims().filter(c=>c.key!==claimKey).map(c=>Number(c.ticket)||0))};
+      GM_setValue(claimKey,claim);await wait(180);
+      if(!active || !visible() || !validContext() || claims().some(c=>c.key!==claimKey && (c.choosing
+        || c.ticket<claim.ticket || c.ticket===claim.ticket&&c.key<claimKey)))return false;
+      heartbeat=setInterval(()=>{
+        try{
+          if(!owns()){stop('Потеряна блокировка вкладки');return;}
+          claim.until=Date.now()+TTL;GM_setValue(claimKey,claim);
+        }catch(e){stop('Не удалось сохранить блокировку вкладки');}
+      },3000);
+      return owns();
+    }
+    function release(){
+      clearInterval(heartbeat);
+      try{if(GM_getValue(claimKey,null)?.token===claim?.token)GM_deleteValue(claimKey);}catch(e){}
+      claim=null;
+    }
+    function resolvePending(result){
+      if(!pending)return;
+      const current=pending;pending=null;clearTimeout(current.timeout);current.resolve(result);
+    }
+    function uncertain(reason){
+      blocked=true;
+      try{GM_setValue(UNCERTAIN,Date.now()+60000);}catch(e){}
+      log('unconfirmed',{reason,rolls,requestSeen:!!pending?.requestId},'warn');
+      resolvePending({error:'Результат не подтверждён. Проверьте витрину и обновите страницу'});
+    }
+    function checkCompletion(){
+      mutationTimer=0;
+      if(!pending?.response || !validContext() || busy())return;
+      const offers=suiteShopOffers(root.querySelector('#accshopCardsWrap'));
+      if(balance()!==pending.response.balance || suiteShopFingerprint(offers)!==pending.response.fingerprint)return;
+      if(pending.beforeBalance-pending.response.balance!==pending.beforePrice){uncertain('balance_mismatch');return;}
+      resolvePending({offers,cost:pending.beforePrice,elapsedMs:pending.response.elapsedMs});
+    }
+    function scheduleCompletion(){
+      if(!mutationTimer && pending?.response)mutationTimer=setTimeout(checkCompletion,30);
+    }
+    function onCapture(phase,data){
+      if(!pending)return;
+      if(phase==='request'){
+        if(pending.requestId){uncertain('overlapping_reroll_request');return;}
+        pending.requestId=data.id;return;
+      }
+      if(data.id!==pending.requestId)return;
+      const body=data.body;
+      if(data.status<200 || data.status>=300 || !body || typeof body.success!=='boolean'){
+        uncertain(data.status?'http_or_unknown_response':'network_error');return;
+      }
+      if(!body.success){
+        log('rejected',{status:data.status,elapsedMs:data.elapsedMs},'warn');
+        resolvePending({error:'Сервер отклонил обновление. Ролл остановлен'});return;
+      }
+      if(typeof body.cards_html!=='string' || suiteShopNumber(body.balance)===null){uncertain('incomplete_response');return;}
+      if(!validContext()){resolvePending({error:'Страница магазина изменилась'});return;}
+      const doc=new DOMParser().parseFromString(body.cards_html,'text/html'),offers=suiteShopOffers(doc);
+      if(!offers.length){uncertain('empty_response_offers');return;}
+      pending.response={balance:suiteShopNumber(body.balance),fingerprint:suiteShopFingerprint(offers),elapsedMs:data.elapsedMs};
+      scheduleCompletion();
+    }
+    onCapture.wantsRequest=()=>!!pending;
+    const capture=suiteInstallShopCapture(onCapture);
+    function rollOnce(){
+      return new Promise(resolve=>{
+        pending={resolve,requestId:null,response:null,beforeBalance:balance(),beforePrice:price(),
+          timeout:setTimeout(()=>uncertain('response_or_dom_timeout'),20000)};
+        lastClick=Date.now();dispatching=true;
+        try{nativeButton().click();}catch(e){uncertain('click_failed');}finally{dispatching=false;}
+      });
+    }
+    async function run(){
+      try{
+        if(!await acquire()){stop('Ролл уже работает в другой вкладке');return;}
+        while(active){
+          if(!validContext()){stop('Страница магазина изменилась');break;}
+          if(!visible()){stop('Вкладка скрыта');break;}
+          if(!owns()){stop('Потеряна блокировка вкладки');break;}
+          if(!options.exp&&!options.brick&&!options.wishlist){stop('Выберите условия остановки');break;}
+          if(busy()){stop('Магазин занят. Дождитесь завершения операции');break;}
+          lastOffers=suiteShopOffers(root.querySelector('#accshopCardsWrap'));
+          if(!lastOffers.length || lastOffers.some(o=>o.kind==='unknown'||(o.kind==='exp'||o.kind==='brick')&&o.amount===null)){
+            sample(lastOffers,true);stop('Не удалось распознать товары');break;
+          }
+          const found=match(lastOffers);
+          if(found){
+            log('match',{rolls,spent,kind:found.kind,amount:found.amount,id:found.id,wanted:found.wanted});
+            sample(lastOffers,true);stop(found.kind==='exp'?`Найден опыт: ${found.amount}`:found.kind==='brick'?`Найден кирпич: ${found.amount}`:'Найдена карта из желаемого');break;
+          }
+          const available=balance(),cost=price();
+          if(available===null||cost===null){stop('Не удалось прочитать баланс или цену обновления');break;}
+          if(available<cost){stop('Не хватает АСС на обновление');break;}
+          const remaining=1000-(Date.now()-lastClick);
+          if(remaining>0){await wait(remaining);continue;}
+          render('Обновляем витрину');
+          const result=await rollOnce();
+          if(result.error){stop(result.error);stopReason=result.error;break;}
+          rolls++;spent+=result.cost;lastOffers=result.offers;
+          sample(lastOffers);
+          if(rolls===1 || rolls-lastProgress>=25){lastProgress=rolls;log('progress',{rolls,spent,balance:balance(),elapsedMs:result.elapsedMs});}
+          if(active)render('Проверяем витрину');
+        }
+      }catch(e){stop('Ошибка ролла. Обновления остановлены');log('error',{name:String(e?.name||'Error')},'warn');}
+      finally{
+        active=false;release();runPromise=null;
+        if(destroyed)capture.listeners.delete(onCapture);
+        if(!destroyed)render(stopReason||'Остановлен');
+        log('stopped',{reason:stopReason,rolls,spent});
+      }
+    }
+    function start(){
+      if(active||runPromise||blocked||!validContext())return;
+      if(!visible()){render('Откройте вкладку магазина');return;}
+      if(Number(gmStoreGet(UNCERTAIN,0))>Date.now()){render('Предыдущее обновление не подтверждено. Проверьте витрину и подождите минуту');return;}
+      if(!options.exp&&!options.brick&&!options.wishlist){settingsBox.hidden=false;settingsButton.setAttribute('aria-expanded','true');render('Выберите условия остановки');return;}
+      active=true;stopReason='';rolls=0;spent=0;lastProgress=0;seenShapes=new Set();
+      log('started',{options,intervalMs:1000});render('Запускаем');runPromise=run();
+    }
+    function guard(event){
+      if(!runPromise&&!active)return;
+      if(!event.target.closest?.('#accshopRerollBtn,.accshop__buy-btn,.accshop__buy-special-btn')||dispatching)return;
+      event.preventDefault();event.stopImmediatePropagation();render('Сначала остановите ролл');
+    }
+    function visibility(){if(!visible())stop('Вкладка скрыта');}
+    function pagehide(){
+      if(pending)try{GM_setValue(UNCERTAIN,Date.now()+60000);}catch(e){}
+      stop('Страница закрыта');
+    }
+    startButton.addEventListener('click',start);stopButton.addEventListener('click',()=>stop('Остановлено вручную'));
+    settingsButton.addEventListener('click',()=>{settingsBox.hidden=!settingsBox.hidden;settingsButton.setAttribute('aria-expanded',String(!settingsBox.hidden));});
+    panel.querySelectorAll('[data-shop-option]').forEach(input=>{
+      const key=input.dataset.shopOption;
+      if(input.type==='checkbox')input.checked=options[key];else input.value=String(options[key]);
+      input.addEventListener('change',()=>{
+        if(active||runPromise)return;
+        if(input.type==='checkbox')options[key]=input.checked;
+        else{const number=suiteShopNumber(input.value);if(number===null||number<1){input.value=options[key];return;}options[key]=number;}
+        gmStoreSet(SETTINGS,options);
+      });
+    });
+    const observer=new MutationObserver(mutations=>{
+      if(!pending?.response)return;
+      if(mutations.some(m=>!panel.contains(m.target)))scheduleCompletion();
+    });
+    observer.observe(root,{subtree:true,childList:true,characterData:true,attributes:true,
+      attributeFilter:['disabled','aria-disabled','data-accshop-busy']});
+    root.addEventListener('click',guard,true);document.addEventListener('visibilitychange',visibility);
+    window.addEventListener('pagehide',pagehide);
+    suiteShopRoll={stop,destroy(){
+      stop('Модуль выключен');destroyed=true;observer.disconnect();clearTimeout(mutationTimer);
+      root.removeEventListener('click',guard,true);document.removeEventListener('visibilitychange',visibility);
+      window.removeEventListener('pagehide',pagehide);panel.remove();
+      // An in-flight response is still observed until the runner releases its claim.
+      if(!pending)capture.listeners.delete(onCapture);
+    }};
+    window.__suiteShopRollInstalled=true;
+    sample(suiteShopOffers(grid),true);
+    log('ready',{wishlistPolicy:'site_markers_assumed_v1'});
+  }
+
+  function cleanupLabyrinthShopRoll() {
+    suiteShopRoll?.destroy();suiteShopRoll=null;window.__suiteShopRollInstalled=false;
+  }
+  // END LABYRINTH SHOP ROLL
+
   let labyrinthRouteWatcherInstalled=false;
   function setupLabyrinthQuizRouteWatcher(){
     if(labyrinthRouteWatcherInstalled) return;
     labyrinthRouteWatcherInstalled=true;
     const isLabyrinthRoute=()=>/\/labyrinth(?:\/|$)/.test(location.pathname);
     let wasLabyrinth=isLabyrinthRoute();
+    let wasShop=/^\/accshop\/?$/.test(location.pathname);
     let routeCheckTimer=null;
     const check=()=>{
+      const isShop=/^\/accshop\/?$/.test(location.pathname);
+      if(!isShop && (wasShop || suiteShopRoll))cleanupLabyrinthShopRoll();
+      if(isShop && !wasShop && cfg.modLabyrinthShop)initLabyrinthShopRoll();
+      wasShop=isShop;
       const isLabyrinth=isLabyrinthRoute();
       if(!isLabyrinth){
         const hasActiveModule = wasLabyrinth
@@ -13980,6 +14356,7 @@ function watchTradeLimitsSettings(){
     suiteStartModule('vote_cards', 'modVoteCardsToggle', initVoteCardsToggle);
     suiteStartModule('suggestion_authors', 'modSuggestionAuthors', initSuggestionAuthors);
     suiteStartModule('autowatch', 'modAutoLootCards', initAutoLootCards);
+    suiteStartModule('shop_roll', 'modLabyrinthShop', initLabyrinthShopRoll);
     suiteStartModule('quiz', 'modLabyrinthQuiz', initLabyrinthQuiz);
     suiteStartModule('emission', 'modLabyrinthEmission', initLabyrinthEmission);
     suiteStartModule('fatigue', 'modLabyrinthFatigue', initLabyrinthFatigue);
