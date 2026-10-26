@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.81
+// @version      3.82
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -9179,9 +9179,29 @@
       const pageBefore=getCurrentPage();
       brickTradePending=true;updateBrickButton(true);
       try{
-        const result=await suiteConfirmCardAction({button:btn,action:'create_energy',ids,signal:brickAbort.signal});
+        let result, retries=0;
+        const isRateLimited=result=>!result.ok && !result.uncertain && result.reason==='server_rejected'
+          && /^Слишком\s+часто(?:[\s,.!;:]|$)/i.test(result.response?.error||'');
+        const expectedIds=ids.map(String).sort().join(',');
+        while(true){
+          const button=document.querySelector('.stone__send-trade-btn');
+          result=await suiteConfirmCardAction({button,action:'create_energy',ids,signal:brickAbort.signal});
+          if(brickAbort.signal.aborted)return {ok:false};
+          if(!isRateLimited(result)||retries>=3)break;
+          retries++;
+          suiteTelemetryLog('suite','brick_rate_limit_retry',{retry:retries,maxRetries:3,delayMs:1000,selectedCount:ids.length,energy},'warn');
+          brickNotify(`⏳ Слишком часто. Повтор через секунду (${retries}/3).`,0);
+          await sleep(1000);
+          if(brickAbort.signal.aborted)return {ok:false};
+          const currentIds=[...(getBasket()?.querySelectorAll('.stone__main-item[data-id]')||[])].map(el=>String(el.dataset.id)).sort().join(',');
+          if(currentIds!==expectedIds || getFutureEnergy()!==energy){
+            result={ok:false,reason:'basket_changed'};
+            break;
+          }
+        }
         if(brickAbort.signal.aborted)return {ok:false};
         if(result.ok && await waitAfterBrickTrade(result.newEnergy)){
+          if(retries)suiteTelemetryLog('suite','brick_rate_limit_recovered',{retries,selectedCount:ids.length,energy});
           setBrickReady(false);brickNotify(`✅ Обмен подтверждён: ${energy} энергии`);
           return {ok:true,energy};
         }
@@ -9189,13 +9209,16 @@
         brickTradeUncertain=!!result.uncertain||result.ok;
         suiteSelfDiagnosticIssue('suite','brick_exchange_not_confirmed',{
           reason:result.reason||'ui_not_settled',selectedCount:ids.length,energy,
+          retries,retryExhausted:retries===3&&isRateLimited(result),
           response:result.response||null,confirmedByServer:!!result.ok,uncertain:brickTradeUncertain,
           visibility:document.visibilityState,pageBefore,page:getCurrentPage(),rank:getActiveRank(),
           remainingSlots:getUsedSlots(),futureEnergy:getFutureEnergy(),expectedBalance:result.newEnergy??null,
           displayedBalance:document.getElementById('now_energy')?.textContent.replace(/\D/g,'').slice(0,20)||null,
           filterBusy:document.getElementById('celestialForge')?.dataset.filterBusy==='true'
         });
-        brickNotify('⚠️ Обмен не подтверждён. Проверь баланс и карты; автоматическая работа остановлена.');
+        brickNotify(retries===3&&isRateLimited(result)
+          ? '⚠️ После 3 повторов сервер всё ещё отвечает «Слишком часто». Наполнение остановлено.'
+          : '⚠️ Обмен не подтверждён. Проверь баланс и карты; автоматическая работа остановлена.');
         return {ok:false};
       }finally{brickTradePending=false;updateBrickButton(false);}
     }
@@ -21099,12 +21122,11 @@ function watchTradeLimitsSettings(){
       }
 
       if(!suiteAttachLabyrinthOverlay(runtime.box)) return false;
-      suitePositionLabyrinthFatigueCounter();
       return true;
     }
 
     function renderBox(){
-      if(!runtime.box) return;
+      if(!runtime.box || document.hidden) return;
       const percentEl = runtime.box.querySelector('[data-lab-fatigue="percent"]');
       const fillEl = runtime.box.querySelector('[data-lab-fatigue="fill"]');
       const value = suiteLabyrinthFatigueNumber(runtime.state.value);
@@ -21112,15 +21134,17 @@ function watchTradeLimitsSettings(){
       // Threshold calibration remains internal; the compact UI shows percent only.
       const confirmed = runtime.cacheExact && runtime.state.limitConfirmed;
       const percent = Number.isFinite(value) ? Math.max(0, Math.min(100, Math.round(value / limit * 1000) / 10)) : 0;
-      if(percentEl) percentEl.textContent = Number.isFinite(value) ? `${percent}%` : '—';
-      if(fillEl) fillEl.style.width = `${percent}%`;
+      const percentText = Number.isFinite(value) ? `${percent}%` : '—';
+      if(percentEl && percentEl.textContent !== percentText) percentEl.textContent = percentText;
+      if(fillEl && fillEl.style.width !== `${percent}%`) fillEl.style.width = `${percent}%`;
       runtime.box.classList.toggle('is-ready', percent >= 100 && confirmed);
       const hints = [];
       if(!Number.isFinite(value)) hints.push('Счётчик появится после первого хода.');
       if(Number.isFinite(value) && !runtime.cacheExact) hints.push('Сохранённое значение получено в другой комнате и может быть неточным.');
       if(runtime.state.skipped) hints.push('Последний ход не добавил усталость.');
       if(percent >= 100 && confirmed) hints.push('Следующий засчитанный ход вызовет усталость.');
-      runtime.box.title = hints.join('\n');
+      const title = hints.join('\n');
+      if(runtime.box.title !== title) runtime.box.title = title;
       suitePositionLabyrinthFatigueCounter();
     }
 
@@ -21301,6 +21325,7 @@ function watchTradeLimitsSettings(){
     }
 
     runtime.startTimer = setTimeout(() => {
+      if(document.hidden) return;
       installLabyrinthFatigueStepHook();
       syncLabyrinthFatiguePageState();
       updateCacheAccuracy();
@@ -21308,6 +21333,7 @@ function watchTradeLimitsSettings(){
       renderBox();
     }, 500);
     runtime.attachInterval = setInterval(() => {
+      if(document.hidden) return;
       installLabyrinthFatigueStepHook();
       syncLabyrinthFatiguePageState();
       updateCacheAccuracy();
@@ -21349,6 +21375,7 @@ function watchTradeLimitsSettings(){
       document.querySelectorAll('#suite-labyrinth-overlays:empty').forEach(el=>el.remove());
       return;
     }
+    if(document.hidden) return;
     const arena = document.querySelector('.labyrinth__arena');
     if(!arena) return;
     for(const panel of [fatigue,emission].filter(Boolean)) suiteAttachLabyrinthOverlay(panel);
@@ -21361,35 +21388,45 @@ function watchTradeLimitsSettings(){
       .map(el=>el.getBoundingClientRect()).filter(rect=>rect.height>0 && rect.width>0)
       .reduce((bottom,rect)=>Math.max(bottom,rect.bottom),arenaRect.top);
     const top = `${Math.max(0,(headerBottom-arenaRect.top)/(scaleY||1)-arena.clientTop)}px`;
-    if(layer.style.top!==top) layer.style.top=top;
     const hasEmission = !!(emission && emission.isConnected && getComputedStyle(emission).display !== 'none');
     const isMobile = typeof window.matchMedia === 'function' && window.matchMedia('(max-width:760px)').matches;
-    if(hasEmission){emission.style.top='12px';emission.style.right='12px';}
-    if(fatigue){
-      fatigue.style.top='12px';fatigue.style.right='12px';
-      if(hasEmission){
-        const emissionWidth=Math.ceil(emission.getBoundingClientRect().width || 172);
-        const fatigueWidth=Math.ceil(fatigue.getBoundingClientRect().width || 180);
-        const hostWidth=fatigue.parentElement?.clientWidth || window.innerWidth;
-        if(!isMobile && emissionWidth+fatigueWidth+36<=hostWidth){
-          fatigue.style.right=`${24+emissionWidth}px`;
-        }else{
-          fatigue.style.top=`${24+Math.ceil(emission.getBoundingClientRect().height || 80)}px`;
-        }
+    // Read geometry first; never reset positions just to measure them again.
+    // Temporary writes wake map observers and force synchronous layout on every tick.
+    const plans = [hasEmission ? emission : null, fatigue].filter(Boolean).map(el=>({
+      el, top:12, right:12, width:el.offsetWidth, height:el.offsetHeight,
+      visible:getComputedStyle(el).display !== 'none',
+    }));
+    const e = plans.find(p=>p.el===emission), f = plans.find(p=>p.el===fatigue);
+    if(e && f){
+      if(!isMobile && e.width+f.width+36<=layer.clientWidth){
+        f.right=24+e.width;
+      }else{
+        f.top=24+e.height;
       }
     }
     // On narrow maps the site's own red emission banner occupies the same corner height.
-    const panels=[hasEmission?emission:null,fatigue].filter(el=>el && getComputedStyle(el).display!=='none');
+    const panels=plans.filter(p=>p.visible);
     const banner=arena.querySelector('.labyrinth-emission.is-active .labyrinth-emission__banner');
     if(banner){
       const rect=banner.getBoundingClientRect();
-      const overlaps=rect.width && rect.height && panels.some(el=>{
-        const r=el.getBoundingClientRect();
-        return r.left<rect.right+12 && r.right>rect.left-12 && r.top<rect.bottom+12 && r.bottom>rect.top;
+      const scaleX=arena.offsetWidth ? arenaRect.width/arena.offsetWidth : 1;
+      const originY=arenaRect.top+(arena.clientTop+parseFloat(top))*scaleY;
+      const originRight=arenaRect.left+(arena.clientLeft+layer.clientWidth)*scaleX;
+      const overlaps=rect.width && rect.height && panels.some(p=>{
+        const right=originRight-p.right*scaleX, panelTop=originY+p.top*scaleY;
+        return right-p.width*scaleX<rect.right+12 && right>rect.left-12
+          && panelTop<rect.bottom+12 && panelTop+p.height*scaleY>rect.top;
       });
       if(overlaps){
-        const shift=Math.max(0,rect.bottom+12-Math.min(...panels.map(el=>el.getBoundingClientRect().top)));
-        for(const panel of panels)panel.style.top=`${parseFloat(panel.style.top)+shift}px`;
+        const shift=Math.max(0,(rect.bottom+12-originY)/(scaleY||1)-Math.min(...panels.map(p=>p.top)));
+        for(const panel of panels)panel.top+=shift;
+      }
+    }
+    if(layer.style.top!==top) layer.style.top=top;
+    for(const panel of plans){
+      for(const key of ['top','right']){
+        const value=`${panel[key]}px`;
+        if(panel.el.style[key]!==value)panel.el.style[key]=value;
       }
     }
   }
@@ -21449,8 +21486,8 @@ function watchTradeLimitsSettings(){
     const subEl = box.querySelector('.suite-emission-sub');
 
     function attachTimer(){
+      if(document.hidden) return false;
       if(!suiteAttachLabyrinthOverlay(box)) return false;
-      suitePositionLabyrinthFatigueCounter();
       return true;
     }
 
@@ -21486,56 +21523,38 @@ function watchTradeLimitsSettings(){
     }
 
     function render(){
+      if(document.hidden) return;
       attachTimer();
-
-      if(!state.endTime){
-        box.classList.remove('is-active','is-soon');
-        valueEl.textContent = 'Ожидание...';
-        subEl.textContent = 'Синхронизация с лабиринтом';
-        suitePositionLabyrinthFatigueCounter();
-        return;
-      }
-
-      const left = Math.floor((state.endTime - Date.now()) / 1000);
-
-      if(left <= 0){
-        if(state.active){
-          box.classList.remove('is-active');
-          box.classList.add('is-soon');
-          valueEl.textContent = 'Выброс завершён';
-          subEl.textContent = 'Ожидаем следующее окно';
-        } else {
-          box.classList.remove('is-active');
-          box.classList.add('is-soon');
-          valueEl.textContent = 'Скоро выброс';
-          subEl.textContent = 'Момент почти наступил';
+      let active=false, soon=false, value='Ожидание...', subtitle='Синхронизация с лабиринтом';
+      if(state.endTime){
+        const left = Math.floor((state.endTime - Date.now()) / 1000);
+        if(left <= 0){
+          soon=true;
+          value=state.active ? 'Выброс завершён' : 'Скоро выброс';
+          subtitle=state.active ? 'Ожидаем следующее окно' : 'Момент почти наступил';
+        }else{
+          active=state.active;soon=!active;
+          value=formatTime(left);
+          subtitle=active ? 'До завершения выброса' : 'До следующего выброса';
         }
-        suitePositionLabyrinthFatigueCounter();
-        return;
       }
-
-      if(state.active){
-        box.classList.add('is-active');
-        box.classList.remove('is-soon');
-        valueEl.textContent = formatTime(left);
-        subEl.textContent = 'До завершения выброса';
-      } else {
-        box.classList.remove('is-active');
-        box.classList.add('is-soon');
-        valueEl.textContent = formatTime(left);
-        subEl.textContent = 'До следующего выброса';
-      }
+      box.classList.toggle('is-active',active);
+      box.classList.toggle('is-soon',soon);
+      if(valueEl.textContent!==value)valueEl.textContent=value;
+      if(subEl.textContent!==subtitle)subEl.textContent=subtitle;
       suitePositionLabyrinthFatigueCounter();
     }
 
     state.startTimer = setTimeout(() => {
-      attachTimer();
+      if(document.hidden) return;
       syncEmission();
       render();
     }, 700);
-    state.attachInterval = setInterval(attachTimer, 500);
-    state.syncInterval = setInterval(syncEmission, 1000);
-    state.renderInterval = setInterval(render, 500);
+    state.renderInterval = setInterval(() => {
+      if(document.hidden) return;
+      syncEmission();
+      render();
+    }, 1000);
   }
 
 
