@@ -24,16 +24,17 @@ window.jQuery=()=>eventTarget;
 const emit=(name,...args)=>{for(const [key,fn] of [...handlers])if(key.startsWith(name+'.'))fn({},...args);};
 const notices=[],issues=[];
 const suiteSelfDiagnosticIssue=(...args)=>issues.push(args);
-const suiteTelemetryLog=()=>{};
+const telemetry=[];const suiteTelemetryLog=(...args)=>telemetry.push(args);
 function cardHtml(kind,id='1'){
   return '<div class="'+kind+'__inventory-item" data-id="'+id+'" data-rank="e" data-energy="1"><img><div class="card-stats">'+
     [['Владельцев',1362,'1,4к'],['Хотят получить',4,'4'],['Готовы обменять',200,'200'],['Дубли на руках',2,'2']]
       .map(([label,n,text])=>'<span title="'+label+': '+n+'" data-'+(kind==='stone'?'cg':'rf')+'-count="'+n+'"><b>'+text+'</b></span>').join('')+'</div></div>';
 }
-let reply={new_energy:101}, outcome='success', clicks=0,replyStatus=200;
+let reply={new_energy:101}, outcome='success', clicks=0,replyStatus=200,exchangeReplies=[];
 function attachExchange(button,action,ids,update){
   button.onclick=()=>{
     clicks++;
+    if(exchangeReplies.length){reply=exchangeReplies.shift();outcome=reply.error?'failure':'success';}
     const xhr={status:replyStatus,responseJSON:reply};
     const data=new URLSearchParams({action});
     for(const id of ids)data.append(action==='create_energy'?'cards_ids[]':'card_ids[]',id);
@@ -99,16 +100,18 @@ abort.abort();check((await pending).reason==='cancelled','module cleanup cancels
 const brickScope=src.slice(src.indexOf('  function initBrickFill'));
 const brickFns=['getBasket','getUsedSlots','getFutureEnergy','getPageSelect','getCurrentPage','getLastPage','getFreeSlots','getActiveRank','parseCardStats','getCardImage','getCardRank','getCardEnergy','isCardAvailable','filterBrickCards','clickBrickTrade','waitAfterBrickTrade','fillBrickOnce','clickMatchingBrickCards'].map(n=>extract(n,brickScope)).join('\n');
 const brickTests=String.raw`
-const brickAbort=new AbortController();const BRICK_SLOT_LIMIT=70,BRICK_ENERGY={e:1,d:1,c:1,b:2,a:6};
+let brickAbort=new AbortController();const BRICK_SLOT_LIMIT=70,BRICK_ENERGY={e:1,d:1,c:1,b:2,a:6};
 let brickBusy=false,brickReadyToTrade=false,brickTradePending=false,brickTradeUncertain=false;
 const brickNotify=text=>notices.push(text),updateBrickButton=()=>{},setBrickReady=v=>{brickReadyToTrade=v;};
-const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const retryWaits=[];let onRetryWait=null;
+const sleep=ms=>{if(ms===1000){retryWaits.push(ms);onRetryWait?.();}return new Promise(r=>setTimeout(r,ms));};
 const warnCardStatsDemandRequired=()=>false,suiteGetCurrentUserName=()=>'',getLockedImages=async()=>new Set();
 const defaultRankCfg=()=>({wantEnabled:true,wantLimit:50,ownersEnabled:true,ownersLimit:500});
 const loadBrickSettings=()=>({'':defaultRankCfg(),excludeWishlist:false,targetEnergy:1});
 const goToPage=()=>false,waitForInventoryUpdate=async()=>false;
 function resetBrick(){
-  brickTradeUncertain=false;notices.length=0;
+  brickAbort=new AbortController();brickTradeUncertain=false;notices.length=0;issues.length=0;telemetry.length=0;
+  exchangeReplies=[];retryWaits.length=0;onRetryWait=null;
   document.body.innerHTML='<div id="celestialForge" data-filter-busy="false"><span id="now_energy">100</span><span id="future-energy">0</span><div class="stone__main-items" data-type="creator"></div><button class="stone__send-trade-btn">Send</button>'+cardHtml('stone')+'</div>';
   document.querySelector('.stone__inventory-item').onclick=function(){
     getBasket().innerHTML='<button class="stone__main-item" data-id="1"></button>';this.hidden=true;document.getElementById('future-energy').textContent='1';
@@ -131,6 +134,33 @@ check(issues.at(-1)[2].response.error==='No'&&issues.at(-1)[2].remainingSlots===
 resetBrick();reply={new_energy:101};outcome='timeout';const startClicks=clicks;await clickMatchingBrickCards();
 check(brickTradeUncertain&&!notices.some(x=>x.includes('Цель выполнена')),'uncertain brick stops');
 await clickMatchingBrickCards();check(clicks===startClicks+1,'no blind repeat after timeout');
+const busy={error:'Слишком часто, подождите пару секунд и повторите действие'};
+for(const retries of [1,2,3]){
+ resetBrick();exchangeReplies=[...Array(retries).fill(busy),{new_energy:101}];const before=clicks;
+ await clickMatchingBrickCards();
+ check(clicks===before+1+retries,'initial request plus '+retries+' retries');
+ check(retryWaits.length===retries&&retryWaits.every(ms=>ms===1000),'one second per retry');
+ check(notices.some(x=>x.includes('Цель выполнена: 1/1')),'successful retry continues fill');
+ check(!issues.length&&!brickTradeUncertain&&!brickTradePending,'successful retry leaves no incident or busy lock');
+ check(telemetry.some(x=>x[1]==='brick_rate_limit_recovered'&&x[2].retries===retries),'retry recovery logged');
+}
+resetBrick();reply=busy;outcome='failure';let beforeRetry=clicks;await clickMatchingBrickCards();
+check(clicks===beforeRetry+4&&retryWaits.length===3,'stop after three retries, four total requests');
+check(issues.length===1&&issues[0][2].retryExhausted&&issues[0][2].retries===3,'one final exhausted incident');
+check(getUsedSlots()===1&&!notices.some(x=>x.includes('Цель выполнена')),'failed retries keep cards and do not count energy');
+resetBrick();exchangeReplies=[busy,{error:'Другая ошибка'}];beforeRetry=clicks;await clickMatchingBrickCards();
+check(clicks===beforeRetry+2&&retryWaits.length===1,'different rejection stops immediately');
+resetBrick();exchangeReplies=[busy,{}];beforeRetry=clicks;await clickMatchingBrickCards();
+check(clicks===beforeRetry+2&&brickTradeUncertain,'uncertain retry response prevents further submissions');
+resetBrick();reply=busy;outcome='failure';onRetryWait=()=>{document.querySelector('.stone__send-trade-btn').disabled=true;};beforeRetry=clicks;
+await clickMatchingBrickCards();check(clicks===beforeRetry+1&&issues[0][2].reason==='not_ready','disabled native button is not forced');
+resetBrick();reply=busy;outcome='failure';onRetryWait=()=>brickAbort.abort();beforeRetry=clicks;
+await clickMatchingBrickCards();check(clicks===beforeRetry+1&&!brickTradePending,'cancel during wait prevents repeat and releases lock');
+resetBrick();reply=busy;outcome='failure';onRetryWait=()=>getBasket().querySelector('[data-id]').dataset.id='2';beforeRetry=clicks;
+await clickMatchingBrickCards();check(clicks===beforeRetry+1&&issues[0][2].reason==='basket_changed','changed basket never blindly resubmitted');
+resetBrick();reply=busy;outcome='failure';let duplicateAttempt;
+onRetryWait=()=>{duplicateAttempt=clickBrickTrade();};beforeRetry=clicks;
+await clickMatchingBrickCards();check(!(await duplicateAttempt).ok&&clicks===beforeRetry+4,'pending lock also covers retry delays');
 `;
 const remeltScope=src.slice(src.indexOf('  function initRemelt'));
 const remeltFns=['getRemeltPageSelect','getRemeltCurrentPage','isRemeltPageReady','getRemeltFilterContext','restoreRemeltPage','getRemeltActiveRank','getRemeltNeedCount','parseRemeltCardStats','getRemeltCardImage','isRemeltCardAvailable','getRemeltCards','filterRemeltCards','getRemeltStartBtn','isRemeltVisible','getRemeltActiveWrapper','getRemeltFilledSlotCount','waitForRemeltSlotsFilled','waitForRemeltStartBtn','waitAfterRemelt','runRemelt'].map(n=>extract(n,remeltScope)).join('\n');

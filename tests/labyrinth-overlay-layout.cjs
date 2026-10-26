@@ -34,6 +34,13 @@ let checks=0;const ok=(v,m)=>{assert.ok(v,m);checks++;};
    initLabyrinthEmission();attachBox();renderBox();
   },{fixture,css,functions});
   await page.waitForTimeout(800);
+  const idleMutations=await page.evaluate(()=>{
+   const observer=new MutationObserver(()=>{});
+   observer.observe(document.querySelector('.labyrinth__arena'),{subtree:true,childList:true,attributes:true,characterData:true});
+   for(let i=0;i<100;i++){attachBox();renderBox();suitePositionLabyrinthFatigueCounter();}
+   const count=observer.takeRecords().length;observer.disconnect();return count;
+  });
+  ok(idleMutations===0,'unchanged fatigue/overlay causes zero DOM mutations, got '+idleMutations);
   for(const width of [1280,800,600,390,320]){
    await page.setViewportSize({width,height:900});
    const result=await page.evaluate(()=>{
@@ -112,6 +119,24 @@ let checks=0;const ok=(v,m)=>{assert.ok(v,m);checks++;};
   ok(await page.locator('.labyrinth__arena > #suite-labyrinth-overlays > #suite-lab-fatigue-counter').count()===1,'legacy arena fallback for fatigue');
   await page.evaluate(()=>{runtime.box.remove();cfg.modLabyrinthEmission=false;cleanupLabyrinthEmission();});
   ok(await page.locator('#suite-labyrinth-overlays').count()===0,'empty layer removed after both modules stop');
+  const emissionIdle=await page.evaluate(()=>{
+   const interval=window.setInterval,timeout=window.setTimeout,now=Date.now;
+   const timers=[];window.setInterval=(fn,ms)=>(timers.push({fn,ms}),0);window.setTimeout=()=>0;
+   Date.now=()=>1800000000000;cfg.modLabyrinthEmission=true;
+   labyrinthData.emission={active:true,active_until:1800000180};
+   initLabyrinthEmission();const tick=timers[0].fn;tick();
+   const observer=new MutationObserver(()=>{});
+   observer.observe(document.querySelector('.labyrinth__arena'),{subtree:true,childList:true,attributes:true});
+   for(let i=0;i<100;i++)tick();const writes=observer.takeRecords().length;
+   Object.defineProperty(document,'hidden',{configurable:true,value:true});
+   Date.now=()=>1800000010000;tick();const hiddenWrites=observer.takeRecords().length;
+   Object.defineProperty(document,'hidden',{configurable:true,value:false});tick();
+   const resumed=document.querySelector('.suite-emission-value').textContent==='02:50';
+   observer.disconnect();cleanupLabyrinthEmission();
+   window.setInterval=interval;window.setTimeout=timeout;Date.now=now;
+   return {oneTimer:timers.length===1&&timers[0].ms===1000,idle:writes===0,hidden:hiddenWrites===0,resumed};
+  });
+  for(const [name,value] of Object.entries(emissionIdle))ok(value,'emission scheduling: '+name);
   console.log('LABYRINTH_OVERLAY_LAYOUT_OK '+checks+' checks');
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

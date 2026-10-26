@@ -34,6 +34,20 @@ function extract(name){
    const percentOnly=()=>!box().querySelector('[data-lab-fatigue="approx"]')&&!box().textContent.includes('≈')&&!/Порог усталости|Счётчик:|уточняется/.test(box().title)&&!box().classList.contains('is-approximate');
    const send=(value,total,extra={})=>{labyrinthData=stepData(value,total,extra);__suiteLabyrinthFatigueStepHandler({status:200,transport:'test',response:suiteLabyrinthFatigueResponseSummary(labyrinthData)});};
    check(state().limit===10&&!state().limitConfirmed&&percent()==='30%'&&percentOnly(),'initial threshold stays internal, UI shows only percent');
+   const observer=new MutationObserver(()=>{});
+   observer.observe(box(),{subtree:true,attributes:true,childList:true,characterData:true});
+   for(let i=0;i<100;i++)tick();
+   check(observer.takeRecords().length===0,'100 unchanged fatigue ticks produce zero DOM writes');
+   Object.defineProperty(document,'hidden',{configurable:true,value:true});
+   labyrinthData=stepData(4,100);
+   tick();check(percent()==='30%'&&observer.takeRecords().length===0,'hidden tick leaves UI untouched');
+   // A real captured response still preserves progress while the UI is hidden.
+   send(4,101);check(state().value===4&&percent()==='30%','hidden response records counter without rendering');
+   Object.defineProperty(document,'hidden',{configurable:true,value:false});
+   tick();check(percent()==='40%','visible tick renders preserved hidden response');
+   observer.disconnect();
+   cleanupLabyrinthFatigue();delete store['suite_labyrinth_fatigue_v2:Test'];
+   labyrinthData=stepData(3,100);initLabyrinthFatigue();tick();
    send(10,101);check(state().value===10&&!box().classList.contains('is-ready'),'unconfirmed limit does not promise next-step fatigue');
    send(0,102,{fatigue:{active:true}});check(state().limit===10&&state().limitConfirmed,'consecutive actual fatigue confirms 10');
    send(5,103);check(percent()==='50%'&&percentOnly(),'confirmed percentage without calibration badge');
