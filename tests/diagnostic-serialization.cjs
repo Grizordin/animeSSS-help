@@ -46,6 +46,7 @@ const suiteSelfDiagnosticRecent = [];
 const suiteTelemetrySessionId = 'test-session', suiteTelemetryInstallId = 'test-install';
 let suiteTelemetryPendingRecords = [], suiteTelemetryPersistTimer = null;
 let suiteTelemetryPersistPromise = Promise.resolve(), suiteTelemetryFlushPromise = null;
+const suiteRoutineTelemetry = { record:() => false, persist:async () => {} };
 const suiteTelemetryWithQueueLock = async fn => fn();
 const suiteTelemetrySchedulePersist = () => {};
 let acceptSend = false;
