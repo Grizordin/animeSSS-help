@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.83
+// @version      3.84
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -767,6 +767,102 @@
   let suiteTelemetryPersistPromise = Promise.resolve();
   const suiteSelfDiagnosticRecent = [];
 
+  // BEGIN ROUTINE TELEMETRY
+  // Share half-hour summaries across tabs/reloads; never throttle failures or receipts.
+  const suiteRoutineTelemetry = (() => {
+    const KEY = 'suite_telemetry_routine_v1', INTERVAL = 30 * 60 * 1000;
+    const events = {
+      autowatch:new Set(['module_initialized','next_attempt_scheduled','target_episode_selected',
+        'network_request_started','network_request_finished']),
+      chat_stone:new Set(['snapshot_started','snapshot_response','snapshot_finished'])
+    };
+    let pending = {}, timer = null, saving = Promise.resolve();
+    function merge(target, delta) {
+      target.firstAt = Math.min(target.firstAt || delta.firstAt, delta.firstAt);
+      target.lastAt = Math.max(target.lastAt || 0, delta.lastAt);
+      for(const [event, count] of Object.entries(delta.counts)) target.counts[event] = (target.counts[event] || 0) + count;
+      for(const [event, sample] of Object.entries(delta.samples)) {
+        if(!target.samples[event] || sample.at >= target.samples[event].at) target.samples[event] = sample;
+      }
+    }
+    function record(module, event, data, level, now) {
+      if(!['debug','info'].includes(level) || !events[module]?.has(event)) return false;
+      const detail = module === 'autowatch' ? (data?.data || data) : data;
+      if(Number(detail?.status || 0) >= 400 || detail?.ok === false || detail?.error || detail?.response?.error
+        || detail?.response?.success === false || Number(detail?.diamondCount || 0) > 0) return false;
+      const group = pending[module] || (pending[module] = { firstAt:now, lastAt:now, counts:{}, samples:{} });
+      const sample = {};
+      for(const key of ['source','status','delayMs','nextRunAt','animeId','season','episode','durationMs',
+        'itemCount','candidateItemCount','diamondCount']) {
+        const value = detail?.[key];
+        if(typeof value === 'number' || typeof value === 'boolean') sample[key] = value;
+        else if(typeof value === 'string') sample[key] = value.slice(0, 160);
+      }
+      merge(group, { firstAt:now, lastAt:now, counts:{[event]:1}, samples:{[event]:{at:now, data:sample}} });
+      // Local checkpoint only. Network delivery still uses the normal queue.
+      if(!timer) timer = setTimeout(() => { timer = null; void persist(); }, 60 * 1000);
+      return true;
+    }
+    function persist() {
+      clearTimeout(timer); timer = null;
+      const delta = pending; pending = {};
+      saving = saving.then(async () => {
+        let checkpointed = false;
+        try {
+          const saved = await suiteTelemetryWithQueueLock(() => {
+            const now = Date.now();
+            const raw = gmGet(KEY, {}), shared = {};
+            for(const module of Object.keys(events)) {
+              const old = raw?.[module];
+              const valid = old && Number.isFinite(old.nextReportAt) && old.counts && old.samples;
+              const group = valid ? old : { nextReportAt:now + INTERVAL, firstAt:0, lastAt:0, counts:{}, samples:{} };
+              if(group.nextReportAt > now + INTERVAL * 2) group.nextReportAt = now + INTERVAL;
+              if(delta[module]) merge(group, delta[module]);
+              shared[module] = group;
+            }
+            const records = [];
+            for(const [module, group] of Object.entries(shared)) {
+              if(!group.report && Object.keys(group.counts).length && now >= group.nextReportAt) {
+                group.report = { id:`routine-${module}-${group.nextReportAt}-${suiteTelemetryInstallId}`,
+                  timestamp:now, time:new Date(now).toISOString(), module, event:'routine_success_summary', level:'debug',
+                  sessionId:suiteTelemetrySessionId, path:location.pathname, visibility:document.visibilityState,
+                  data:{ intervalMs:INTERVAL, firstEventAt:new Date(group.firstAt).toISOString(),
+                    lastEventAt:new Date(group.lastAt).toISOString(), counts:group.counts, samples:group.samples } };
+                group.nextReportAt = now + INTERVAL;group.firstAt = 0;group.lastAt = 0;group.counts = {};group.samples = {};
+              }
+              if(group.report) records.push(group.report);
+            }
+            // Commit counts and a tiny outbox together. Retrying an enqueue never
+            // adds the same delta again or erases events from a newer period.
+            gmSet(KEY, shared);checkpointed = true;
+            if(records.length) {
+              const queue = suiteTelemetryReadQueue(), ids = new Set(queue.map(item => item.id));
+              const next = queue.concat(records.filter(item => !ids.has(item.id)));
+              // A low-priority summary must never evict an important queued event.
+              if(next.length > SUITE_TELEMETRY_MAX_EVENTS || JSON.stringify(next).length > SUITE_TELEMETRY_MAX_QUEUE_CHARS) return true;
+              if(!suiteTelemetryWriteQueue(next)) return true;
+              for(const group of Object.values(shared)) {
+                if(group.report){delete group.report;group.nextReportAt = Math.max(group.nextReportAt,now + INTERVAL);}
+              }
+              gmSet(KEY, shared);
+            }
+            return true;
+          }, false);
+          if(!saved) throw new Error('routine_checkpoint_pending');
+        } catch(error) {
+          if(checkpointed) return;
+          for(const [module, group] of Object.entries(delta)) {
+            const target = pending[module] || (pending[module] = { firstAt:group.firstAt, lastAt:0, counts:{}, samples:{} });
+            merge(target, group);
+          }
+        }
+      });
+      return saving;
+    }
+    return { record, persist };
+  })();
+  // END ROUTINE TELEMETRY
+
   const suiteTelemetryDelay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
   async function suiteTelemetryWithQueueLock(callback, fallback) {
@@ -860,13 +956,13 @@
       let serialized = '';
       try { serialized = JSON.stringify(limited); } catch(e) { limited.shift(); continue; }
       if(serialized.length <= SUITE_TELEMETRY_MAX_QUEUE_CHARS){
-        try { GM_setValue(SUITE_TELEMETRY_QUEUE_KEY, serialized); }
-        catch(e) { gmDelete(SUITE_TELEMETRY_QUEUE_KEY); }
-        return;
+        try { GM_setValue(SUITE_TELEMETRY_QUEUE_KEY, serialized); return true; }
+        catch(e) { return false; }
       }
       limited.shift();
     }
     gmDelete(SUITE_TELEMETRY_QUEUE_KEY);
+    return true;
   }
 
   function suiteTelemetryTakeBatch(records, module) {
@@ -896,8 +992,7 @@
         const now = Date.now();
         const records = suiteTelemetryReadQueue()
           .filter(item => now - Number(item?.timestamp || now) <= SUITE_TELEMETRY_MAX_AGE_MS);
-        suiteTelemetryWriteQueue(records.concat(pending));
-        return true;
+        return suiteTelemetryWriteQueue(records.concat(pending));
       }, false);
       if(!saved) suiteTelemetryPendingRecords.unshift(...pending);
     }).catch(() => {
@@ -979,6 +1074,7 @@
       const now = Date.now();
       const safeData = suiteTelemetrySanitize(data);
       suiteSelfDiagnosticTrace(module, event, safeData, level);
+      if(suiteRoutineTelemetry.record(module, event, safeData, level, now)) return;
       const record = {
         id: `${now.toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
         timestamp: now,
@@ -1086,6 +1182,7 @@
 
   async function suiteTelemetryFlush(reason = 'timer') {
     await suiteTelemetryPersistPending();
+    await suiteRoutineTelemetry.persist();
     if(suiteTelemetryFlushPromise) return suiteTelemetryFlushPromise;
     suiteTelemetryFlushPromise = (async () => {
       while(true) {
@@ -1570,7 +1667,7 @@
       }
       if(emissionHealthy){
         const state = window.__suiteLabyrinthEmissionState;
-        if(!state || !state.attachInterval || !state.syncInterval || !state.renderInterval){
+        if(!suiteLabyrinthEmissionRuntimeHealthy(state)){
           report('suite', 'emission_runtime_incomplete', { hasState:!!state });
         }
         if(document.querySelector('.labyrinth__arena') && !document.getElementById('suite-emission-timer')){
@@ -2134,20 +2231,35 @@
       to { --cv-neon-angle:360deg; }
     }
 
-    #suite-shop-roll{margin:12px 0;padding:12px;border:1px solid var(--bdc,#59606c);border-radius:12px;background:var(--bg-2,#1e2330);color:var(--tt,#e2e8f0);font:inherit}
-    #suite-shop-roll .suite-shop-roll-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-    #suite-shop-roll .suite-shop-roll-bar strong{margin-right:auto;font-size:14px}
-    #suite-shop-roll button{height:auto;padding:7px 11px;border:1px solid var(--bdc,#59606c);border-radius:8px;background:var(--bg,#151923);color:var(--tt,#e2e8f0);font:inherit;font-size:12px;cursor:pointer}
-    #suite-shop-roll button:disabled{opacity:.5;cursor:default}
-    #suite-shop-roll [data-shop-start]{background:#387b5c;color:#fff;border-color:#387b5c}
-    #suite-shop-roll [data-shop-options]{margin-top:12px;padding-top:10px;border-top:1px solid var(--bdc,#59606c)}
+    #suite-shop-roll{margin:14px 0 20px;padding:18px 20px;border:1px solid var(--ax-line,var(--bdc,#e5dfe9));border-radius:14px;background:var(--ax-panel,var(--bg-2,#f7f5f8));color:var(--ax-text,var(--tt,#30283b));font:inherit;line-height:1.5}
+    #suite-shop-roll .suite-shop-roll-bar{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+    #suite-shop-roll .suite-shop-roll-heading{display:flex;align-items:center;gap:11px;min-width:0}
+    #suite-shop-roll .suite-shop-roll-heading>i{color:var(--ax-accent,#7759a8);font-size:18px}
+    #suite-shop-roll strong{display:block;font-size:15px;font-weight:700}
+    #suite-shop-roll small{display:block;color:var(--ax-muted,var(--tt-2,#736b7b));font-size:12px;line-height:1.5}
+    #suite-shop-roll .suite-shop-roll-controls{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+    #suite-shop-roll button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:36px;padding:7px 12px;border:1px solid var(--ax-line,var(--bdc,#e5dfe9));border-radius:9px;background:var(--ax-bg,var(--bg,#fff));color:var(--ax-muted,var(--tt-2,#736b7b));font:inherit;font-size:12px;font-weight:600;cursor:pointer}
+    #suite-shop-roll button:hover{border-color:var(--ax-accent,#7759a8);color:var(--ax-accent,#7759a8)}
+    #suite-shop-roll .suite-shop-roll-switch{display:flex;align-items:center;gap:10px;color:var(--ax-muted,var(--tt-2,#736b7b));font-size:12px}
+    #suite-shop-roll .suite-toggle{margin:0}
+    #suite-shop-roll .suite-slider{background:var(--ax-bg,var(--bg,#fff));border-color:var(--ax-line,var(--bdc,#e5dfe9));box-shadow:inset 0 1px 3px #0000000d}
+    #suite-shop-roll .suite-slider:before{background:var(--ax-muted,var(--tt-2,#736b7b));border:0;box-shadow:0 1px 3px #00000026}
+    #suite-shop-roll .suite-slider:after{display:none}
+    #suite-shop-roll input:checked+.suite-slider{background:var(--ax-soft,rgba(119,89,168,.075));border-color:var(--ax-accent,#7759a8);box-shadow:none}
+    #suite-shop-roll input:checked+.suite-slider:before{background:var(--ax-accent,#7759a8)}
+    #suite-shop-roll input:disabled+.suite-slider{opacity:.5;cursor:wait}
+    #suite-shop-roll [data-shop-options]{margin-top:16px;padding-top:14px;border-top:1px solid var(--ax-line,var(--bdc,#e5dfe9))}
     #suite-shop-roll [hidden]{display:none!important}
-    #suite-shop-roll label{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:8px 0;font-size:13px}
-    #suite-shop-roll input[type=number]{width:95px;min-width:0;height:30px;padding:3px 6px;border:1px solid var(--bdc,#59606c);border-radius:6px;background:var(--bg,#151923);color:var(--tt,#e2e8f0);font:inherit}
-    #suite-shop-roll input[type=checkbox]{width:16px;height:16px;accent-color:#7759a8}
-    #suite-shop-roll p{margin:0 0 8px;font-size:13px}
-    #suite-shop-roll small,#suite-shop-roll [data-shop-status]{display:block;font-size:12px;line-height:1.5;color:var(--tt-2,#9ba8b9)}
-    #suite-shop-roll [data-shop-status]{margin-top:8px}
+    #suite-shop-roll .suite-shop-roll-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:10px 0}
+    #suite-shop-roll .suite-shop-roll-option{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:11px 12px;border:1px solid var(--ax-line,var(--bdc,#e5dfe9));border-radius:10px;background:var(--ax-bg,var(--bg,#fff));font-size:13px}
+    #suite-shop-roll .suite-shop-roll-option label{display:inline-flex;align-items:center;gap:7px;min-width:0;margin:0}
+    #suite-shop-roll input[type=number]{box-sizing:border-box;width:82px;min-width:0;height:32px;padding:4px 7px;border:1px solid var(--ax-line,var(--bdc,#e5dfe9));border-radius:7px;background:var(--ax-panel,var(--bg-2,#f7f5f8));color:var(--ax-text,var(--tt,#30283b));font:inherit;font-size:13px}
+    #suite-shop-roll [data-shop-option][type=checkbox]{width:15px;height:15px;margin:0;accent-color:var(--ax-accent,#7759a8)}
+    #suite-shop-roll p{margin:0;font-size:12px;color:var(--ax-muted,var(--tt-2,#736b7b))}
+    #suite-shop-roll .suite-shop-roll-footer{display:flex;align-items:center;justify-content:space-between;gap:8px 16px;flex-wrap:wrap;margin-top:13px;padding-top:12px;border-top:1px solid var(--ax-line,var(--bdc,#e5dfe9));font-size:12px;color:var(--ax-muted,var(--tt-2,#736b7b))}
+    #suite-shop-roll .suite-shop-roll-counts{display:flex;gap:14px;flex-wrap:wrap}
+    #suite-shop-roll .suite-shop-roll-counts b{color:var(--ax-text,var(--tt,#30283b));font-weight:600}
+    @media(max-width:760px){#suite-shop-roll{padding:14px}#suite-shop-roll .suite-shop-roll-options{grid-template-columns:1fr}#suite-shop-roll .suite-shop-roll-controls{width:100%;justify-content:space-between}#suite-shop-roll .suite-shop-roll-footer{align-items:flex-start;flex-direction:column}}
     .accshop .accshop__card.cv-neon-outline::before{inset:-4px;height:auto;padding:4px;opacity:1;transform:none;background:conic-gradient(from var(--cv-neon-angle),var(--cv-neon-main),#fff,var(--cv-neon-main),var(--cv-neon-main));border-radius:15px;pointer-events:none}
     /* Фон меню */
     .lgn__inner.tm-fullbg-ready {
@@ -6696,7 +6808,7 @@
         : rewardType === 'Coins'
           ? [/([\d\s]+)\s*(?:кам(?:ень|ня|ней)\s+духа|💎)/i]
           : rewardType === 'Stone'
-            ? [/([\d\s]+)\s*кирпич/i]
+            ? [/([\d\s]+)\s*(?:единиц[аы]?\s+)?энерги[ияю]\s+(?:небесного\s+)?кирпич/i, /([\d\s]+)\s*кирпич/i]
             : rewardType === 'Stars'
               ? [/([\d\s]+)\s*(?:зв[её]зд|star)/i]
               : rewardType === 'Exp'
@@ -13048,16 +13160,17 @@
     let heartbeat=0,claim=null,blocked=false,stopReason='',rolls=0,spent=0,lastClick=0,runPromise=null;
     let lastOffers=[],seenShapes=new Set(),lastProgress=0;
     const panel=document.createElement('section');panel.id='suite-shop-roll';
-    panel.innerHTML='<div class="suite-shop-roll-bar"><strong>Ролл магазина</strong><button type="button" data-shop-settings aria-expanded="false">⚙ Настройки</button><button type="button" data-shop-start>Старт</button><button type="button" data-shop-stop disabled>Стоп</button></div>'
-      +'<div data-shop-options hidden><p>Остановиться при любом выбранном условии:</p>'
-      +'<label><input type="checkbox" data-shop-option="exp"> Опыт от <input type="number" min="1" step="1" data-shop-option="expMin" aria-label="Опыт от"></label>'
-      +'<label><input type="checkbox" data-shop-option="brick"> Небесный кирпич от <input type="number" min="1" step="1" data-shop-option="brickMin" aria-label="Кирпич от"></label>'
-      +'<label><input type="checkbox" data-shop-option="wishlist"> Карта из желаемого</label>'
+    panel.setAttribute('aria-label','Ролл магазина');
+    panel.innerHTML='<div class="suite-shop-roll-bar"><div class="suite-shop-roll-heading"><i class="fal fa-sync-alt" aria-hidden="true"></i><div><strong>Ролл магазина</strong><small>До любого выбранного условия</small></div></div><div class="suite-shop-roll-controls"><button type="button" data-shop-settings aria-expanded="false" aria-controls="suite-shop-roll-options"><i class="fal fa-sliders-h" aria-hidden="true"></i> Настройки</button><div class="suite-shop-roll-switch"><span data-shop-state>Выключен</span><label class="suite-toggle"><input type="checkbox" role="switch" aria-label="Ролл магазина" data-shop-toggle><span class="suite-slider" aria-hidden="true"></span></label></div></div></div>'
+      +'<div id="suite-shop-roll-options" data-shop-options hidden><p>Остановиться, когда выпадет любое из выбранного:</p><div class="suite-shop-roll-options">'
+      +'<div class="suite-shop-roll-option"><label><input type="checkbox" data-shop-option="exp"> Опыт</label><label>от <input type="number" min="1" step="1" data-shop-option="expMin" aria-label="Опыт от"></label></div>'
+      +'<div class="suite-shop-roll-option"><label><input type="checkbox" data-shop-option="brick"> Небесный кирпич</label><label>от <input type="number" min="1" step="1" data-shop-option="brickMin" aria-label="Кирпич от"></label></div>'
+      +'<div class="suite-shop-roll-option"><label><input type="checkbox" data-shop-option="wishlist"> Карта из желаемого</label></div></div>'
       +'<small>Обновляет до совпадения или нехватки АСС. Товары покупаете вручную.</small></div>'
-      +'<div data-shop-status role="status">Готов к запуску</div>';
+      +'<div class="suite-shop-roll-footer"><span data-shop-status role="status">Готов к запуску</span><div class="suite-shop-roll-counts"><span>Обновлений: <b data-shop-rolls>0</b></span><span>Потрачено: <b data-shop-spent>0</b> АСС</span></div></div>';
     const actions=root.querySelector('.accshop__actions');
     if(actions)actions.after(panel);else grid.before(panel);
-    const startButton=panel.querySelector('[data-shop-start]'),stopButton=panel.querySelector('[data-shop-stop]');
+    const runToggle=panel.querySelector('[data-shop-toggle]'),runState=panel.querySelector('[data-shop-state]');
     const settingsButton=panel.querySelector('[data-shop-settings]'),settingsBox=panel.querySelector('[data-shop-options]');
     const status=panel.querySelector('[data-shop-status]');
     const log=(event,data={},level='info')=>suiteTelemetryLog('suite','shop_roll_'+event,data,level);
@@ -13070,10 +13183,15 @@
     const balance=()=>suiteShopNumber(root.querySelector('#accshopBalance')?.textContent);
     const price=()=>suiteShopNumber(root.querySelector('#accshopRerollPrice')?.textContent);
     function render(message){
-      const text=`${message} · Обновлений: ${rolls} · Потрачено: ${spent} АСС`;
-      if(status.textContent!==text)status.textContent=text;
+      if(status.textContent!==message)status.textContent=message;
+      for(const [selector,value] of [['[data-shop-rolls]',rolls],['[data-shop-spent]',spent]]){
+        const element=panel.querySelector(selector);if(element.textContent!==String(value))element.textContent=String(value);
+      }
       const setDisabled=(input,value)=>{if(input.disabled!==value)input.disabled=value;};
-      setDisabled(startButton,active||!!runPromise||blocked);setDisabled(stopButton,!active);
+      if(runToggle.checked!==active)runToggle.checked=active;
+      setDisabled(runToggle,blocked||!active&&!!runPromise);
+      const stateText=active?'Работает':runPromise?'Остановка…':'Выключен';
+      if(runState.textContent!==stateText)runState.textContent=stateText;
       panel.querySelectorAll('[data-shop-option]').forEach(input=>setDisabled(input,active||!!runPromise));
     }
     function sample(offers,force=false){
@@ -13093,7 +13211,7 @@
       if(wakeDelay){clearTimeout(delayTimer);wakeDelay();wakeDelay=null;}
       render(pending?'Остановка: ждём результат обновления':reason);
       // A sent action keeps its claim until its response or timeout is handled.
-      startButton.disabled=true;
+      runToggle.disabled=true;
     }
     const claims=()=>GM_listValues().filter(key=>key.startsWith(PREFIX)).map(key=>({key,...GM_getValue(key,{})})).filter(c=>c.until>Date.now());
     const owns=()=>claim && GM_getValue(claimKey,null)?.token===claim.token && claim.until>Date.now();
@@ -13227,7 +13345,10 @@
       if(pending)try{GM_setValue(UNCERTAIN,Date.now()+60000);}catch(e){}
       stop('Страница закрыта');
     }
-    startButton.addEventListener('click',start);stopButton.addEventListener('click',()=>stop('Остановлено вручную'));
+    runToggle.addEventListener('change',()=>{
+      if(runToggle.checked)start();else stop('Остановлено вручную');
+      if(!active)runToggle.checked=false;
+    });
     settingsButton.addEventListener('click',()=>{settingsBox.hidden=!settingsBox.hidden;settingsButton.setAttribute('aria-expanded',String(!settingsBox.hidden));});
     panel.querySelectorAll('[data-shop-option]').forEach(input=>{
       const key=input.dataset.shopOption;
@@ -21806,6 +21927,10 @@ function watchTradeLimitsSettings(){
         if(panel.el.style[key]!==value)panel.el.style[key]=value;
       }
     }
+  }
+
+  function suiteLabyrinthEmissionRuntimeHealthy(state){
+    return !!state && !!state.renderInterval;
   }
 
   function cleanupLabyrinthEmission(){

@@ -75,14 +75,19 @@ async function fixture({initial=card('exp',100),options={},balance=62,price=3,re
  return page;
 }
 const state=page=>page.evaluate(()=>({calls:nativeCalls.length,logs,status:document.querySelector('[data-shop-status]')?.textContent,storage,identityPreserved,siteConsumed,purchases}));
-const start=page=>page.locator('[data-shop-start]').click();
-const stopped=page=>page.waitForFunction(()=>!document.querySelector('[data-shop-start]').disabled||document.querySelector('[data-shop-status]').textContent.includes('Результат не подтверждён'),{},{timeout:5000});
+const start=page=>page.locator('#suite-shop-roll .suite-toggle').click();
+const stopped=page=>page.waitForFunction(()=>{
+ const toggle=document.querySelector('[data-shop-toggle]');
+ return !toggle.checked&&!toggle.disabled||document.querySelector('[data-shop-status]').textContent.includes('Результат не подтверждён');
+},{},{timeout:5000});
 async function scenario(options,run){const page=await fixture(options);try{await run(page);}finally{await page.close();}}
 (async()=>{
  browser=await chromium.launch({headless:true,channel:'msedge'});
  try{
   await scenario({},async page=>{
    await page.waitForTimeout(250);check((await state(page)).calls===0,'enabling does not start automation');
+   check(await page.getByRole('switch',{name:'Ролл магазина',exact:true}).count()===1,'one accessible run switch');
+   check(await page.locator('[data-shop-start],[data-shop-stop]').count()===0,'separate run buttons removed');
    const parsed=await page.evaluate(html=>suiteShopOffers(new DOMParser().parseFromString(html,'text/html')),card('brick',2644)+card('exp',497,2)+card('card',0,3,'is-wishlist-card'));
    check(parsed[0].amount===2644&&parsed[0].kind==='brick','supplied brick format');check(parsed[1].amount===497,'experience parsed');
    check(parsed[2].wanted.includes('is-wishlist-card'),'assumed native wishlist marker');
@@ -90,6 +95,10 @@ async function scenario(options,run){const page=await fixture(options);try{await
    await page.locator('[data-shop-settings]').click();await page.locator('[data-shop-option="expMin"]').fill('425');await page.locator('[data-shop-option="expMin"]').dispatchEvent('change');
    check((await state(page)).storage.suite_shop_roll_settings_v1.expMin===425,'threshold saved');
    await page.evaluate(()=>{initLabyrinthShopRoll();initLabyrinthShopRoll();});check(await page.locator('#suite-shop-roll').count()===1,'idempotent module install');
+  });
+  await scenario({initial:card('exp',450)},async page=>{
+   await page.getByRole('switch',{name:'Ролл магазина',exact:true}).press('Space');await stopped(page);
+   check((await state(page)).calls===0,'keyboard switch respects initial matching showcase');
   });
   await scenario({initial:card('exp',497)},async page=>{await start(page);await stopped(page);const s=await state(page);check(s.calls===0&&s.status.includes('497'),'current desired offer stops before spending');});
   await scenario({initial:card('brick',2644),balance:3,options:{brick:true,exp:false,wishlist:false}},async page=>{await start(page);await stopped(page);const s=await state(page);check(s.calls===0&&s.status.includes('2644'),'inclusive brick threshold despite unaffordable purchase');});
@@ -104,7 +113,9 @@ async function scenario(options,run){const page=await fixture(options);try{await
    await start(page);await stopped(page);const s=await state(page);
    check(s.calls===2&&s.status.includes('Найден опыт: 400'),'continue below threshold and stop on equality');
    check(s.identityPreserved&&s.siteConsumed===2,'native fetch promise and body preserved');
-   check(s.status.includes('Потрачено: 6'),'actual confirmed update costs');check(s.purchases===0,'no purchases');
+   check(await page.locator('[data-shop-spent]').textContent()==='6','actual confirmed update costs');check(s.purchases===0,'no purchases');
+   check(!await page.getByRole('switch',{name:'Ролл магазина',exact:true}).isChecked(),'match resets run switch');
+   check(await page.locator('[data-shop-rolls]').textContent()==='2','confirmed updates displayed separately');
    check(await page.evaluate(()=>nativeCalls[1].at-nativeCalls[0].at>=995),'one-second minimum between native clicks');
    check(!JSON.stringify(s.logs).includes('secret_fixture_hash'),'telemetry has no request hash');
   });
@@ -115,10 +126,10 @@ async function scenario(options,run){const page=await fixture(options);try{await
   await scenario({fastTimeout:true,mode:'no-request'},async page=>{await start(page);await stopped(page);const s=await state(page);check(s.calls===1&&s.status.includes('Результат не подтверждён'),'missing capture times out safely');check(s.storage.suite_shop_roll_uncertain_until_v1>Date.now(),'uncertainty cooldown shared across origins');});
   await scenario({fastTimeout:true,responses:[{success:true,balance:59,reroll_price:3,cards_html:card('exp',450),noUI:true}]},async page=>{await start(page);await stopped(page);check((await state(page)).calls===1&&(await state(page)).status.includes('Результат не подтверждён'),'server success without rendered UI does not continue');});
   await scenario({balance:3,responses:[{success:true,balance:0,reroll_price:3,cards_html:card('exp',399)}]},async page=>{await start(page);await stopped(page);check((await state(page)).calls===1&&(await state(page)).status.includes('Не хватает'),'stop when currency exhausted');});
-  await scenario({responses:[{success:true,balance:59,reroll_price:4,cards_html:card('exp',399)},{success:true,balance:55,reroll_price:4,cards_html:card('exp',450)}]},async page=>{await start(page);await stopped(page);check((await state(page)).status.includes('Потрачено: 7'),'updated reroll price used for next click');});
+  await scenario({responses:[{success:true,balance:59,reroll_price:4,cards_html:card('exp',399)},{success:true,balance:55,reroll_price:4,cards_html:card('exp',450)}]},async page=>{await start(page);await stopped(page);check(await page.locator('[data-shop-spent]').textContent()==='7','updated reroll price used for next click');});
   await scenario({delay:250,responses:[{success:true,balance:59,reroll_price:3,cards_html:card('exp',300)}]},async page=>{
-   await start(page);await page.waitForFunction(()=>nativeCalls.length===1);await page.locator('[data-shop-stop]').click();
-   check(await page.locator('[data-shop-start]').isDisabled(),'stop does not allow overlapping restart');
+   await start(page);await page.waitForFunction(()=>nativeCalls.length===1);await page.locator('#suite-shop-roll .suite-toggle').click();
+   check(await page.locator('[data-shop-toggle]').isDisabled(),'stop does not allow overlapping restart');
    check(Object.keys((await state(page)).storage).some(k=>k.startsWith('suite_shop_roll_claim_v1:')),'claim held during pending stop');
    await stopped(page);check((await state(page)).calls===1,'manual stop prevents next click');
    check(!Object.keys((await state(page)).storage).some(k=>k.startsWith('suite_shop_roll_claim_v1:')),'claim released after pending result');
@@ -165,6 +176,30 @@ async function scenario(options,run){const page=await fixture(options);try{await
    await page.evaluate(()=>{cleanupLabyrinthShopRoll();initLabyrinthShopRoll();});check(await page.locator('#suite-shop-roll').count()===1,'shop disable and reenable mounted once');
    const capture=await page.evaluate(()=>({listeners:__suiteShopCaptureV1.listeners.size,sequence:__suiteShopCaptureV1.sequence}));check(capture.listeners===1,'capture ownership reused after reenable');
   });
+  if(process.env.SHOP_SCREENSHOTS){
+   const page=await fixture({initial:card('exp',100)});
+   try{
+    const out=path.join(__dirname,'..','output','shop-roll-preview');fs.mkdirSync(out,{recursive:true});
+    const nativeCss=path.join(out,'site-shop.css');
+    if(fs.existsSync(nativeCss))await page.addStyleTag({content:fs.readFileSync(nativeCss,'utf8')});
+    await page.addStyleTag({content:'body{margin:0;padding:24px;font-family:Manrope,Arial,sans-serif;background:var(--bg);color:var(--tt)}'});
+    await page.locator('[data-shop-settings]').click();
+    for(const [theme,width] of [['light',1100],['dark',1100],['light',360],['dark',360]]){
+     await page.setViewportSize({width,height:900});
+     await page.evaluate(theme=>{
+      document.body.className=theme==='dark'?'dt-is-active':'';
+      const colors=theme==='dark'?{'--bg':'#1c1a21','--bg-2':'#25222b','--tt':'#f0eaf0','--tt-2':'#b7acb8','--bdc':'#3d3441'}:{'--bg':'#fff','--bg-2':'#f7f5f8','--tt':'#30283b','--tt-2':'#736b7b','--bdc':'#e5dfe9'};
+      for(const [name,value] of Object.entries(colors))document.body.style.setProperty(name,value);
+     },theme);
+     check(await page.locator('#suite-shop-roll').evaluate(e=>e.scrollWidth<=e.clientWidth&&e.getBoundingClientRect().right<=innerWidth),'native themed panel fits '+theme+' '+width);
+     await page.locator('#suite-shop-roll').screenshot({path:path.join(out,theme+'-'+width+'.png')});
+    }
+    await page.setViewportSize({width:1100,height:900});
+    await page.locator('[data-shop-settings]').click();
+    check(!await page.locator('[data-shop-options]').isVisible(),'compact panel hides settings by default control');
+    await page.locator('#suite-shop-roll').screenshot({path:path.join(out,'dark-collapsed.png')});
+   }finally{await page.close();}
+  }
   check(source.includes("makeToggle('modLabyrinthShop'")&&source.includes("suiteStartModule('shop_roll'"),'settings and startup integration');
   check(source.match(/@version\s+(\d+\.\d+)/)?.[1]===JSON.parse(fs.readFileSync(path.join(__dirname,'..','version.json'),'utf8')).version,'userscript and release manifest versions agree');
   console.log(`SHOP_ROLL_OK: ${checks} checks; local fixtures only, no live game actions`);

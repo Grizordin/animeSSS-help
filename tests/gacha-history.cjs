@@ -23,7 +23,7 @@ const history=[
  {dateKey:'2026-10-15',status:'no_information'},
  {dateKey:'2026-10-01',status:'looted',rewardType:'Coins',quantity:null,serverResponse:'Вы получили 30 камней духа за бесконечную гачу'},
  {dateKey:'2026-09-30',status:'looted',rewardType:'Stars',quantity:50},
- {dateKey:'2026-09-09',status:'looted',rewardType:'Stone',quantity:null,serverResponse:'Вы получили 3 кирпича за бесконечную гачу'},
+ {dateKey:'2026-09-09',status:'looted',rewardType:'Stone',quantity:null,serverResponse:'Вы получили 3 энергии небесного кирпича за бесконечную гачу'},
  {dateKey:'2026-09-08',status:'looted',rewardType:'Exp',quantity:90},
  {dateKey:'2026-10-21',status:'looted',rewardType:'Card_d',quantity:4},
  {dateKey:'2026-10-21',status:'no_information'}
@@ -63,6 +63,10 @@ const history=[
     check(g.resolveReceivedReward({reward_type:type},type,text).quantity===count,'parse '+type+' '+count);
    }
    check(g.resolveReceivedReward({},'Stone','Вы получили 70 камней духа').rewardType==='Coins','response wording repairs incorrect stored type');
+   for(const amount of [1,40,70,1000,2644]){
+    const text=`Вы получили ${amount.toLocaleString('ru-RU')} энергии небесного кирпича за бесконечную гачу`;
+    check(g.resolveReceivedReward({},'Stone',text).quantity===amount,'real brick energy wording '+amount);
+   }
    check(g.resolveReceivedReward({quantity:'1 000'},'Stone','').quantity===1000,'structured amount fallback');
    check(g.resolveReceivedReward({exp:3490000,step:268},'Exp','ok').quantity===null,'club exp and step are not reward amounts');
    check(g.resolveReceivedReward({},'Card_d','ok').quantity===null,'unknown card count is not invented');
@@ -109,7 +113,7 @@ const history=[
    return passed;
   },prefix);
   // Actual claim flow, entirely mocked, verifies persistence and anomaly logging.
-  for(const [type,text,quantity] of [['Coins','Вы получили 90 камней духа за бесконечную гачу',90],['Stone','Вы получили 1 кирпич за бесконечную гачу',1],['Card_d','ok',null]]){
+  for(const [type,text,quantity] of [['Coins','Вы получили 90 камней духа за бесконечную гачу',90],['Stone','Вы получили 1 кирпич за бесконечную гачу',1],['Stone','Вы получили 40 энергии небесного кирпича за бесконечную гачу',40],['Card_d','ok',null]]){
    const result=await page.evaluate(async({prefix,type,text})=>{
     for(const suffix of ['daily_state','last_check','tab_lock','reward_history'])delete store[prefix+suffix];
     testNow=RealDate.parse('2026-10-22T18:07:00Z');requests=[];logs=[];
