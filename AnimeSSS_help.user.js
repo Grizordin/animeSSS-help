@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.84
+// @version      3.85
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -5987,6 +5987,69 @@
   // ============================================================
   //  ПРЕДЛОЖКА И АВТОРЫ
   // ============================================================
+
+  function watchSuggestionSubmissions() {
+    if(window.top!==window || !document.body) return;
+    const notices = new Map([
+      ['загруженная вами карточка была отправлена на модерацию', 'created'],
+      ['карточка отправлена на модерацию', 'created'],
+      ['заявка на замену арта отправлена на модерацию', 'replacement']
+    ]);
+    const selector = '.DLEPush-notification,.cpt-toast,.message-info__content';
+    const lastSentAt = new Map();
+
+    function sendNotice(item) {
+      const message = item.querySelector('.DLEPush-message,.cpt-sub') || item;
+      const text = (message.textContent || '').replace(/\s+/g,' ').trim().replace(/[.!…]+$/u,'').toLowerCase();
+      const kind = notices.get(text);
+      if(!kind) return;
+      const nick = suiteGetCurrentUserName();
+      if(!nick) return;
+      const cardId = kind==='replacement'
+        ? location.pathname.match(/^\/cards\/replace_art\/([1-9]\d*)\/?$/)?.[1]
+        : undefined;
+      const key = kind + ':' + (cardId || '');
+      const now = Date.now();
+      if(lastSentAt.has(key) && now - lastSentAt.get(key) < 4000) return;
+      lastSentAt.set(key,now);
+      const failed = status => suiteTelemetryLog('suite','suggestion_submission_hint_failed',{kind,status},'warn');
+      try {
+        GM_xmlhttpRequest({
+          method:'POST',
+          url:'https://predlojka-o4s8.onrender.com/api/submission-hints',
+          headers:{'Content-Type':'application/json'},
+          data:JSON.stringify({nick,kind,cardId}),
+          anonymous:true,
+          timeout:30000,
+          onload:response=>{
+            if(response.status<200 || response.status>=300){failed(response.status);return;}
+            try { if(JSON.parse(response.responseText).ok!==true) failed('invalid_response'); }
+            catch(error) { failed('invalid_response'); }
+          },
+          onerror:()=>failed('network'),
+          ontimeout:()=>failed('timeout')
+        });
+      } catch(error) { failed('request_error'); }
+    }
+
+    function inspect(node) {
+      const element = node.nodeType===Node.TEXT_NODE ? node.parentElement : node;
+      if(!(element instanceof HTMLElement)) return;
+      const item = element.closest(selector);
+      if(item) sendNotice(item);
+      element.querySelectorAll(selector).forEach(sendNotice);
+    }
+
+    // A full navigation can leave the site's success message in the new document.
+    document.querySelectorAll(selector).forEach(sendNotice);
+    if(!/^\/cards(?:\/(?:create|replace_art)\/[1-9]\d*)?\/?$/.test(location.pathname)) return;
+    new MutationObserver(records=>{
+      for(const record of records) {
+        if(record.type==='characterData') inspect(record.target);
+        else for(const node of record.addedNodes) inspect(node);
+      }
+    }).observe(document.body,{childList:true,characterData:true,subtree:true});
+  }
 
   function cleanupSuggestionAuthors(){
     const state = window.__suiteSuggestionAuthorsState;
@@ -14475,6 +14538,7 @@ function watchTradeLimitsSettings(){
     suiteStartModule('owner_restrictions', 'modOwnerRestrictions', initOwnerRestrictions);
     suiteStartModule('trade_limits', null, watchTradeLimitsSettings);
     suiteStartModule('vote_cards', 'modVoteCardsToggle', initVoteCardsToggle);
+    suiteStartModule('suggestion_submission_watch', null, watchSuggestionSubmissions);
     suiteStartModule('suggestion_authors', 'modSuggestionAuthors', initSuggestionAuthors);
     suiteStartModule('autowatch', 'modAutoLootCards', initAutoLootCards);
     suiteStartModule('shop_roll', 'modLabyrinthShop', initLabyrinthShopRoll);
