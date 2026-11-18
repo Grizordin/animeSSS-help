@@ -79,6 +79,7 @@ function extract(name) {
         const GM_setValue = async () => { throw Error('restoration must not rewrite stored position'); };
         const GM_addStyle = css => { const el = document.createElement('style'); el.textContent = css; document.head.appendChild(el); return el; };
         const suiteShouldFreezeForVirtualKeyboard = () => false;
+        const suiteDraggingPanels = new WeakSet();
         const suiteGetVisibleViewport = () => ({ left: 0, top: 0, right: innerWidth, bottom: innerHeight, width: innerWidth, height: innerHeight });
         const suiteKeepInViewport = () => {}, suiteResolveFloatingButtonOverlaps = () => {};
         const installPanelDrag = () => {}, toggleWatch = () => {}, openAnimeDbModal = () => {}, openStatsModal = () => {}, togglePanelCollapsed = () => {};

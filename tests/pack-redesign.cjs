@@ -49,10 +49,11 @@ let suiteTelemetryFlushPromise=null,queue=[],sent=[],acceptBatch=true;
 const suiteTelemetrySessionId='test';
 const suiteTelemetryInstallId='test';
 const suiteTelemetryPersistPending=async()=>{};
+const suiteRoutineTelemetry={persist:async()=>{}};
 const suiteTelemetryWithQueueLock=async(fn)=>fn();
 const suiteTelemetryReadQueue=()=>queue;
 const suiteTelemetryTakeBatch=(items,module)=>items.filter(e=>e.module===module);
-const suiteTelemetryWriteQueue=items=>{queue=items;};
+const suiteTelemetryWriteQueue=items=>{queue=items;return true;};
 const suiteReportEvent=async(type,payload)=>{sent.push(payload);return acceptBatch;};
 `;
 const tests=String.raw`

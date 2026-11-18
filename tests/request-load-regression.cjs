@@ -13,7 +13,7 @@ async function authors(browser){
   window.cfg={modSuggestionAuthors:true};window.RANK_COLORS={};window.storage={};window.requests=[];window.testHidden=false;
   Object.defineProperty(document,'hidden',{get:()=>testHidden});
   window.gmStoreGet=(k,d)=>k in storage?structuredClone(storage[k]):d;window.gmStoreSet=(k,v)=>storage[k]=structuredClone(v);
-  window.suiteGetCurrentUserName=()=> 'Tester';window.suiteKeepInViewport=()=>{};
+  window.suiteGetCurrentUserName=()=> 'Tester';window.makeDraggable=()=>{};
   const d=new Date();storage.suite_suggestion_authors_cache_v1={cards:[],lastHourKey:d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')+'-'+String(d.getHours()).padStart(2,'0')};
   window.GM_xmlhttpRequest=o=>{requests.push(o.url);const keys=new URL(o.url).searchParams.get('keys').split(',');setTimeout(()=>o.onload({status:200,responseText:JSON.stringify({results:keys.map(task_key=>{const pending=task_key==='999'&&requests.filter(url=>url.includes('999')).length<2;return {task_key,author:task_key==='456'||pending?'':'KnownAuthor',status:task_key==='456'?'not_found':pending?'pending':'found'};})})}),10);};
   (0,eval)(code+'\ninitSuggestionAuthors();');
@@ -122,4 +122,30 @@ async function queueControls(browser){
  for(const [key,value] of Object.entries(result))ok(value,'queue controls: '+key);
  await page.close();
 }
-(async()=>{await queues();const browser=await chromium.launch({headless:true,channel:'msedge'});try{await authors(browser);await clubs(browser);await queueControls(browser);}finally{await browser.close();}console.log('REQUEST_LOAD_REGRESSION_OK '+checks+' checks');})().catch(e=>{console.error(e);process.exitCode=1;});
+async function interruptedChatStart(browser){
+ const page=await browser.newPage();
+ await page.route('**/*',r=>r.fulfill({contentType:'text/html',body:'<body></body>'}));
+ await page.goto('https://fixture.invalid/');
+ const result=await page.evaluate(async code=>{
+  let resolveBaseline;
+  const pending=new Promise(resolve=>{resolveBaseline=resolve;});
+  const cfg={modChatStoneAutoloot:true}, getPageWindow=()=>window, suiteGetUserHash=()=>'example';
+  const gmStoreGet=(_k,d)=>d, gmStoreSet=()=>{}, gmStoreDelete=()=>{}, suiteTelemetryLog=()=>{};
+  let requests=0;
+  window.fetch=()=>{requests++;return pending;};
+  eval(code+';window.beginChat=initChatStoneAutoloot;window.endChat=cleanupChatStoneAutoloot');
+  window.beginChat();
+  const deadline=performance.now()+2000;
+  while(!requests && performance.now()<deadline) await new Promise(r=>setTimeout(r,5));
+  if(!requests) throw Error('chat baseline did not start');
+  const old=window.__suiteChatStoneAutolootState;
+  cfg.modChatStoneAutoloot=false;
+  window.endChat();
+  resolveBaseline(new Response('<body></body>'));
+  await new Promise(r=>setTimeout(r,40));
+  return {ready:old.ready,timers:old.timers.length,requests};
+ },['initChatStoneAutoloot','cleanupChatStoneAutoloot'].map(extract).join('\n'));
+ ok(!result.ready && !result.timers && result.requests===1,'late chat response after disable cannot start polling');
+ await page.close();
+}
+(async()=>{await queues();const browser=await chromium.launch({headless:true,channel:'msedge'});try{await authors(browser);await clubs(browser);await queueControls(browser);await interruptedChatStart(browser);}finally{await browser.close();}console.log('REQUEST_LOAD_REGRESSION_OK '+checks+' checks');})().catch(e=>{console.error(e);process.exitCode=1;});

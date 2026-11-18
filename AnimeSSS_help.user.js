@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.85
+// @version      3.86
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -46,7 +46,7 @@
     try { GM_setValue(key, JSON.stringify(val)); } catch(e) {}
   }
   function gmDelete(key) {
-    try { GM_deleteValue(key); } catch(e) {}
+    try { GM_deleteValue(key); return true; } catch(e) { return false; }
   }
   function gmStoreGet(key, def = null) {
     try {
@@ -836,7 +836,9 @@
             // adds the same delta again or erases events from a newer period.
             gmSet(KEY, shared);checkpointed = true;
             if(records.length) {
-              const queue = suiteTelemetryReadQueue(), ids = new Set(queue.map(item => item.id));
+              const queue = suiteTelemetryReadQueue();
+              if(!queue) return true; // The summary is already held in its persistent outbox.
+              const ids = new Set(queue.map(item => item.id));
               const next = queue.concat(records.filter(item => !ids.has(item.id)));
               // A low-priority summary must never evict an important queued event.
               if(next.length > SUITE_TELEMETRY_MAX_EVENTS || JSON.stringify(next).length > SUITE_TELEMETRY_MAX_QUEUE_CHARS) return true;
@@ -918,9 +920,11 @@
   }
 
   function suiteTelemetryReadQueue() {
+    let raw;
+    try { raw = GM_getValue(SUITE_TELEMETRY_QUEUE_KEY, null); }
+    catch(e) { return null; } // A failed read must not clear or replace the stored queue.
+    if(raw == null) return [];
     try {
-      const raw = GM_getValue(SUITE_TELEMETRY_QUEUE_KEY, null);
-      if(raw == null) return [];
       const records = JSON.parse(raw);
       if(Array.isArray(records)) return records;
     } catch(e) {}
@@ -961,8 +965,7 @@
       }
       limited.shift();
     }
-    gmDelete(SUITE_TELEMETRY_QUEUE_KEY);
-    return true;
+    return gmDelete(SUITE_TELEMETRY_QUEUE_KEY);
   }
 
   function suiteTelemetryTakeBatch(records, module) {
@@ -990,8 +993,9 @@
     suiteTelemetryPersistPromise = suiteTelemetryPersistPromise.then(async () => {
       const saved = await suiteTelemetryWithQueueLock(() => {
         const now = Date.now();
-        const records = suiteTelemetryReadQueue()
-          .filter(item => now - Number(item?.timestamp || now) <= SUITE_TELEMETRY_MAX_AGE_MS);
+        const queue = suiteTelemetryReadQueue();
+        if(!queue) return false;
+        const records = queue.filter(item => now - Number(item?.timestamp || now) <= SUITE_TELEMETRY_MAX_AGE_MS);
         return suiteTelemetryWriteQueue(records.concat(pending));
       }, false);
       if(!saved) suiteTelemetryPendingRecords.unshift(...pending);
@@ -1188,9 +1192,11 @@
       while(true) {
         const events = await suiteTelemetryWithQueueLock(() => {
           const current = suiteTelemetryReadQueue();
+          if(!current) return null;
           if(!current.length) return [];
           return suiteTelemetryTakeBatch(current, current[0].module || 'suite');
-        }, []);
+        }, null);
+        if(!events) return false;
         if(!events.length) break;
         // Preserve the component on events, but use a server-supported channel.
         // This also drains old queued auto_open reports.
@@ -1210,10 +1216,11 @@
           events
         });
         if(!ok) return false;
-        await suiteTelemetryWithQueueLock(() => {
+        const removed = await suiteTelemetryWithQueueLock(() => {
           const latest = suiteTelemetryReadQueue();
-          suiteTelemetryWriteQueue(latest.filter(item => !ids.has(item.id)));
-        });
+          return !!latest && suiteTelemetryWriteQueue(latest.filter(item => !ids.has(item.id)));
+        }, false);
+        if (!removed) return false;
       }
       return true;
     })().finally(() => { suiteTelemetryFlushPromise = null; });
@@ -1710,7 +1717,7 @@
       } finally {
         localStorage.removeItem(lockKey);
       }
-    })();
+    })().catch(() => {}); // Reporting is optional when site storage is unavailable.
   }
 
   function suiteSleep(ms){return new Promise(resolve=>setTimeout(resolve,ms));}
@@ -3570,6 +3577,7 @@
   // ============================================================
 
   const suiteViewportItems = new Map();
+  const suiteDraggingPanels = new WeakSet();
   const suiteFloatingSelector = [
     '#aw-active-tab-panel',
     '#suite-settings-panel',
@@ -3578,7 +3586,7 @@
     '.cv-stones-floating-btn',
     '.circle-btn'
   ].join(',');
-  const suiteKeyboardStyleProps = ['left','top','right','bottom','transform','maxWidth','maxHeight'];
+  const suiteKeyboardStyleProps = ['left','top','right','bottom','transform','translate','maxWidth','maxHeight'];
   const suiteKeyboardPositions = new Map();
   let suiteViewportListenersInstalled = false;
   let suiteViewportFrame = 0;
@@ -3642,6 +3650,7 @@
   function suiteFreezeKeyboardPositions() {
     suiteKeyboardPositions.forEach((saved, element) => {
       if(!element?.isConnected || saved.rect.width <= 0 || saved.rect.height <= 0) return;
+      element.style.translate = '';
       element.style.transform = 'none';
       element.style.left = `${Math.round(saved.rect.left)}px`;
       element.style.top = `${Math.round(saved.rect.top)}px`;
@@ -3741,9 +3750,11 @@
 
   function suiteClampToViewport(element, options = {}) {
     if(suiteShouldFreezeForVirtualKeyboard()) return;
-    if(!element?.isConnected || getComputedStyle(element).display === 'none') return;
-    const margin = Number.isFinite(options.margin) ? options.margin : 8;
+    if(!element?.isConnected || suiteDraggingPanels.has(element) || getComputedStyle(element).display === 'none') return;
     const viewport = suiteGetVisibleViewport();
+    if(document.hidden || viewport.width <= 1 || viewport.height <= 1) return;
+    element.style.translate = '';
+    const margin = Number.isFinite(options.margin) ? options.margin : 8;
 
     if(options.constrainSize !== false){
       element.style.boxSizing = 'border-box';
@@ -3760,20 +3771,15 @@
     top = Math.max(viewport.top + margin, top);
 
     if(Math.abs(left - rect.left) > .5 || Math.abs(top - rect.top) > .5){
-      element.style.transform = 'none';
-      element.style.left = `${Math.round(left)}px`;
-      element.style.top = `${Math.round(top)}px`;
-      element.style.right = 'auto';
-      element.style.bottom = 'auto';
+      element.style.translate = `${left - rect.left}px ${top - rect.top}px`;
     }
   }
 
   function suiteRefreshViewportItems() {
     suiteViewportFrame = 0;
     if(suiteShouldFreezeForVirtualKeyboard()) return;
-    for(const [element, options] of suiteViewportItems){
-      if(!element?.isConnected){ suiteViewportItems.delete(element); continue; }
-      suiteClampToViewport(element, options);
+    for(const element of suiteViewportItems.keys()){
+      if(!element.isConnected) suiteViewportItems.delete(element);
     }
     suiteResolveFloatingButtonOverlaps();
     if(typeof cptApplyScale === 'function') cptApplyScale();
@@ -3783,14 +3789,17 @@
     if(suiteShouldFreezeForVirtualKeyboard()) return;
     const viewport = suiteGetVisibleViewport();
     const gap = 8;
-    const controls = [...new Set([
-      ...suiteViewportItems.keys(),
-      ...document.querySelectorAll(suiteFloatingSelector)
-    ])].filter(control => {
-      if(!control?.isConnected) return false;
+    if(document.hidden || viewport.width <= 1 || viewport.height <= 1) return;
+    const controls = suiteGetFloatingControls().filter(control => {
       const style = getComputedStyle(control);
+      if(style.display === 'none' || style.visibility === 'hidden') return false;
+      if(!suiteDraggingPanels.has(control)){
+        const options = suiteViewportItems.get(control);
+        if(options) suiteClampToViewport(control, options);
+        else control.style.translate = '';
+      }
       const rect = control.getBoundingClientRect();
-      return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+      return rect.width > 0 && rect.height > 0;
     });
     if(!controls.length) return;
 
@@ -3803,6 +3812,7 @@
       return 10;
     };
     const ordered = controls.sort((a,b) => {
+      if(suiteDraggingPanels.has(a) !== suiteDraggingPanels.has(b)) return suiteDraggingPanels.has(a) ? -1 : 1;
       const priorityDiff = priority(a) - priority(b);
       if(priorityDiff) return priorityDiff;
       if(a === preferred) return -1;
@@ -3816,7 +3826,7 @@
 
     ordered.forEach(control => {
       let rect = control.getBoundingClientRect();
-      if(occupied.some(other => overlaps(rect,other))){
+      if(!suiteDraggingPanels.has(control) && occupied.some(other => overlaps(rect,other))){
         const candidates = [];
         const addCandidate = (left,top) => candidates.push({left,top});
         occupied.forEach(other => {
@@ -3859,13 +3869,11 @@
         );
         const candidate = valid[0];
         if(candidate){
-          control.style.transform = 'none';
-          control.style.left = `${Math.round(candidate.left)}px`;
-          control.style.top = `${Math.round(candidate.top)}px`;
-          control.style.right = 'auto';
-          control.style.bottom = 'auto';
+          // Translate only the rendered box. CSS anchors and stored preferences stay intact.
+          control.style.translate = '';
+          const anchor = control.getBoundingClientRect();
+          control.style.translate = `${candidate.left - anchor.left}px ${candidate.top - anchor.top}px`;
           rect = control.getBoundingClientRect();
-          try{ control._suitePersistFloatingPosition?.(); }catch(e){}
         }
       }
       occupied.push(rect);
@@ -3888,6 +3896,9 @@
       suiteViewportListenersInstalled = true;
       window.addEventListener('resize', suiteHandleViewportChange, {passive:true});
       window.addEventListener('orientationchange', suiteHandleOrientationChange, {passive:true});
+      window.addEventListener('pageshow', suiteScheduleViewportRefresh);
+      window.addEventListener('focus', suiteScheduleViewportRefresh);
+      document.addEventListener('visibilitychange', () => { if(!document.hidden) suiteScheduleViewportRefresh(); });
       window.visualViewport?.addEventListener('resize', suiteHandleViewportChange, {passive:true});
       window.visualViewport?.addEventListener('scroll', suiteHandleViewportChange, {passive:true});
       document.addEventListener('focusin', suiteHandleViewportFocusIn, true);
@@ -3896,143 +3907,93 @@
     suiteScheduleViewportRefresh();
   }
 
-  const suiteCollapsedPanelAnchors = new WeakMap();
   function suiteApplyCollapsibleState(panel, collapsed, renderState) {
     if(!panel) return;
-    if(!collapsed){
-      const rect = panel.getBoundingClientRect();
-      suiteCollapsedPanelAnchors.set(panel, {left:rect.left, top:rect.top});
-    }
     renderState();
-    requestAnimationFrame(() => {
-      if(collapsed){
-        const anchor = suiteCollapsedPanelAnchors.get(panel);
-        if(anchor){
-          panel.style.transform = 'none';
-          panel.style.left = `${Math.round(anchor.left)}px`;
-          panel.style.top = `${Math.round(anchor.top)}px`;
-          panel.style.right = 'auto';
-          panel.style.bottom = 'auto';
-        }
-      }
-      suiteClampToViewport(panel, {margin:8, constrainSize:true});
-      suiteResolveFloatingButtonOverlaps(panel);
-    });
+    suiteScheduleViewportRefresh();
   }
 
   function makeDraggable(panel, handleSelectorOrEl, onDrop, options = {}) {
-    const handle = handleSelectorOrEl
-      ? (typeof handleSelectorOrEl === 'string' ? panel.querySelector(handleSelectorOrEl) : handleSelectorOrEl)
-      : panel;
-    if (!handle) return;
-    panel._suitePersistFloatingPosition = () => {
-      if(!onDrop) return;
-      const rect = panel.getBoundingClientRect();
-      onDrop(rect.left, rect.top);
-    };
-    if(options.keepInViewport !== false) suiteKeepInViewport(panel, {margin:8, constrainSize:true});
+    const handle = typeof handleSelectorOrEl === 'string' ? panel.querySelector(handleSelectorOrEl) : handleSelectorOrEl || panel;
+    if(!handle) return;
+    const layout = {margin:options.margin ?? 8, constrainSize:options.constrainSize !== false};
+    if(!onDrop && panel.id){
+      const key = 'suite_floating_position:' + panel.id;
+      const saved = gmStoreGet(key, null);
+      if(Number.isFinite(saved?.left) && Number.isFinite(saved?.top)){
+        Object.assign(panel.style, {left:saved.left+'px', top:saved.top+'px', right:'auto', bottom:'auto', transform:'none'});
+      }
+      onDrop = (left,top) => gmStoreSet(key, {left,top});
+    }
+    if(options.keepInViewport !== false) suiteKeepInViewport(panel, layout);
     handle.style.cursor = 'grab';
     handle.style.touchAction = 'none';
 
-    let startX, startY, startLeft, startTop, isDragging = false;
-    const getPoint = (e) => e.touches?.[0] || e.changedTouches?.[0] || e;
-
-    handle.addEventListener('mousedown', function(e) {
-      // Не перехватываем клики по кнопкам внутри хедера
-      if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT') return;
-      e.preventDefault();
-      isDragging = true;
-
-      // Если панель позиционирована через transform (centered), переводим в абсолютные координаты
+    let gesture = null, suppressClick = false;
+    handle.addEventListener('pointerdown', event => {
+      const interactive = event.target.closest('button,input,select,textarea,a,label');
+      if(gesture || !event.isPrimary || event.button !== 0 || (interactive && interactive !== handle)) return;
+      suppressClick = false;
       const rect = panel.getBoundingClientRect();
-      panel.style.transform = 'none';
-      panel.style.top  = rect.top  + 'px';
-      panel.style.left = rect.left + 'px';
-      panel.style.right  = 'auto';
-      panel.style.bottom = 'auto';
-
-      startX = e.clientX;
-      startY = e.clientY;
-      startLeft = rect.left;
-      startTop  = rect.top;
-
-      handle.style.cursor = 'grabbing';
+      gesture = {id:event.pointerId, x:event.clientX, y:event.clientY, left:rect.left, top:rect.top, original:null};
+      handle.setPointerCapture(event.pointerId);
+      window.addEventListener('blur', interrupt);
+      window.addEventListener('resize', interrupt);
+      window.visualViewport?.addEventListener('resize', interrupt);
+      document.addEventListener('visibilitychange', onVisibility);
     });
-
-    handle.addEventListener('touchstart', function(e) {
-      if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT') return;
-      e.preventDefault();
-      const point = getPoint(e);
-      isDragging = true;
-
-      const rect = panel.getBoundingClientRect();
-      panel.style.transform = 'none';
-      panel.style.top  = rect.top  + 'px';
-      panel.style.left = rect.left + 'px';
-      panel.style.right  = 'auto';
-      panel.style.bottom = 'auto';
-
-      startX = point.clientX;
-      startY = point.clientY;
-      startLeft = rect.left;
-      startTop  = rect.top;
-
-      handle.style.cursor = 'grabbing';
-    }, { passive:false });
-
-    document.addEventListener('mousemove', function(e) {
-      if (!isDragging) return;
-      const dx = e.clientX - startX;
-      const dy = e.clientY - startY;
+    handle.addEventListener('pointermove', event => {
+      if(!gesture || event.pointerId !== gesture.id) return;
+      const dx = event.clientX - gesture.x, dy = event.clientY - gesture.y;
+      if(!gesture.original){
+        if(Math.max(Math.abs(dx),Math.abs(dy)) <= 3) return;
+        gesture.original = {};
+        for(const prop of ['left','top','right','bottom','transform','translate']) gesture.original[prop] = panel.style[prop];
+        suiteDraggingPanels.add(panel);
+        Object.assign(panel.style, {right:'auto',bottom:'auto',transform:'none',translate:''});
+        handle.style.cursor = 'grabbing';
+      }
       const viewport = suiteGetVisibleViewport();
-      const maxLeft = Math.max(viewport.left, viewport.right - panel.offsetWidth);
-      const maxTop = Math.max(viewport.top, viewport.bottom - panel.offsetHeight);
-      const newLeft = Math.max(viewport.left, Math.min(maxLeft, startLeft + dx));
-      const newTop  = Math.max(viewport.top, Math.min(maxTop, startTop + dy));
-      panel.style.left = newLeft + 'px';
-      panel.style.top  = newTop  + 'px';
+      const left = Math.max(viewport.left+layout.margin, Math.min(viewport.right-panel.offsetWidth-layout.margin, gesture.left+dx));
+      const top = Math.max(viewport.top+layout.margin, Math.min(viewport.bottom-panel.offsetHeight-layout.margin, gesture.top+dy));
+      panel.style.left = left+'px';
+      panel.style.top = top+'px';
+      options.onMove?.();
     });
-
-    document.addEventListener('touchmove', function(e) {
-      if (!isDragging) return;
-      e.preventDefault();
-      const point = getPoint(e);
-      const dx = point.clientX - startX;
-      const dy = point.clientY - startY;
-      const viewport = suiteGetVisibleViewport();
-      const maxLeft = Math.max(viewport.left, viewport.right - panel.offsetWidth);
-      const maxTop = Math.max(viewport.top, viewport.bottom - panel.offsetHeight);
-      const newLeft = Math.max(viewport.left, Math.min(maxLeft, startLeft + dx));
-      const newTop  = Math.max(viewport.top, Math.min(maxTop, startTop + dy));
-      panel.style.left = newLeft + 'px';
-      panel.style.top  = newTop  + 'px';
-    }, { passive:false });
-
-    document.addEventListener('mouseup', function() {
-      if (!isDragging) return;
-      isDragging = false;
+    function onVisibility(){ if(document.hidden) interrupt(); }
+    function interrupt(){
+      if(!gesture) return;
+      const pointerId = gesture.id;
+      finish({type:'cancel', pointerId});
+      if(handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId);
+    }
+    function finish(event){
+      if(!gesture || event.pointerId !== gesture.id) return;
+      const {original} = gesture;
+      gesture = null;
+      window.removeEventListener('blur', interrupt);
+      window.removeEventListener('resize', interrupt);
+      window.visualViewport?.removeEventListener('resize', interrupt);
+      document.removeEventListener('visibilitychange', onVisibility);
+      if(!original) return;
+      suiteDraggingPanels.delete(panel);
       handle.style.cursor = 'grab';
-      suiteClampToViewport(panel, {margin:8, constrainSize:true});
+      suppressClick = true;
+      if(event.type === 'pointerup' && !document.hidden && window.innerWidth > 1 && window.innerHeight > 1){
+        const rect = panel.getBoundingClientRect();
+        if(panel.isConnected && rect.width > 0 && rect.height > 0) onDrop?.(rect.left,rect.top);
+      }else{
+        Object.assign(panel.style, original);
+      }
       if(options.resolveOverlaps !== false) suiteResolveFloatingButtonOverlaps(panel);
-      // Вызываем callback с финальными координатами (если передан)
-      panel._suitePersistFloatingPosition();
-    });
-    document.addEventListener('touchend', function() {
-      if (!isDragging) return;
-      isDragging = false;
-      handle.style.cursor = 'grab';
-      suiteClampToViewport(panel, {margin:8, constrainSize:true});
-      if(options.resolveOverlaps !== false) suiteResolveFloatingButtonOverlaps(panel);
-      panel._suitePersistFloatingPosition();
-    });
-    document.addEventListener('touchcancel', function() {
-      if (!isDragging) return;
-      isDragging = false;
-      handle.style.cursor = 'grab';
-      suiteClampToViewport(panel, {margin:8, constrainSize:true});
-      if(options.resolveOverlaps !== false) suiteResolveFloatingButtonOverlaps(panel);
-      panel._suitePersistFloatingPosition();
-    });
+    }
+    for(const type of ['pointerup','pointercancel','lostpointercapture']) handle.addEventListener(type, finish);
+    handle.addEventListener('click', event => {
+      if(!suppressClick || event.detail === 0) return;
+      suppressClick = false;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }, true);
   }
 
   const observedContainers=new WeakMap();
@@ -4172,7 +4133,7 @@
     makeDraggable(panel, '#cv-stats-panel > div:first-child');
     panel.querySelectorAll('.cv-tab-btn').forEach(b=>b.addEventListener('click',()=>{ activeTab=b.dataset.tab; renderStatsTab(); }));
     panel.querySelectorAll('.cv-filter-btn').forEach(b=>b.addEventListener('click',()=>{ statsFilter=b.dataset.filter; renderStatsTab(); }));
-    panel.querySelector('#cv-stats-close').addEventListener('click',()=>panel.style.display='none');
+    panel.querySelector('#cv-stats-close').addEventListener('click',()=>{panel.style.display='none';suiteScheduleViewportRefresh();});
     panel.querySelector('#cv-stats-reset').addEventListener('click',()=>{
       if(!confirm('Сбросить ВСЮ статистику (за всё время)?'))return;
       stats={allCards:{},pickedCards:{}}; seenPackIds.clear(); seenPickIds.clear();
@@ -6357,104 +6318,21 @@
     }
 
     function setupDraggableSuggestionButton(button){
-      const cache = loadCache();
-      const saved = cache.suggestionButtonPosition;
-      if(saved && Number.isFinite(saved.x)){
-        const rect = button.getBoundingClientRect();
-        const left = Math.max(0, Math.min(saved.x, window.innerWidth - rect.width));
-        const bottom = Number.isFinite(saved.bottom)
-          ? Math.max(0, Math.min(saved.bottom, window.innerHeight - rect.height))
-          : 18;
-        button.style.left = left + 'px';
-        button.style.bottom = bottom + 'px';
+      const positionKey = 'suite_suggestion_button_position_v1';
+      const saved = gmStoreGet(positionKey, null) ?? loadCache().suggestionButtonPosition;
+      if(Number.isFinite(saved?.x)){
+        button.style.left = saved.x + 'px';
+        button.style.bottom = (Number.isFinite(saved.bottom) ? saved.bottom : 18) + 'px';
         button.style.right = 'auto';
         button.style.top = 'auto';
       }
-      suiteKeepInViewport(button, {margin:8, constrainSize:false});
-      button._suitePersistFloatingPosition = () => {
-        const rect = button.getBoundingClientRect();
-        const nextCache = loadCache();
-        nextCache.suggestionButtonPosition = {
-          x:rect.left,
-          bottom:Math.max(0, window.innerHeight - rect.bottom)
-        };
-        saveCache(nextCache);
-      };
-
-      let dragging = false;
-      let moved = false;
-      let suppressClickUntil = 0;
-      let startX = 0;
-      let startY = 0;
-      let startLeft = 0;
-      let startTop = 0;
-      const startDrag = (event, point) => {
-        const rect = button.getBoundingClientRect();
-        dragging = true;
-        moved = false;
-        startX = point.clientX;
-        startY = point.clientY;
-        startLeft = rect.left;
-        startTop = rect.top;
-        button.style.left = startLeft + 'px';
-        button.style.top = startTop + 'px';
-        button.style.right = 'auto';
-        button.style.bottom = 'auto';
-        button.style.transition = 'none';
-        event.preventDefault();
-      };
-      const moveDrag = (event, point) => {
-        if(!dragging) return;
-        const dx = point.clientX - startX;
-        const dy = point.clientY - startY;
-        if(Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
-        const viewport = suiteGetVisibleViewport();
-        const newLeft = Math.max(viewport.left, Math.min(viewport.right - button.offsetWidth, startLeft + dx));
-        const newTop = Math.max(viewport.top, Math.min(viewport.bottom - button.offsetHeight, startTop + dy));
-        button.style.left = newLeft + 'px';
-        button.style.top = newTop + 'px';
-        event.preventDefault();
-      };
-      const finishDrag = (activate = false) => {
-        if(!dragging) return;
-        dragging = false;
-        button.style.transition = '';
-        suiteClampToViewport(button, {margin:8, constrainSize:false});
-        suiteResolveFloatingButtonOverlaps(button);
-        button._suitePersistFloatingPosition();
-        if(activate && !moved){
-          suppressClickUntil = Date.now() + 700;
-          openModal();
-        }
-      };
-      on(button, 'mousedown', event => {
-        if(event.button !== 0) return;
-        startDrag(event,event);
-      });
-      on(document, 'mousemove', event => {
-        moveDrag(event,event);
-      });
-      on(document, 'mouseup', finishDrag);
-      on(button, 'touchstart', event => startDrag(event,event.touches[0]), {passive:false});
-      on(document, 'touchmove', event => {
-        if(dragging) moveDrag(event,event.touches[0]);
-      }, {passive:false});
-      on(document, 'touchend', () => finishDrag(true));
-      on(document, 'touchcancel', () => finishDrag(false));
-      on(button, 'click', event => {
-        if(Date.now() < suppressClickUntil){
-          event.preventDefault();
-          event.stopPropagation();
-          return;
-        }
-        if(moved){
-          moved = false;
-          event.preventDefault();
-          event.stopPropagation();
-          return;
-        }
-        openModal();
-      });
+      makeDraggable(button, button, (left) => {
+        const bottom = window.innerHeight - button.getBoundingClientRect().bottom;
+        button.style.bottom = bottom + 'px';
+        button.style.top = 'auto';
+        gmStoreSet(positionKey, {x:left, bottom});
+      }, {constrainSize:false});
+      on(button, 'click', openModal);
     }
 
     function lockModalScroll(modal){
@@ -8390,7 +8268,7 @@
     const getScoped = (key, fallback) => gmStoreGet(scopedKey(key), fallback);
     const setScoped = (key, value) => gmStoreSet(scopedKey(key), value);
 
-    function isEnabled(){ return !!cfg.modChatStoneAutoloot; }
+    function isEnabled(){ return !!cfg.modChatStoneAutoloot && window.__suiteChatStoneAutolootState === state; }
     function parseJson(text){ try{ return JSON.parse(text); }catch(e){ return null; } }
 
     function getUserHash(){
@@ -8715,6 +8593,7 @@
       if(getScoped(KEYS.baselineReady, false)) return;
       try{
         const html = await fetchText('/transactions/');
+        if(!isEnabled()) return;
         const verified = {};
         extractStoneTransactions(html).forEach(date => { verified[date] = true; });
         setScoped(KEYS.verified, verified);
@@ -8736,6 +8615,7 @@
       if(!isEnabled()) return;
       try{
         const html = await fetchText('/transactions/');
+        if(!isEnabled()) return;
         const verified = getScoped(KEYS.verified, {});
         let newCount = 0;
         for(const date of extractStoneTransactions(html)){
@@ -8940,7 +8820,7 @@
 
     async function waitForUserHash(timeoutMs = 10000){
       const started = Date.now();
-      while(!getUserHash() && Date.now() - started < timeoutMs) await sleep(250);
+      while(isEnabled() && !getUserHash() && Date.now() - started < timeoutMs) await sleep(250);
     }
 
     async function start(){
@@ -8953,7 +8833,9 @@
       state.accountKey = getAccountKey();
       state.seen = new Set(getScoped(KEYS.seen, []));
       await acquireLeader();
+      if(!isEnabled()) return;
       await createTransactionBaseline();
+      if(!isEnabled()) return;
       state.ready = true;
       scanExistingDom();
       installDomObserver();
@@ -8982,7 +8864,7 @@
     }
 
     start().catch(error => {
-      window.__suiteChatStoneAutolootInstalled = false;
+      if(window.__suiteChatStoneAutolootState === state) cleanupChatStoneAutoloot();
       log('Init failed:', error?.message || error);
     });
   }
@@ -9666,10 +9548,7 @@
     function loadBrickPanelPos(){return gmStoreGet(BRICK_POS_KEY, null);}
     function applyBrickPanelPos(panel){
       const pos=loadBrickPanelPos();if(!pos)return;
-      const margin=8;
-      const left=Math.min(Math.max(margin,pos.left),Math.max(margin,window.innerWidth-panel.offsetWidth-margin));
-      const top=Math.min(Math.max(margin,pos.top),Math.max(margin,window.innerHeight-panel.offsetHeight-margin));
-      panel.style.right='auto';panel.style.bottom='auto';panel.style.left=left+'px';panel.style.top=top+'px';
+      panel.style.right='auto';panel.style.bottom='auto';panel.style.left=pos.left+'px';panel.style.top=pos.top+'px';
     }
     function makeBrickPanelDraggable(panel,handle){
       makeDraggable(panel,handle,saveBrickPanelPos);
@@ -10331,7 +10210,7 @@
         if(rankRow)apply();else suiteApplyCollapsibleState(panel,collapsed,apply);
       });
       if(!rankRow){makeRemeltPanelDraggable(panel,header);
-      const pos=loadRemeltPanelPos();if(pos){const margin=8;const left=Math.min(Math.max(margin,pos.left),Math.max(margin,window.innerWidth-panel.offsetWidth-margin));const top=Math.min(Math.max(margin,pos.top),Math.max(margin,window.innerHeight-panel.offsetHeight-margin));panel.style.right='auto';panel.style.left=left+'px';panel.style.top=top+'px';}
+      const pos=loadRemeltPanelPos();if(pos){panel.style.right='auto';panel.style.left=pos.left+'px';panel.style.top=pos.top+'px';}
       }
       renderRemeltBody(body);
     }
@@ -11874,7 +11753,7 @@
       'line-height:1',
       'padding:0'
     ].join(';');
-    closeBtn.addEventListener('click',()=>panel.style.display='none');
+    closeBtn.addEventListener('click',()=>{panel.style.display='none';suiteScheduleViewportRefresh();});
     hdr.append(titleWrap,closeBtn);
     subscribeSuiteUpdateState(state=>{
       updateBtn.style.display=state.hasUpdate ? 'inline-flex' : 'none';
@@ -12282,12 +12161,9 @@
       panel.style.left=cfg.settingsPanelLeft+'px';
       panel.style.right='auto';
     }
-    window.addEventListener('resize', keepSettingsPanelInViewport);
     makeDraggable(panel, '#suite-settings-panel > div:first-child', (left,top)=>{
-      keepSettingsPanelInViewport();
-      const rect = panel.getBoundingClientRect();
-      cfg.settingsPanelLeft=rect.left; cfg.settingsPanelTop=rect.top; saveCfg();
-    });
+      cfg.settingsPanelLeft=left; cfg.settingsPanelTop=top; saveCfg();
+    }, {margin:12});
     return panel;
   }
 
@@ -12300,17 +12176,10 @@
     // Восстанавливаем сохранённую позицию кнопки
     if(cfg.settingsBtnLeft!==null)  {
       btn.style.left=cfg.settingsBtnLeft+'px';
-      btn.style.bottom=(cfg.settingsBtnBottom||20)+'px';
+      btn.style.bottom=(cfg.settingsBtnBottom ?? 20)+'px';
       btn.style.right='auto';
     }
     document.body.appendChild(btn);
-    suiteKeepInViewport(btn, {margin:8, constrainSize:false});
-    btn._suitePersistFloatingPosition=()=>{
-      const rect=btn.getBoundingClientRect();
-      cfg.settingsBtnLeft=rect.left;
-      cfg.settingsBtnBottom=Math.max(0,window.innerHeight-rect.bottom);
-      saveCfg();
-    };
     const panel=createSettingsPanel();
 
     const mobileLayer=document.createElement('div');
@@ -12390,11 +12259,6 @@
       top=Math.max(viewport.top+margin,Math.min(top,viewport.bottom-margin-layerRect.height));
       mobileLayer.style.left=Math.round(left)+'px';
       mobileLayer.style.top=Math.round(top)+'px';
-      if(hasSavedPosition&&(Math.abs(left-savedLeft)>.5||Math.abs(top-savedTop)>.5)){
-        cfg.mobileHelperLeft=Math.round(left);
-        cfg.mobileHelperTop=Math.round(top);
-        saveCfg();
-      }
     };
     const openMobileLayer=()=>{
       syncMobileVisibilityControl();
@@ -12429,36 +12293,9 @@
     startSuiteVersionChecker();
 
     // Перетаскивание кнопки настроек
-    let btnDragging=false, btnMoved=false, bx, by, bLeft, bTop;
-    const startButtonDrag=(e,point)=>{
-      btnDragging=true; btnMoved=false;
-      bx=point.clientX; by=point.clientY;
-      const rect=btn.getBoundingClientRect();
-      bLeft=rect.left;
-      bTop=rect.top;
-      btn.style.left=bLeft+'px';
-      btn.style.top=bTop+'px';
-      btn.style.right='auto';
-      btn.style.bottom='auto';
-      btn.style.transition='none';
-      e.preventDefault();
-    };
-    const moveButtonDrag=(e,point)=>{
-      if(!btnDragging)return;
-      const dx=point.clientX-bx, dy=point.clientY-by;
-      if(Math.abs(dx)>3||Math.abs(dy)>3) btnMoved=true;
-      const viewport=suiteGetVisibleViewport();
-      const newLeft=Math.max(viewport.left,Math.min(viewport.right-btn.offsetWidth,bLeft+dx));
-      const newTop=Math.max(viewport.top,Math.min(viewport.bottom-btn.offsetHeight,bTop+dy));
-      btn.style.left=newLeft+'px';
-      btn.style.top=newTop+'px';
-      positionMobileLayer();
-      e.preventDefault();
-    };
-    let suppressButtonClickUntil=0;
     const toggleSettingsPanel=()=>{
       panel.style.display=panel.style.display==='none'?'block':'none';
-      if(panel.style.display !== 'none') suiteScheduleViewportRefresh();
+      suiteScheduleViewportRefresh();
     };
     const activateSettingsControl=()=>{
       if(!suiteUsesMobileSettingsLayer()){
@@ -12471,41 +12308,14 @@
       if(panelWasOpen||!mobileLayer.classList.contains('is-open')) openMobileLayer();
       else closeMobileLayer();
     };
-    const finishButtonDrag=(activate=false)=>{
-      if(!btnDragging)return;
-      btnDragging=false;
-      btn.style.transition='';
-      suiteClampToViewport(btn,{margin:8,constrainSize:false});
-      suiteResolveFloatingButtonOverlaps(btn);
-      btn._suitePersistFloatingPosition();
-      if(activate&&!btnMoved){
-        suppressButtonClickUntil=Date.now()+700;
-        activateSettingsControl();
-      }
-    };
-    btn.addEventListener('mousedown', function(e){
-      if(e.button!==0)return;
-      startButtonDrag(e,e);
-    });
-    document.addEventListener('mousemove', function(e){
-      moveButtonDrag(e,e);
-    });
-    document.addEventListener('mouseup',finishButtonDrag);
-    btn.addEventListener('touchstart',e=>startButtonDrag(e,e.touches[0]),{passive:false});
-    document.addEventListener('touchmove',e=>{
-      if(btnDragging) moveButtonDrag(e,e.touches[0]);
-    },{passive:false});
-    document.addEventListener('touchend',()=>finishButtonDrag(true));
-    document.addEventListener('touchcancel',()=>finishButtonDrag(false));
-    btn.addEventListener('click',e=>{
-      if(Date.now()<suppressButtonClickUntil){
-        e.preventDefault();
-        e.stopPropagation();
-        return;
-      }
-      if(btnMoved)return; // не открываем если тащили
-      activateSettingsControl();
-    });
+    makeDraggable(btn, btn, left=>{
+      cfg.settingsBtnLeft=left;
+      cfg.settingsBtnBottom=window.innerHeight-btn.getBoundingClientRect().bottom;
+      btn.style.top='auto';
+      btn.style.bottom=cfg.settingsBtnBottom+'px';
+      saveCfg();
+    },{constrainSize:false,onMove:positionMobileLayer});
+    btn.addEventListener('click',activateSettingsControl);
     window.addEventListener('resize',()=>{
       suiteApplyMobileFloatingUiVisibility();
       if(!suiteUsesMobileSettingsLayer()) closeMobileLayer();
@@ -15827,7 +15637,6 @@ function watchTradeLimitsSettings(){
         let panelStateUpdatePromise = null;
         let panelStateUpdateQueued = false;
         let panelPaused = false;
-        let panelDragAbortController = null;
         let panelStyleElement = null;
 
         const currentUser = getCurrentUser();
@@ -18994,17 +18803,8 @@ function watchTradeLimitsSettings(){
             const next = !current;
             await GM_setValue(PANEL_COLLAPSED_KEY, next);
 
-            const anchor = panel.getBoundingClientRect();
             renderPanelCollapsedState(panel, body, btn, next);
-            requestAnimationFrame(() => {
-                panel.style.transform = 'none';
-                panel.style.left = `${Math.round(anchor.left)}px`;
-                panel.style.top = `${Math.round(anchor.top)}px`;
-                panel.style.right = 'auto';
-                panel.style.bottom = 'auto';
-                clampPanelToViewport(panel);
-                suiteResolveFloatingButtonOverlaps(panel);
-            });
+            suiteScheduleViewportRefresh();
 
             updateButtonState();
         }
@@ -19558,11 +19358,6 @@ function watchTradeLimitsSettings(){
                 </div>
             `;
             document.body.appendChild(panel);
-            panel._suitePersistFloatingPosition = () => GM_setValue(PANEL_POSITION_KEY, {
-                left: panel.style.left,
-                top: panel.style.top
-            });
-
             panel.querySelector('#aw-active-tab-toggle').addEventListener('click', toggleWatch);
             panel.querySelector('#aw-open-anime-db').addEventListener('click', openAnimeDbModal);
             panel.querySelector('#aw-open-stats').addEventListener('click', openStatsModal);
@@ -19589,105 +19384,9 @@ function watchTradeLimitsSettings(){
         }
 
         function installPanelDrag(panel) {
-            const head = panel.querySelector('.aw-head');
-            if (!head) return;
-            panelDragAbortController?.abort();
-            panelDragAbortController = new AbortController();
-            const signal = panelDragAbortController.signal;
-
-            head.style.cursor = 'grab';
-            head.style.touchAction = 'none';
-            let dragging = false;
-            let startX = 0, startY = 0, origLeft = 0, origTop = 0;
-            const getPoint = (e) => e.touches?.[0] || e.changedTouches?.[0] || e;
-
-            head.addEventListener('mousedown', (e) => {
-                if (e.button !== 0 || e.target.closest('button')) return;
-                dragging = true;
-                startX = e.clientX;
-                startY = e.clientY;
-                const rect = panel.getBoundingClientRect();
-                origLeft = rect.left;
-                origTop  = rect.top;
-                // Переключаемся на top-позиционирование при начале drag
-                panel.style.left   = origLeft + 'px';
-                panel.style.top    = origTop + 'px';
-                panel.style.right  = 'auto';
-                panel.style.bottom = 'auto';
-                head.style.cursor = 'grabbing';
-                e.preventDefault();
-            }, { signal });
-
-            head.addEventListener('touchstart', (e) => {
-                if (e.target.closest('button')) return;
-                const point = getPoint(e);
-                dragging = true;
-                startX = point.clientX;
-                startY = point.clientY;
-                const rect = panel.getBoundingClientRect();
-                origLeft = rect.left;
-                origTop  = rect.top;
-                panel.style.left   = origLeft + 'px';
-                panel.style.top    = origTop + 'px';
-                panel.style.right  = 'auto';
-                panel.style.bottom = 'auto';
-                head.style.cursor = 'grabbing';
-                e.preventDefault();
-            }, { passive:false, signal });
-
-            document.addEventListener('mousemove', (e) => {
-                if (!dragging) return;
-                const dx = e.clientX - startX;
-                const dy = e.clientY - startY;
-                const viewport = suiteGetVisibleViewport();
-                const newLeft = Math.max(viewport.left, Math.min(viewport.right - panel.offsetWidth, origLeft + dx));
-                const newTop  = Math.max(viewport.top, Math.min(viewport.bottom - panel.offsetHeight, origTop + dy));
-                panel.style.left  = newLeft + 'px';
-                panel.style.top   = newTop  + 'px';
-                panel.style.right  = 'auto';
-                panel.style.bottom = 'auto';
-            }, { signal });
-
-            document.addEventListener('touchmove', (e) => {
-                if (!dragging) return;
-                const point = getPoint(e);
-                const dx = point.clientX - startX;
-                const dy = point.clientY - startY;
-                const viewport = suiteGetVisibleViewport();
-                const newLeft = Math.max(viewport.left, Math.min(viewport.right - panel.offsetWidth, origLeft + dx));
-                const newTop  = Math.max(viewport.top, Math.min(viewport.bottom - panel.offsetHeight, origTop + dy));
-                panel.style.left  = newLeft + 'px';
-                panel.style.top   = newTop  + 'px';
-                panel.style.right  = 'auto';
-                panel.style.bottom = 'auto';
-                e.preventDefault();
-            }, { passive:false, signal });
-
-            document.addEventListener('mouseup', async () => {
-                if (!dragging) return;
-                dragging = false;
-                head.style.cursor = 'grab';
-                clampPanelToViewport(panel);
-                suiteResolveFloatingButtonOverlaps(panel);
-                await panel._suitePersistFloatingPosition();
-            }, { signal });
-            document.addEventListener('touchend', async () => {
-                if (!dragging) return;
-                dragging = false;
-                head.style.cursor = 'grab';
-                clampPanelToViewport(panel);
-                suiteResolveFloatingButtonOverlaps(panel);
-                await panel._suitePersistFloatingPosition();
-            }, { signal });
-            document.addEventListener('touchcancel', async () => {
-                if (!dragging) return;
-                dragging = false;
-                head.style.cursor = 'grab';
-                clampPanelToViewport(panel);
-                suiteResolveFloatingButtonOverlaps(panel);
-                await panel._suitePersistFloatingPosition();
-            }, { signal });
-            window.addEventListener('resize', () => clampPanelToViewport(panel), { passive:true, signal });
+            makeDraggable(panel, '.aw-head', (left,top) => {
+                GM_setValue(PANEL_POSITION_KEY, {left:left+'px', top:top+'px'});
+            }, {keepInViewport:false});
         }
 
         async function applyPanelPosition(panel) {
@@ -19700,13 +19399,15 @@ function watchTradeLimitsSettings(){
                     panel.style.bottom = 'auto';
                 }
             }
+            if(!pos?.top){
+                // Keep the top edge fixed when the last-card row arrives asynchronously.
+                const rect = panel.getBoundingClientRect();
+                panel.style.left = rect.left+'px';
+                panel.style.top = rect.top+'px';
+                panel.style.right = 'auto';
+                panel.style.bottom = 'auto';
+            }
             clampPanelToViewport(panel);
-            // Keep the top edge fixed when the last-card row arrives asynchronously.
-            const rect = panel.getBoundingClientRect();
-            panel.style.left = `${Math.round(rect.left)}px`;
-            panel.style.top = `${Math.round(rect.top)}px`;
-            panel.style.right = 'auto';
-            panel.style.bottom = 'auto';
         }
 
         function clampPanelToViewport(panel) {
@@ -19914,7 +19615,6 @@ function watchTradeLimitsSettings(){
             try { stopTabLockHeartbeat(); } catch (e) {}
             try { stopPanelTicker(); } catch (e) {}
             try { removeStorageListener(); } catch (e) {}
-            try { panelDragAbortController?.abort(); panelDragAbortController = null; } catch (e) {}
             try { panelStyleElement?.remove?.(); panelStyleElement = null; } catch (e) {}
             try { document.removeEventListener('visibilitychange', handleTabActivityChange); } catch (e) {}
             try { window.removeEventListener('focus', handleTabFocus); } catch (e) {}
