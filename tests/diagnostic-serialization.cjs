@@ -36,9 +36,18 @@ const setup = String.raw`
 let passed = 0;
 const check = (value, label) => { assert.ok(value, label); passed++; };
 const storage = new Map(), sent = [];
-const gmGet = (key, fallback) => storage.has(key) ? storage.get(key) : fallback;
+let refuseQueueRead = false;
+const gmGet = (key, fallback) => {
+  if (refuseQueueRead && key === SUITE_TELEMETRY_QUEUE_KEY) throw Error('storage busy');
+  return storage.has(key) ? storage.get(key) : fallback;
+};
 const gmSet = (key, value) => storage.set(key, value);
-const gmDelete = key => storage.delete(key);
+let refuseQueueDelete = false;
+const gmDelete = key => {
+  if (refuseQueueDelete && key === SUITE_TELEMETRY_QUEUE_KEY) return false;
+  storage.delete(key);
+  return true;
+};
 const GM_getValue = gmGet, GM_setValue = gmSet;
 const window = {}, location = {pathname:'/cards/pack/'};
 const document = {visibilityState:'visible'};
@@ -52,6 +61,7 @@ const suiteTelemetrySchedulePersist = () => {};
 let acceptSend = false;
 const suiteReportEvent = async (type, payload) => {
   if (!acceptSend) return false;
+  if (refuseQueueDelete && sent.at(-1)?.payload.events[0]?.id === 'cannot-remove') throw Error('immediate repeat');
   sent.push(JSON.parse(JSON.stringify({type,payload})));
   return true;
 };
@@ -114,6 +124,15 @@ suiteTelemetryLog('suite','oversized', {items:Array.from({length:100},()=> 'x'.r
 await suiteTelemetryFlush('test-oversize');
 const last = sent.at(-1).payload.events[0];
 check(last.data.truncated === true, 'oversized event marked');
+storage.set(SUITE_TELEMETRY_QUEUE_KEY, JSON.stringify([{id:'cannot-remove',module:'suite',time:'test'}]));
+refuseQueueRead = true;
+check(await suiteTelemetryFlush('temporarily unreadable') === false && storage.has(SUITE_TELEMETRY_QUEUE_KEY), 'failed read retains the queue');
+refuseQueueRead = false;
+refuseQueueDelete = true;
+check(await suiteTelemetryFlush('locked') === false, 'stop after a successful upload if its receipt cannot be removed');
+check(storage.has(SUITE_TELEMETRY_QUEUE_KEY), 'retain pending queue for a later retry');
+refuseQueueDelete = false;
+check(await suiteTelemetryFlush('retry') === true && !storage.has(SUITE_TELEMETRY_QUEUE_KEY), 'resume after storage recovers');
 check(JSON.stringify(last).length <= SUITE_TELEMETRY_MAX_EVENT_CHARS, 'event size limit retained');
 console.log('diagnostic-serialization: ' + passed + ' checks passed');
 `;

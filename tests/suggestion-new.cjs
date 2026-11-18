@@ -32,7 +32,7 @@ ok(ctx.colors('__proto__').bg==='#475569','unknown safe fallback');
    var storage={},writes=[],requests=[],nick='Tester';
    var gmStoreGet=(k,d)=>k in storage?structuredClone(storage[k]):d;
    var gmStoreSet=(k,v)=>{storage[k]=structuredClone(v);writes.push(k);};
-   var suiteGetCurrentUserName=()=>nick,suiteKeepInViewport=()=>{};
+   var suiteGetCurrentUserName=()=>nick,makeDraggable=()=>{};
    var GM_xmlhttpRequest=o=>requests.push(o);
    var image='data:image/svg+xml,'+encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="160" height="220"><rect width="160" height="220" fill="#20334b"/><text x="10" y="25" fill="white">RANK</text></svg>');
    var cards=Array.from({length:40},(_,i)=>({card_id:40-i,rank:['s','a','b','c','d','e'][i%6],image,name:'Карта '+(40-i),author:'Автор'}));
