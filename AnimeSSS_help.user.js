@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.86
+// @version      3.87
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -3917,6 +3917,7 @@
     const handle = typeof handleSelectorOrEl === 'string' ? panel.querySelector(handleSelectorOrEl) : handleSelectorOrEl || panel;
     if(!handle) return;
     const layout = {margin:options.margin ?? 8, constrainSize:options.constrainSize !== false};
+    const transformDrag = options.transformDrag === true;
     if(!onDrop && panel.id){
       const key = 'suite_floating_position:' + panel.id;
       const saved = gmStoreGet(key, null);
@@ -3936,6 +3937,10 @@
       suppressClick = false;
       const rect = panel.getBoundingClientRect();
       gesture = {id:event.pointerId, x:event.clientX, y:event.clientY, left:rect.left, top:rect.top, original:null};
+      if(transformDrag){
+        gesture.size = {width:rect.width, height:rect.height};
+        gesture.viewport = suiteGetVisibleViewport();
+      }
       handle.setPointerCapture(event.pointerId);
       window.addEventListener('blur', interrupt);
       window.addEventListener('resize', interrupt);
@@ -3951,13 +3956,24 @@
         for(const prop of ['left','top','right','bottom','transform','translate']) gesture.original[prop] = panel.style[prop];
         suiteDraggingPanels.add(panel);
         Object.assign(panel.style, {right:'auto',bottom:'auto',transform:'none',translate:''});
+        if(transformDrag){
+          panel.style.left = gesture.left+'px';
+          panel.style.top = gesture.top+'px';
+          panel.classList.add('suite-transform-drag');
+        }
         handle.style.cursor = 'grabbing';
       }
-      const viewport = suiteGetVisibleViewport();
-      const left = Math.max(viewport.left+layout.margin, Math.min(viewport.right-panel.offsetWidth-layout.margin, gesture.left+dx));
-      const top = Math.max(viewport.top+layout.margin, Math.min(viewport.bottom-panel.offsetHeight-layout.margin, gesture.top+dy));
-      panel.style.left = left+'px';
-      panel.style.top = top+'px';
+      const viewport = gesture.viewport ?? suiteGetVisibleViewport();
+      const width = gesture.size?.width ?? panel.offsetWidth;
+      const height = gesture.size?.height ?? panel.offsetHeight;
+      const left = Math.max(viewport.left+layout.margin, Math.min(viewport.right-width-layout.margin, gesture.left+dx));
+      const top = Math.max(viewport.top+layout.margin, Math.min(viewport.bottom-height-layout.margin, gesture.top+dy));
+      if(transformDrag){
+        panel.style.transform = `translate3d(${left-gesture.left}px,${top-gesture.top}px,0)`;
+      }else{
+        panel.style.left = left+'px';
+        panel.style.top = top+'px';
+      }
       options.onMove?.();
     });
     function onVisibility(){ if(document.hidden) interrupt(); }
@@ -3981,10 +3997,14 @@
       suppressClick = true;
       if(event.type === 'pointerup' && !document.hidden && window.innerWidth > 1 && window.innerHeight > 1){
         const rect = panel.getBoundingClientRect();
+        if(transformDrag){
+          Object.assign(panel.style, {left:rect.left+'px', top:rect.top+'px', transform:'none'});
+        }
         if(panel.isConnected && rect.width > 0 && rect.height > 0) onDrop?.(rect.left,rect.top);
       }else{
         Object.assign(panel.style, original);
       }
+      if(transformDrag) panel.classList.remove('suite-transform-drag');
       if(options.resolveOverlaps !== false) suiteResolveFloatingButtonOverlaps(panel);
     }
     for(const type of ['pointerup','pointercancel','lostpointercapture']) handle.addEventListener(type, finish);
@@ -6255,7 +6275,7 @@
           box-shadow:0 10px 30px rgba(0,0,0,.48),0 0 0 1px rgba(14,165,233,.15),0 0 22px rgba(14,165,233,.18);
         }
         .suite-suggestion-button:hover{filter:brightness(1.08);border-color:rgba(125,211,252,.58);}
-        .suite-suggestion-button:active{cursor:grabbing;transform:translateY(1px);}
+        .suite-suggestion-button.suite-transform-drag{filter:none;will-change:transform;transition:none;}
         .suite-suggestion-modal{
           position:fixed;inset:4vh 3vw;z-index:100000;display:none;flex-direction:column;
           background:linear-gradient(180deg,rgba(8,20,38,.98),rgba(7,16,30,.97));
@@ -6331,7 +6351,7 @@
         button.style.bottom = bottom + 'px';
         button.style.top = 'auto';
         gmStoreSet(positionKey, {x:left, bottom});
-      }, {constrainSize:false});
+      }, {constrainSize:false,transformDrag:true});
       on(button, 'click', openModal);
     }
 

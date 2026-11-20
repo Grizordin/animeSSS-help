@@ -97,7 +97,26 @@ const storedButton = {x:540,bottom:34};
     for(const [selector,x,y] of [['#suite-suggestion-authors-button',310,350],['.aw-head',440,95]]){
       const r=await rect(selector);
       await page.mouse.move(r.x+12,r.y+12);await page.mouse.down();
-      await page.mouse.move(x+12,y+12,{steps:5});await page.mouse.up();
+      if(selector==='#suite-suggestion-authors-button'){
+        await button.evaluate(el=>{
+          window.suggestionSizeReads=0;
+          for(const property of ['offsetWidth','offsetHeight']){
+            const original=Object.getOwnPropertyDescriptor(HTMLElement.prototype,property);
+            Object.defineProperty(el,property,{configurable:true,get(){
+              window.suggestionSizeReads++;
+              return original.get.call(this);
+            }});
+          }
+        });
+      }
+      await page.mouse.move(x+12,y+12,{steps:5});
+      if(selector==='#suite-suggestion-authors-button'){
+        assert.deepEqual(await rect(selector),{x,y},'the suggestion button follows the pointer during a drag');
+        assert.equal(await page.evaluate(()=>window.suggestionSizeReads),0,'drag movement reuses its initial dimensions');
+        assert.deepEqual(await page.evaluate(()=>writes),[],'dragging does not persist temporary coordinates');
+        assert.ok(await button.evaluate(el=>el.classList.contains('suite-transform-drag') && el.style.transform.startsWith('translate3d(')));
+      }
+      await page.mouse.up();
     }
     assert.deepEqual(await positions(),[{x:310,y:350},{x:440,y:95}]);
     assert.equal(await page.evaluate(()=>opens),1,'drag is not a click');
