@@ -46,11 +46,12 @@ function runtime(storage=new Map()){
  const refreshAnimeDbEmptyState=async()=>false,clearAnimeDbEmptyState=async()=>{},getMskDateKey=()=> '2026-10-24';
  const updateCardCounter=async()=>{},setDailyProgress=async()=>{},getMsUntilMskMidnight=()=>3600000;
  const state={index:0,ep_offset:2,failed_attempts:1,cards_collected:3};
- const buildOrderedPool=async()=>[{anime_id:1,min_ep:1,s:1,t_id:1,t_title:'T'}],updateSmartTarget=async()=>state,getEpOrder=async()=>[1,2,3];
+ const pool=[{anime_id:1,min_ep:1,s:1,t_id:1,t_title:'T'}];
+ const buildOrderedPool=async()=>pool,updateSmartTarget=async()=>state,getEpOrder=async()=>[1,2,3];
  const isCurrentServerDayConfirmed=async()=>false,confirmCurrentServerDay=async()=>{},ensureDailyKodikWarmup=async()=>{};
  const processCardReward=async()=>{processed++;},saveRequestLog=async()=>{};
  const saveSkippedEpisode=async data=>skippedEpisodes.push(data);
- const fetch=async(url,opts)=>{requests.push({url,at:now});const reply=replies.shift();if(!reply)throw Error('unexpected network');if(reply instanceof Error)throw reply;return reply;};
+ const fetch=async(url,opts)=>{requests.push({url,body:opts?.body,at:now});const reply=replies.shift();if(!reply)throw Error('unexpected network');if(reply instanceof Error)throw reply;return reply;};
  `+funcs,c);
  return {c,run:s=>vm.runInContext(s,c),storage};
 }
@@ -125,6 +126,10 @@ async function main(){
  custom.run("replies.push(new Response('{}'),new Response('{}'),new Response(JSON.stringify({reason:'no'})))");await custom.run('mainCardCheckLogic()');
  check(custom.run("notices[0][3]==='Карта не выпала за 5 попыток.'"),'custom attempt threshold appears in notice');
  custom.run("handleCardError('no','site')");check(custom.run("notices[1][2]==='Карта не выпала' && notices[1][3]===''"),'site response does not promise an automatic retry');
+ const mixed=runtime();
+ mixed.run("pool[0].episode_translations=[{t_id:'20',t_title:'Другой перевод',episodes:[3]}]; replies.push(new Response('{}'),new Response('{}'),new Response(JSON.stringify({cards:[{id:1}]})))");
+ await mixed.run('mainCardCheckLogic()');
+ check(mixed.run("requests.length===3 && requests.every(r=>r.body?.includes('kodik_data[translation][id]=20') && r.body.includes('kodik_data[episode]=3'))"),'watch requests use the voice that actually has the target episode');
  console.log(JSON.stringify({result:'AUTOLOOT_RATE_LIMIT_OK',checks}));
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});

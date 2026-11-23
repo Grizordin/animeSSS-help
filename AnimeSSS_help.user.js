@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.87
+// @version      3.88
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -15653,6 +15653,7 @@ function watchTradeLimitsSettings(){
         let kodikWarmupPromise = null;
         let diagnosticRequestSequence = 0;
         let animeDbEmpty = null;
+        let animeDbAddPending = false;
         let emptyDbLastReminderAt = 0;
         let panelStateUpdatePromise = null;
         let panelStateUpdateQueued = false;
@@ -16641,7 +16642,7 @@ function watchTradeLimitsSettings(){
         }
 
         function normalizeAnimeEntry(entry) {
-            return {
+            const normalized = {
                 anime_id: String(entry.anime_id),
                 s: Number(entry.s || 1),
                 min_ep: Number(entry.min_ep || 1),
@@ -16652,6 +16653,36 @@ function watchTradeLimitsSettings(){
                 title: String(entry.title || ''),
                 addedAt: Number(entry.addedAt || 0)
             };
+            const used = new Set();
+            const groups = [];
+            for (const group of Array.isArray(entry.episode_translations) ? entry.episode_translations : []) {
+                if (!group?.t_id || !group.t_title || !Array.isArray(group.episodes)) continue;
+                const episodes = [];
+                for (const value of group.episodes) {
+                    const ep = Number(value);
+                    if (!Number.isSafeInteger(ep) || ep < 1 || ep > 3000 || used.has(ep)) continue;
+                    used.add(ep);
+                    episodes.push(ep);
+                }
+                if (episodes.length) groups.push({ t_id: String(group.t_id), t_title: String(group.t_title),
+                    t_link: String(group.t_link || ''), episodes });
+            }
+            if (used.size) {
+                normalized.episode_translations = groups;
+                normalized.min_ep = Math.min(...used);
+                normalized.max_ep = Math.max(...used);
+            }
+            return normalized;
+        }
+
+        function getAnimeEpisodeNumbers(entry, fallbackMax = 0) {
+            if (entry.episode_translations?.length) {
+                return entry.episode_translations.flatMap(group => group.episodes).sort((a, b) => a - b);
+            }
+            const min = Number(entry.min_ep || 1);
+            const max = Number(entry.max_ep || fallbackMax);
+            if (!Number.isSafeInteger(min) || !Number.isSafeInteger(max) || min < 1 || max < min) return [];
+            return Array.from({ length: max - min + 1 }, (_, offset) => min + offset);
         }
 
         async function getAnimeDb() {
@@ -16746,12 +16777,6 @@ function watchTradeLimitsSettings(){
             return true;
         }
 
-        async function isAnimeInFinishedArchive(entry) {
-            const archive = await getFinishedAnimeArchive();
-            const key = buildAnimeUniqueKey(entry);
-            return archive.some(item => buildAnimeUniqueKey(item) === key);
-        }
-
         async function removeFinishedAnimeArchiveByKey(key) {
             const archive = await getFinishedAnimeArchive();
             const next = archive.filter(item => buildAnimeUniqueKey(item) !== key);
@@ -16804,313 +16829,144 @@ function watchTradeLimitsSettings(){
             );
         }
 
-        function getCurrentPageActiveTranslation() {
-            const active =
-                document.querySelector('#translators-list .b-translator__item.active') ||
-                document.querySelector('.b-translators__list .b-translator__item.active') ||
-                document.querySelector('#translators-list li.active') ||
-                document.querySelector('.b-translators__list li.active');
-
-            if (!active) return null;
-
-            const t_link =
-                getElementKodikLink(active) ||
-                getElementKodikLink(document.querySelector('#kodik_player_ajax')) ||
-                getElementKodikLink(document.querySelector('[data-this_link]')) ||
-                '';
-            const t_id =
-                parseCurrentPageTranslationId(t_link) ||
-                active.getAttribute('data-id') ||
-                active.getAttribute('data-translation-id') ||
-                active.getAttribute('data-translation_id') ||
-                null;
-
-            return {
-                t_title: clean(active.textContent) || null,
-                t_id,
-                t_link
-            };
-        }
-
-        function getCurrentPageSeason() {
-            const animeId = getCurrentPageAnimeId();
-            if (!animeId) return 1;
-
-            for (const s of document.scripts) {
-                const txt = s.textContent || '';
-                if (!txt.includes('anime_episode_arr')) continue;
-
-                const m = txt.match(/anime_episode_arr\s*=\s*(\{[\s\S]*?\});/);
-                if (!m) continue;
-
-                try {
-                    const obj = JSON.parse(m[1]);
-                    return parseInt(obj?.[animeId]?.season, 10) || 1;
-                } catch (e) {}
+        function collectKodikTranslations(root) {
+            const translations = new Map();
+            const selector = '#translators-list li, .b-translators__list li, #translators-list .b-translator__item, ' +
+                '.b-translators__list .b-translator__item, [data-donor-block="kodik"] .b-translator__item';
+            for (const item of root.querySelectorAll(selector)) {
+                const raw = getElementKodikLink(item);
+                if (!raw) continue;
+                let url;
+                try { url = new URL(raw, location.href); } catch (error) { continue; }
+                if (url.protocol !== 'https:' || url.username || url.password ||
+                    (url.hostname !== 'kodikplayer.com' && url.origin !== location.origin)) continue;
+                const t_id = parseCurrentPageTranslationId(url.href) || item.getAttribute('data-translation-id') ||
+                    item.getAttribute('data-translation_id') || item.getAttribute('data-id') ||
+                    item.getAttribute('data-this-translator')?.match(/^kodik_(\d+)$/)?.[1];
+                const t_title = clean(item.textContent);
+                if (!/^\d+$/.test(t_id || '') || !t_title) continue;
+                url.hash = '';
+                if (url.hostname === 'kodikplayer.com') url.searchParams.set('only_translations', t_id);
+                const t_link = url.href;
+                const active = item.classList.contains('active') || !!translations.get(t_link)?.active;
+                translations.set(t_link, { t_id, t_title, t_link, active });
             }
-
-            return 1;
+            return [...translations.values()];
         }
 
-        function addEpisodeNumber(set, value) {
-            const n = parseInt(value, 10);
-            if (Number.isFinite(n) && n >= 1 && n <= 3000) {
-                set.add(n);
-            }
-        }
+        async function getCurrentPageKodikTranslations(animeId) {
+            const root = document.querySelector('#kodik_player_ajax');
+            const translations = collectKodikTranslations(document);
+            if (translations.length || !root) return translations;
 
-        function buildEpisodeRange(numbers, source = '') {
-            const list = [...numbers]
-                .map(n => parseInt(n, 10))
-                .filter(n => Number.isFinite(n) && n >= 1 && n <= 3000)
-                .sort((a, b) => a - b);
-
-            if (!list.length) return null;
-
-            const unique = [...new Set(list)];
-            const min = unique[0];
-            const max = unique[unique.length - 1];
-            const hasUsefulRange = unique.length >= 2 || max > 1;
-
-            if (!hasUsefulRange) return null;
-            log(`Автоопределение серий (${source}): ${min}-${max}`, unique.slice(0, 40));
-            return { min_ep: min, max_ep: max };
-        }
-
-        function collectEpisodeNumbersFromValue(value, set, inEpisodeContext = false) {
-            if (value == null) return;
-
-            if (typeof value === 'number' || typeof value === 'string') {
-                if (inEpisodeContext) addEpisodeNumber(set, value);
-                return;
-            }
-
-            if (Array.isArray(value)) {
-                value.forEach((item, index) => {
-                    collectEpisodeNumbersFromValue(item, set, inEpisodeContext);
-                    if (inEpisodeContext && typeof item === 'object' && item !== null && !('episode' in item) && !('series' in item)) {
-                        addEpisodeNumber(set, index + 1);
-                    }
+            try {
+                const params = new URLSearchParams({ controller: 'ajax', mod: 'animesss_playlist', news_id: animeId, action: 'load_player' });
+                const response = await fetch('/index.php?' + params, {
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' }, signal: AbortSignal.timeout(15000)
                 });
-                return;
-            }
-
-            if (typeof value !== 'object') return;
-
-            for (const [key, val] of Object.entries(value)) {
-                const keyText = String(key).toLowerCase();
-                const isEpisodeKey = /(episode|episodes|ep|seria|series|серия|серии)/i.test(keyText);
-                const isSeasonKey = /(season|сезон)/i.test(keyText);
-
-                if (inEpisodeContext && /^\d+$/.test(key) && !isSeasonKey) {
-                    addEpisodeNumber(set, key);
-                }
-
-                if (isEpisodeKey && !isSeasonKey) {
-                    collectEpisodeNumbersFromValue(val, set, true);
-                } else if (val && typeof val === 'object') {
-                    collectEpisodeNumbersFromValue(val, set, inEpisodeContext);
-                }
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+                const html = new DOMParser().parseFromString(await response.text(), 'text/html');
+                return collectKodikTranslations(html);
+            } catch (error) {
+                warn('Не удалось загрузить список озвучек аниме:', error);
+                return collectKodikTranslations(document);
             }
         }
 
-        function getEpisodeRangeFromAnimeEpisodeArr() {
-            const animeId = getCurrentPageAnimeId();
-            if (!animeId) return null;
-
-            for (const s of document.scripts) {
-                const txt = s.textContent || '';
-                if (!txt.includes('anime_episode_arr')) continue;
-
-                const m = txt.match(/anime_episode_arr\s*=\s*(\{[\s\S]*?\});/);
-                if (!m) continue;
-
+        function getCurrentPageSeason(animeId) {
+            for (const script of document.scripts) {
+                const match = (script.textContent || '').match(/anime_episode_arr\s*=\s*(\{[\s\S]*?\});/);
+                if (!match) continue;
                 try {
-                    const obj = JSON.parse(m[1]);
-                    const data = obj?.[animeId];
-                    const directMaxEpisode = parseInt(data?.episode, 10);
-                    if (Number.isFinite(directMaxEpisode) && directMaxEpisode >= 1) {
-                        log(`Автоопределение серий (anime_episode_arr): 1-${directMaxEpisode}`, data);
-                        return { min_ep: 1, max_ep: directMaxEpisode };
-                    }
-
-                    const episodes = new Set();
-                    collectEpisodeNumbersFromValue(data, episodes, true);
-
-                    if (data && typeof data === 'object') {
-                        for (const [key, val] of Object.entries(data)) {
-                            if (/^\d+$/.test(key) && key !== String(data.season || '')) {
-                                addEpisodeNumber(episodes, key);
-                            }
-                            if (val && typeof val === 'object') {
-                                for (const nestedKey of Object.keys(val)) {
-                                    if (/^\d+$/.test(nestedKey)) addEpisodeNumber(episodes, nestedKey);
-                                }
-                            }
-                        }
-                    }
-
-                    const range = buildEpisodeRange(episodes, 'anime_episode_arr');
-                    if (range) return range;
-                } catch (e) {}
+                    const season = Number(JSON.parse(match[1])?.[animeId]?.season);
+                    if (Number.isSafeInteger(season) && season > 0) return season;
+                } catch (error) {}
             }
-
             return null;
         }
 
-        function getEpisodeRangeFromDom() {
-            const episodes = new Set();
-            const selectors = [
-                '[data-episode]',
-                '[data-episode_id]',
-                '[data-episode-number]',
-                '[data-episode_number]',
-                '[data-seria]',
-                '[data-seriya]',
-                '[data-kodik-episode]',
-                '[data-num]',
-                '[data-number]',
-                '.b-simple_episode__item',
-                '.b-simple_episode__number',
-                '.b-episode__item',
-                '.b-episodes__item',
-                '.b-episode',
-                '.episode',
-                '.episodes li',
-                '.serial-series-box li',
-                '.kodik-episode',
-                '[onclick*="episode"]'
-            ];
-
-            for (const el of document.querySelectorAll(selectors.join(','))) {
-                for (const attr of ['data-episode', 'data-episode_id', 'data-episode-number', 'data-episode_number', 'data-seria', 'data-seriya', 'data-kodik-episode', 'data-num', 'data-number']) {
-                    const value = el.getAttribute(attr);
-                    if (value) addEpisodeNumber(episodes, value);
-                }
-
-                for (const attr of [...el.attributes]) {
-                    if (/(episode|seria|series|kodik|сер)/i.test(attr.name)) {
-                        addEpisodeNumber(episodes, attr.value);
-                    }
-                }
-
-                const text = clean(el.textContent || '');
-                const textPatterns = [
-                    /^(?:серия\s*)?(\d{1,4})(?:\s*(?:серия|серии|эпизод|$))/i,
-                    /(?:серия|серии|серий|эпизод)\s*(\d{1,4})/i,
-                    /(\d{1,4})\s*(?:серия|серии|серий|эпизод)/i
-                ];
-                for (const pattern of textPatterns) {
-                    const textMatch = text.match(pattern);
-                    if (textMatch) addEpisodeNumber(episodes, textMatch[1]);
-                }
-
-                const onclick = el.getAttribute('onclick') || '';
-                for (const match of onclick.matchAll(/(?:episode|seria|series)['"]?\s*[:=,]\s*['"]?(\d{1,4})/gi)) {
-                    addEpisodeNumber(episodes, match[1]);
-                }
-            }
-
-            return buildEpisodeRange(episodes, 'dom');
-        }
-
-        function getCurrentPageEpisodeRange() {
-            const range =
-                getEpisodeRangeFromAnimeEpisodeArr() ||
-                getEpisodeRangeFromDom();
-
-            if (!range) {
-                warn('Автоопределение серий не нашло данные на странице.');
-            }
-
-            return range;
-        }
-
-        function normalizeKodikUrl(url) {
-            const raw = String(url || '').trim();
-            if (!raw) return '';
-            if (raw.startsWith('//')) return location.protocol + raw;
-            if (raw.startsWith('/')) return location.origin + raw;
-            return raw;
-        }
-
         function fetchTextViaTampermonkey(url) {
-            const target = normalizeKodikUrl(url);
-            if (!target) return Promise.reject(new Error('Пустая ссылка Kodik'));
-
             if (typeof GM_xmlhttpRequest === 'function') {
                 return new Promise((resolve, reject) => {
                     GM_xmlhttpRequest({
                         method: 'GET',
-                        url: target,
-                        onload: response => resolve(response.responseText || ''),
+                        url,
+                        onload: response => {
+                            if (response.status >= 200 && response.status < 300) resolve(response.responseText || '');
+                            else reject(new Error('HTTP ' + response.status + ' for Kodik'));
+                        },
                         onerror: () => reject(new Error('Не удалось загрузить Kodik')),
                         ontimeout: () => reject(new Error('Таймаут загрузки Kodik')),
                         timeout: 15000
                     });
                 });
             }
-
-            return fetch(target, { credentials: 'omit' }).then(r => {
-                if (!r.ok) throw new Error(`HTTP ${r.status} for Kodik`);
-                return r.text();
+            return fetch(url, { credentials: 'omit', signal: AbortSignal.timeout(15000) }).then(response => {
+                if (!response.ok) throw new Error('HTTP ' + response.status + ' for Kodik');
+                return response.text();
             });
         }
 
-        function buildEpisodeRangeFromOptions(options, source) {
-            const episodes = new Set();
+        function readKodikEpisodeOptions(options) {
+            const numbers = new Set();
             for (const option of options) {
-                addEpisodeNumber(episodes, option.getAttribute('value'));
-                addEpisodeNumber(episodes, option.getAttribute('data-title'));
-                addEpisodeNumber(episodes, option.textContent);
+                if (option.disabled || option.getAttribute('data-other-translation') === 'true') continue;
+                const label = option.getAttribute('data-title') || option.textContent;
+                const number = Number(option.value) || Number(label?.trim().match(/^(?:серия\s*)?(\d+)(?:\s*серия)?$/i)?.[1]);
+                if (Number.isSafeInteger(number) && number >= 1 && number <= 3000) numbers.add(number);
             }
-            return buildEpisodeRange(episodes, source);
+            return [...numbers].sort((a, b) => a - b);
         }
 
-        function parseEpisodeRangeFromKodikHtml(html) {
-            const doc = new DOMParser().parseFromString(String(html || ''), 'text/html');
-
-            const seasonSelect = doc.querySelector('.serial-seasons-box select');
-            const selectedSeason =
-                seasonSelect?.querySelector('option[selected]')?.getAttribute('value') ||
-                seasonSelect?.querySelector('option[selected="selected"]')?.getAttribute('value') ||
-                seasonSelect?.querySelector('option')?.getAttribute('value') ||
-                null;
-
-            if (selectedSeason != null) {
-                const seasonBox = [...doc.querySelectorAll('.series-options > div')]
-                    .find(el => el.classList.contains(`season-${selectedSeason}`));
-                if (seasonBox) {
-                    const range = buildEpisodeRangeFromOptions(seasonBox.querySelectorAll('option'), `kodik season ${selectedSeason}`);
-                    if (range) return { ...range, season: parseInt(selectedSeason, 10) || 1 };
-                }
+        function parseKodikEpisodeLists(html) {
+            const doc = new DOMParser().parseFromString(html, 'text/html');
+            const selected = doc.querySelector('.serial-seasons-box option[selected]') || doc.querySelector('.serial-seasons-box option');
+            const selectedSeason = Number(selected?.value) || 1;
+            const seasons = new Map();
+            const otherTranslationSeasons = new Set([...doc.querySelectorAll('.serial-seasons-box option[data-other-translation="true"]')].map(option => Number(option.value)));
+            for (const box of doc.querySelectorAll('.series-options > div')) {
+                const className = [...box.classList].find(value => /^season-\d+$/.test(value));
+                if (!className) continue;
+                const season = Number(className.slice(7));
+                if (!otherTranslationSeasons.has(season)) seasons.set(season, readKodikEpisodeOptions(box.querySelectorAll('option')));
             }
-
-            const range = buildEpisodeRangeFromOptions(
-                doc.querySelectorAll('.serial-series-box select option'),
-                'kodik serial-series-box'
-            );
-            if (range) return { ...range, season: parseInt(selectedSeason, 10) || 1 };
-
-            return null;
+            if (!seasons.has(selectedSeason) && !otherTranslationSeasons.has(selectedSeason)) {
+                seasons.set(selectedSeason, readKodikEpisodeOptions(doc.querySelectorAll('.serial-series-box select option')));
+            }
+            return { selectedSeason, seasons };
         }
 
-        async function getEpisodeRangeFromKodik(translationLink) {
-            if (!translationLink) return null;
-
-            try {
-                const html = await fetchTextViaTampermonkey(translationLink);
-                const range = parseEpisodeRangeFromKodikHtml(html);
-                if (range) {
-                    log('Автоопределение серий из Kodik:', range);
-                } else {
-                    warn('Kodik загружен, но список серий не найден.');
-                }
-                return range;
-            } catch (e) {
-                warn('Не удалось получить серии из Kodik:', e);
-                return null;
+        async function getKodikEpisodeAvailability(translations, requestedSeason) {
+            const catalogs = [];
+            let incomplete = false;
+            for (let i = 0; i < translations.length; i += 3) {
+                const batch = await Promise.all(translations.slice(i, i + 3).map(async translation => {
+                    try {
+                        const lists = parseKodikEpisodeLists(await fetchTextViaTampermonkey(translation.t_link));
+                        if ([...lists.seasons.values()].some(episodes => episodes.length)) return { translation, ...lists };
+                    } catch (error) { warn('Не удалось получить серии озвучки ' + translation.t_title, error); }
+                    incomplete = true;
+                    return null;
+                }));
+                catalogs.push(...batch.filter(Boolean));
             }
+            const activeSeason = catalogs.find(catalog => catalog.translation.active)?.selectedSeason;
+            const defaultSeason = catalogs.some(catalog => catalog.seasons.get(1)?.length) ? 1 : catalogs[0]?.selectedSeason;
+            const season = requestedSeason || activeSeason || defaultSeason || 1;
+            catalogs.sort((a, b) => (b.seasons.get(season)?.length || 0) - (a.seasons.get(season)?.length || 0) ||
+                Number(b.translation.active) - Number(a.translation.active));
+            const used = new Set();
+            const groups = [];
+            for (const { translation, seasons } of catalogs) {
+                const episodes = [];
+                for (const ep of seasons.get(season) || []) {
+                    if (used.has(ep)) continue;
+                    used.add(ep);
+                    episodes.push(ep);
+                }
+                if (episodes.length) groups.push({ t_id: translation.t_id, t_title: translation.t_title, t_link: translation.t_link, episodes });
+            }
+            return { season, groups, incomplete };
         }
 
         async function isKodikWarmupDoneForCurrentCardDay() {
@@ -17258,25 +17114,6 @@ function watchTradeLimitsSettings(){
             return clean(document.querySelector('h1')?.textContent || document.title || 'Аниме');
         }
 
-        function collectCurrentAnimeBaseData() {
-            const anime_id = getCurrentPageAnimeId();
-            const tr = getCurrentPageActiveTranslation();
-            const s = getCurrentPageSeason();
-            const title = getCurrentPageAnimeTitle();
-            const episodeRange = getCurrentPageEpisodeRange();
-
-            return {
-                anime_id,
-                s,
-                min_ep: episodeRange?.min_ep || 1,
-                max_ep: episodeRange?.max_ep || null,
-                t_title: tr?.t_title || null,
-                t_id: tr?.t_id || null,
-                t_link: tr?.t_link || '',
-                title
-            };
-        }
-
         async function readAutolootProgressInputs() {
             const [pool, history, skipped, order, legacy, storedKeys] = await Promise.all([
                 buildOrderedPool(), getGmStore('anime_history'), getGmStore('skipped_episodes'),
@@ -17323,10 +17160,9 @@ function watchTradeLimitsSettings(){
 
         async function getAnimeProgress(entry, snapshot = null) {
             const animeId = String(entry.anime_id);
-            const minEp = Number(entry.min_ep || 1);
-            const maxEp = Number(entry.max_ep || 0);
+            const episodes = getAnimeEpisodeNumbers(entry);
 
-            if (!animeId || !maxEp || maxEp < minEp) {
+            if (!animeId || !episodes.length) {
                 return {
                     processedEpisodes: 0,
                     totalEpisodes: 0,
@@ -17343,8 +17179,8 @@ function watchTradeLimitsSettings(){
             const episodeStates = [];
             let processedEpisodes = 0;
 
-            for (let ep = minEp; ep <= maxEp; ep++) {
-                if (ep > minEp && (ep - minEp) % 256 === 0) await new Promise(resolve => setTimeout(resolve, 0));
+            for (const ep of episodes) {
+                if (episodeStates.length && episodeStates.length % 256 === 0) await new Promise(resolve => setTimeout(resolve, 0));
                 const receiptCount = receiptMap.get(ep) || 0;
                 const isSkipped = skippedSet.has(ep);
                 const isWatched = watchedSet.has(ep);
@@ -17361,7 +17197,7 @@ function watchTradeLimitsSettings(){
                 });
             }
 
-            const totalEpisodes = maxEp - minEp + 1;
+            const totalEpisodes = episodes.length;
 
             return {
                 processedEpisodes,
@@ -17390,13 +17226,14 @@ function watchTradeLimitsSettings(){
             const key = `${animeEntry.anime_id}_s${animeEntry.s || 1}`;
             const saved = savedOrder === undefined ? await GM_getValue(EP_ORDER_KEY, null) : savedOrder;
 
-            if (saved && saved[key] && Array.isArray(saved[key]) && saved[key].length) {
-                return saved[key];
-            }
+            const customOrder = Array.isArray(saved?.[key]) ? saved[key] : [];
+            if (customOrder.length && !animeEntry.episode_translations?.length) return customOrder;
 
-            const base = parseInt(animeEntry.min_ep, 10);
-            const max = parseInt(animeEntry.max_ep || 12, 10);
-            return Array.from({ length: max - base + 1 }, (_, i) => base + i);
+            const episodes = getAnimeEpisodeNumbers(animeEntry, 12);
+            if (!customOrder.length) return episodes;
+            const remaining = new Set(episodes);
+            const ordered = customOrder.map(Number).filter(ep => remaining.delete(ep));
+            return ordered.concat([...remaining]);
         }
 
         async function buildOrderedPool() {
@@ -17781,15 +17618,21 @@ function watchTradeLimitsSettings(){
                 }
 
                 const poolByOrder = await buildOrderedPool();
-                const cur = poolByOrder[state.index];
-                if (!cur) {
+                const storedAnime = poolByOrder[state.index];
+                if (!storedAnime) {
                     const msToMidnight = getMsUntilMskMidnight();
                     scheduleNext(msToMidnight);
                     return;
                 }
 
-                const orderedEpsForCur = await getEpOrder(cur);
-                const targetEp = orderedEpsForCur[state.ep_offset] ?? (parseInt(cur.min_ep, 10) + state.ep_offset);
+                const orderedEpsForCur = await getEpOrder(storedAnime);
+                const targetEp = orderedEpsForCur[state.ep_offset];
+                if (targetEp == null) {
+                    scheduleNext(RESUME_DELAY_MS);
+                    return;
+                }
+                const translation = storedAnime.episode_translations?.find(group => group.episodes.includes(targetEp));
+                const cur = translation ? { ...storedAnime, t_id: translation.t_id, t_title: translation.t_title } : storedAnime;
                 saveDiagnosticLog('target_episode_selected', {
                     animeId: cur.anime_id,
                     animeTitle: cur.title || '',
@@ -18411,81 +18254,55 @@ function watchTradeLimitsSettings(){
         }
 
         async function addCurrentAnimeToDb() {
-            const baseData = collectCurrentAnimeBaseData();
-
-            if (!baseData.anime_id || !baseData.t_title || !baseData.t_id) {
-                await showMessageModal('Ошибка', 'Не удалось автоматически собрать обязательные данные для текущего аниме.');
+            const anime_id = getCurrentPageAnimeId();
+            if (!anime_id) {
+                await showMessageModal('Ошибка', 'Не удалось определить аниме на текущей странице.');
+                return false;
+            }
+            const title = getCurrentPageAnimeTitle();
+            const translations = await getCurrentPageKodikTranslations(anime_id);
+            if (!translations.length) {
+                await showMessageModal('Ошибка', 'Не удалось найти озвучки Kodik для текущего аниме.');
                 return false;
             }
 
-            const kodikRange = await getEpisodeRangeFromKodik(baseData.t_link);
-            const finalRange = kodikRange || {
-                min_ep: 1,
-                max_ep: null,
-                season: baseData.s
-            };
+            const { season, groups, incomplete } = await getKodikEpisodeAvailability(translations, getCurrentPageSeason(anime_id));
+            const sameSeason = item => item.anime_id === String(anime_id) && item.s === season;
+            const previous = incomplete ? (await getAnimeDb()).filter(sameSeason) : [];
+            const episode_translations = groups.concat(previous.flatMap(item => item.episode_translations || []));
+            const primary = episode_translations[0] || translations.find(translation => translation.active) || translations[0];
+            const data = { anime_id, s: season, title, t_id: primary.t_id, t_title: primary.t_title, t_link: primary.t_link };
+            const max_ep = episode_translations.length ? undefined : await askMaxEpisodesModal(data);
+            if (!episode_translations.length && max_ep == null) return false;
 
-            const max_ep = finalRange.max_ep || await askMaxEpisodesModal(baseData);
-            if (max_ep == null) return false;
-
-            const entry = normalizeAnimeEntry({
-                anime_id: baseData.anime_id,
-                s: finalRange.season || baseData.s,
-                min_ep: finalRange.min_ep || 1,
-                max_ep,
-                t_title: baseData.t_title,
-                t_id: baseData.t_id,
-                t_link: baseData.t_link,
-                title: baseData.title,
-                addedAt: Date.now()
-            });
-
-            const progressNow = await getAnimeProgress(entry);
+            const entry = normalizeAnimeEntry({ ...data, max_ep, episode_translations, addedAt: Date.now() });
             const key = buildAnimeUniqueKey(entry);
-            if (!progressNow.isFullyFarmed) {
-                await removeFinishedAnimeArchiveByKey(key);
-            }
-
-            if (await isAnimeInFinishedArchive(entry)) {
-                await showMessageModal('Ошибка', 'В данном аниме уже все карты выфармлены');
-                return false;
-            }
-
+            const matches = item => entry.episode_translations?.length ? sameSeason(item) : buildAnimeUniqueKey(item) === key;
+            const progressNow = await getAnimeProgress(entry);
             if (progressNow.isFullyFarmed) {
-                await addFinishedAnimeToArchive(entry);
+                await addFinishedAnimeToArchive(entry, progressNow);
                 await showMessageModal('Ошибка', 'В данном аниме уже все карты выфармлены');
                 return false;
             }
 
             const db = await getAnimeDb();
-            const existingIndex = db.findIndex(item => buildAnimeUniqueKey(item) === key);
-            if (existingIndex !== -1) {
-                const existing = db[existingIndex];
-                const updated = normalizeAnimeEntry({
-                    ...existing,
-                    ...entry,
-                    addedAt: existing.addedAt || entry.addedAt
-                });
-
-                db[existingIndex] = updated;
-                await removeFinishedAnimeArchiveByKey(key);
-                await setAnimeDb(db);
-                await copyText(JSON.stringify(updated, null, 2));
-                await showMessageModal('\u0413\u043e\u0442\u043e\u0432\u043e', '\u0417\u0430\u043f\u0438\u0441\u044c \u0430\u043d\u0438\u043c\u0435 \u0432 \u0431\u0430\u0437\u0435 \u043e\u0431\u043d\u043e\u0432\u043b\u0435\u043d\u0430.');
-                return true;
+            const existingIndex = db.findIndex(matches);
+            for (const archivedKey of new Set([key, ...db.filter(matches).map(buildAnimeUniqueKey)])) {
+                await removeFinishedAnimeArchiveByKey(archivedKey);
             }
-
-            if (db.some(item => buildAnimeUniqueKey(item) === key)) {
-                await showMessageModal('Информация', 'Это аниме уже есть в базе.');
-                return false;
+            if (existingIndex >= 0) {
+                entry.addedAt = db[existingIndex].addedAt || entry.addedAt;
+                const updated = db.filter((item, index) => index === existingIndex || !matches(item));
+                updated[existingIndex] = entry;
+                await GM_setValue(SMART_PROGRESSION_KEY, null);
+                await setAnimeDb(updated);
+            } else {
+                await setAnimeDb([...db, entry]);
             }
-
-            db.push(entry);
-            await setAnimeDb(db);
 
             await copyText(JSON.stringify(entry, null, 2));
-
-            await showMessageModal('\u0413\u043e\u0442\u043e\u0432\u043e', '\u0410\u043d\u0438\u043c\u0435 \u0443\u0441\u043f\u0435\u0448\u043d\u043e \u0434\u043e\u0431\u0430\u0432\u043b\u0435\u043d\u043e \u0432 \u0431\u0430\u0437\u0443.');
+            const message = existingIndex >= 0 ? 'Запись аниме в базе обновлена.' : 'Аниме добавлено в базу.';
+            await showMessageModal('Готово', incomplete ? message + ' Часть списков Kodik не загрузилась.' : message);
             return true;
         }
 
@@ -18542,6 +18359,7 @@ function watchTradeLimitsSettings(){
                                 ? items.map(item => {
                                     const key = buildAnimeUniqueKey(item);
                                     const progressText = `${item.progress?.processedEpisodes || 0} / ${item.progress?.totalEpisodes || 0}`;
+                                    const voiceCount = new Set(item.episode_translations?.map(group => group.t_id)).size;
 
                                     return `
                                         <div class="aw-item" data-anime-key="${escapeHtml(key)}">
@@ -18550,7 +18368,7 @@ function watchTradeLimitsSettings(){
                                                     <div class="aw-item-title">${escapeHtml(item.title || `anime_id ${item.anime_id}`)}</div>
                                                     <div class="aw-item-sub">
                                                         anime_id: ${escapeHtml(item.anime_id)} · сезон: ${escapeHtml(item.s)}<br>
-                                                        перевод: ${escapeHtml(item.t_title)} · t_id: ${escapeHtml(item.t_id)}
+                                                        перевод: ${escapeHtml(item.t_title)} · t_id: ${escapeHtml(item.t_id)}${voiceCount > 1 ? ' · всего озвучек: ' + voiceCount : ''}
                                                     </div>
                                                     <div class="aw-item-progress">
                                                         Прогресс: ${progressText}${item.progress?.isFullyFarmed ? ' · ✅ выфармлено' : ''}
@@ -18573,11 +18391,22 @@ function watchTradeLimitsSettings(){
                 await openAnimeDbModal();
             });
 
-            modal.querySelector('#aw-add-current-anime-btn')?.addEventListener('click', async () => {
-                const added = await addCurrentAnimeToDb();
-                if (added) {
-                    removeAnimeDbModal();
-                    await openAnimeDbModal();
+            modal.querySelector('#aw-add-current-anime-btn')?.addEventListener('click', async event => {
+                if (animeDbAddPending) return;
+                const button = event.currentTarget;
+                animeDbAddPending = true;
+                const buttonLabel = button.textContent;
+                button.disabled = true;
+                button.textContent = 'Собираю серии…';
+                try {
+                    if (await addCurrentAnimeToDb() && modal.isConnected) await openAnimeDbModal();
+                } catch (error) {
+                    warn('Не удалось добавить аниме в базу:', error);
+                    await showMessageModal('Ошибка', 'Не удалось добавить аниме в базу.');
+                } finally {
+                    animeDbAddPending = false;
+                    button.disabled = false;
+                    button.textContent = buttonLabel;
                 }
             });
 

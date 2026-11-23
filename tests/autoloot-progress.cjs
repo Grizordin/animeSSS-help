@@ -15,7 +15,7 @@ function extract(name) {
   throw Error(name);
 }
 const names = ['getGmStoreKey', 'getGmStore', 'getAllReceipts', 'normalizeAnimeEntry', 'getAnimeDb',
-  'buildOrderedPool', 'getEpOrder', 'readAutolootProgressInputs', 'buildAutolootProgressSnapshot',
+  'buildOrderedPool', 'getAnimeEpisodeNumbers', 'getEpOrder', 'readAutolootProgressInputs', 'buildAutolootProgressSnapshot',
   'getAnimeProgress', 'updateSmartTarget'];
 let passed = 0;
 function check(v, label) { assert.ok(v, label); passed++; }
