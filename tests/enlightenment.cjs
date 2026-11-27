@@ -40,6 +40,10 @@ const html=process.argv[2]?fs.readFileSync(process.argv[2],'utf8'):'<section cla
    check(nodes.every((n,i)=>n.innerHTML===originalHtml[i]),'site formatting restored exactly');
    check(!document.querySelector('[data-enlightenment-original-text],[data-enlightenment-rendered-text]'),'cleanup removes markers');
    const cases=[['Просветление 140 (+ 47)',187],['Просветление 0 (+ 0 + 0)',0],['Просветление 1 200 (+ 1 000 + 14)',2214],['Просветление 1\u00a0200 (+ 60 + 14)',1274],['Просветление 318',null],['Вкладов 2400',null],['Время 21:03:29(470ms)',null],['Просветление 318 (- 60)',null],['Просветление 318 (+ 60%)',null],['Просветление 318 (+ 60.5)',null],['Просветление 318 (+ 60) неизвестно',null],['Просветление 9007199254740991 (+ 1)',null]];
+   cases.push(['Просветление 508 + 60 + 7',575],['Просветление 293 + 56',349],
+     ['Просветление 0 + 0',0],['Просветление 1 200 + 1 000 + 14',2214],
+     ['Просветление 318 (+ 60',null],['Просветление 318 + 60)',null],
+     ['Просветление 318 + 60%',null],['Просветление 318 + 60.5',null]);
    cases.forEach(([t,n])=>check(getEnlightenmentTotal(t)===n,'parser '+t));
    applyEnlightenment();nodes[0].textContent='Просветление 400 (+ 60 + 20)';applyEnlightenment();check(nodes[0].textContent==='Просветление 480','live node update resummed');
    cleanupEnlightenment();check(nodes[0].textContent==='Просветление 400 (+ 60 + 20)','cleanup uses latest original');
@@ -54,13 +58,14 @@ const html=process.argv[2]?fs.readFileSync(process.argv[2],'utf8'):'<section cla
    applyEnlightenment();check(value.textContent==='392' && bonus.textContent==='','formatted 318+60+14');
    check(structured.querySelector('strong')===value && structured.querySelector('.cg-stat-label')===label,'site elements preserved');
    applyEnlightenment();check(value.textContent==='392','no repeated addition');
-   bonus.textContent='(+ 60 + 20)';applyEnlightenment();check(value.textContent==='398','bonus-only refresh uses original base');
+   bonus.textContent='+ 60 + 20';applyEnlightenment();check(value.textContent==='398','unparenthesized bonus refresh uses original base');
    value.textContent='400';applyEnlightenment();check(value.textContent==='480','base-only refresh retains original bonus');
    value.textContent='500';bonus.textContent='(+ 40)';cleanupEnlightenment();check(value.textContent==='500' && bonus.textContent==='(+ 40)','cleanup preserves fresh structured values');
    applyEnlightenment();check(value.textContent==='540','new structured values applied');
-   structured.innerHTML='<span class="cg-stat-label">Просветление</span><strong class="cg-stat-value">0</strong><span class="cg-stat-extra">(+ 60 + 17)</span>';
+   structured.dataset.stat='Просветление';
+   structured.innerHTML='<span class="cg-stat-label">Просветление</span><strong class="cg-stat-value">0</strong><small class="cg-stat-extra">+ 60 + 17</small>';
    applyEnlightenment();check(structured.querySelector('strong').textContent==='77','replacement nodes and zero base');
-   cleanupEnlightenment();check(structured.querySelector('strong').textContent==='0' && structured.querySelector('.cg-stat-extra').textContent==='(+ 60 + 17)','replacement cleanup uses fresh original');
+   cleanupEnlightenment();check(structured.querySelector('strong').textContent==='0' && structured.querySelector('.cg-stat-extra').textContent==='+ 60 + 17','replacement cleanup uses fresh original');
    return {passed,cards:original.filter(t=>t.startsWith('Просветление')).length};
   })()`);
   console.log(JSON.stringify({result:'ENLIGHTENMENT_OK',...result}));
