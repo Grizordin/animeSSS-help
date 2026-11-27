@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AnimeSSS помощник
 // @namespace    http://tampermonkey.net/
-// @version      3.88
+// @version      3.89
 // @description  Комбайн функций для animesss.tv/com
 // @author       BETEP_B_TYMAHE
 // @match        https://animesss.tv/*
@@ -4780,9 +4780,11 @@
       const extra=text.querySelector('.cg-stat-extra');
       text=label && value ? `${label.textContent.trim()} ${value.textContent.trim()} ${extra?.textContent.trim() || ''}` : text.textContent;
     }
-    const match=String(text||'').trim().match(/^Просветление\s+(\d[\d\s]*)\s*\((\s*\+\s*\d[\d\s]*)+\)\s*$/i);
+    const match=String(text||'').trim().match(/^Просветление\s+(\d[\d\s]*)\s*(\(?\s*\+[\s\S]*)$/i);
     if(!match)return null;
-    const parts=String(text).slice(String(text).indexOf('(')+1,String(text).lastIndexOf(')')).split('+').slice(1);
+    const bonus=match[2].replace(/^\(([\s\S]*)\)$/, '$1').trim();
+    if(!/^(?:\+\s*\d[\d\s]*)+$/.test(bonus))return null;
+    const parts=bonus.split('+').slice(1);
     const values=[match[1],...parts].map(value=>Number(value.replace(/\s/g,'')));
     const total=values.reduce((sum,value)=>sum+value,0);
     return values.every(Number.isSafeInteger)&&Number.isSafeInteger(total)?total:null;
